@@ -1,5 +1,5 @@
 // 应用模块配置
-// 目标:安卓 4.0(API 14)车机,1024x600 横屏
+// 目标:安卓 4.2.2(API 17)车机,1024x600 横屏
 
 plugins {
     id 'com.android.application'
@@ -11,8 +11,8 @@ android {
 
     defaultConfig {
         applicationId "com.captiva.musicplayer"
-        // 核心:最低支持安卓 4.0(科帕奇 15 款改装车机)
-        minSdk 14
+        // 核心:最低支持安卓 4.2.2(科帕奇 15 款改装车机)
+        minSdk 17
         // target 不宜过高,避免触发新权限模型带来的兼容问题
         targetSdk 28
         versionCode 1

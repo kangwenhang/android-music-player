@@ -198,7 +198,7 @@ public class MainActivity extends AppCompatActivity {
      * 隐藏系统 UI,进入全屏沉浸模式
      * - 隐藏状态栏
      * - 隐藏虚拟导航键
-     * - 兼容 Android 4.0(API 14)到新版本
+     * - 兼容 Android 4.2.2(API 17)到新版本
      */
     private void hideSystemUI() {
         View decorView = getWindow().getDecorView();
@@ -212,7 +212,7 @@ public class MainActivity extends AppCompatActivity {
                             | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                             | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         } else {
-            // API 14-18:隐藏状态栏和导航键(非沉浸式)
+            // API 17-18:隐藏状态栏和导航键(非沉浸式)
             decorView.setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_LOW_PROFILE
                             | View.SYSTEM_UI_FLAG_FULLSCREEN
