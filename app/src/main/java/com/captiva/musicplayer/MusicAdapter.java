@@ -1,7 +1,6 @@
 package com.captiva.musicplayer;
 
 import android.content.Context;
-import android.os.Vibrator;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -126,24 +125,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         CoverLoader.getInstance().load(bean, holder.ivCover, coverSize);
 
         holder.itemView.setOnClickListener(v -> {
-            // 震动反馈
-            vibrate(v);
             if (listener != null) {
                 listener.onItemClick(holder.getAdapterPosition(), bean);
             }
         });
-    }
-
-    /** 轻微震动反馈 */
-    private void vibrate(View v) {
-        try {
-            Vibrator vibrator = (Vibrator) v.getContext()
-                    .getSystemService(Context.VIBRATOR_SERVICE);
-            if (vibrator != null && vibrator.hasVibrator()) {
-                vibrator.vibrate(20);
-            }
-        } catch (Exception ignored) {
-        }
     }
 
     @Override
