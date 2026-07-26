@@ -133,23 +133,23 @@ public class EqualizerManager {
         }
         setEnabled(true);
         // 简易预设参数,针对常见 5 段均衡器
-        int[][] presets = {
-                {"流行".hashCode(), {0, 200, 400, 200, 0}},
-                {"摇滚".hashCode(), {400, 200, -100, 200, 400}},
-                {"古典".hashCode(), {300, 0, 0, 0, 300}},
-                {"人声".hashCode(), {-200, 0, 400, 200, 0}},
+        String[] names = {"流行", "摇滚", "古典", "人声"};
+        int[][] levels = {
+                {0, 200, 400, 200, 0},
+                {400, 200, -100, 200, 400},
+                {300, 0, 0, 0, 300},
+                {-200, 0, 400, 200, 0}
         };
-        int[] levels = null;
-        int key = preset.hashCode();
-        for (int[] p : presets) {
-            if (p[0] == key) {
-                levels = p;
+        int[] target = null;
+        for (int i = 0; i < names.length; i++) {
+            if (names[i].equals(preset)) {
+                target = levels[i];
                 break;
             }
         }
-        if (levels == null) return;
-        for (short i = 0; i < bandCount && i + 1 < levels.length; i++) {
-            setBandLevel(i, (short) levels[i + 1]);
+        if (target == null) return;
+        for (short i = 0; i < bandCount && i < target.length; i++) {
+            setBandLevel(i, (short) target[i]);
         }
     }
 
