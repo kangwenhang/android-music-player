@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 圆形按钮背景(小) -->
+<!-- 圆形按钮背景(小) - 车机电阻屏优化 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
     <solid android:color="#4A4A52" />
     <size
-        android:width="44dp"
-        android:height="44dp" />
+        android:width="64dp"
+        android:height="64dp" />
 </shape>

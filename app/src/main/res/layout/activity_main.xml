@@ -139,25 +139,25 @@
             android:layout_weight="1" />
     </LinearLayout>
 
-    <!-- 底部播放控制栏(紧凑美观布局) -->
+    <!-- 底部播放控制栏(车机电阻屏优化:大按钮+大间距) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingLeft="@dimen/control_bar_padding"
         android:paddingRight="@dimen/control_bar_padding"
-        android:paddingTop="2dp"
+        android:paddingTop="4dp"
         android:paddingBottom="@dimen/control_bar_padding"
         android:background="@drawable/bg_control_bar">
 
-        <!-- 进度条 + 时间(同一行,紧凑) -->
+        <!-- 进度条 + 时间(同一行) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginLeft="4dp"
-            android:layout_marginRight="4dp">
+            android:layout_marginLeft="8dp"
+            android:layout_marginRight="8dp">
 
             <TextView
                 android:id="@+id/tv_current_time"
@@ -166,17 +166,17 @@
                 android:text="00:00"
                 android:textColor="@color/text_secondary"
                 android:textSize="@dimen/time_text_size"
-                android:layout_marginRight="6dp" />
+                android:layout_marginRight="8dp" />
 
             <SeekBar
                 android:id="@+id/sb_progress"
                 android:layout_width="0dp"
-                android:layout_height="24dp"
+                android:layout_height="32dp"
                 android:layout_weight="1"
-                android:minHeight="24dp"
-                android:maxHeight="24dp"
-                android:paddingTop="2dp"
-                android:paddingBottom="2dp"
+                android:minHeight="32dp"
+                android:maxHeight="32dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
                 android:progressTint="@color/accent"
                 android:thumbTint="@color/accent" />
 
@@ -187,7 +187,7 @@
                 android:text="00:00"
                 android:textColor="@color/text_secondary"
                 android:textSize="@dimen/time_text_size"
-                android:layout_marginLeft="6dp" />
+                android:layout_marginLeft="8dp" />
         </LinearLayout>
 
         <!-- 控制按钮(左) + 歌曲信息(右) -->
@@ -196,14 +196,17 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="2dp">
 
-            <!-- 左侧:控制按钮组(圆形按钮,参考图片样式) -->
+            <!-- 左侧:控制按钮组(大圆形,适合车机电阻屏) -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:paddingLeft="4dp"
+                android:paddingRight="4dp">
 
                 <!-- 播放模式(小圆) -->
                 <Button
@@ -217,7 +220,7 @@
                     android:background="@drawable/bg_btn_circle"
                     android:text="顺"
                     android:textColor="@color/btn_text"
-                    android:textSize="16sp"
+                    android:textSize="20sp"
                     android:textStyle="bold" />
 
                 <!-- 上一首(小圆) -->
@@ -225,7 +228,7 @@
                     android:id="@+id/btn_prev"
                     android:layout_width="@dimen/btn_circle_size"
                     android:layout_height="@dimen/btn_circle_size"
-                    android:layout_marginLeft="8dp"
+                    android:layout_marginLeft="@dimen/btn_circle_spacing"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
                     android:padding="0dp"
@@ -233,7 +236,7 @@
                     android:background="@drawable/bg_btn_circle"
                     android:text="◀"
                     android:textColor="@color/btn_text"
-                    android:textSize="18sp"
+                    android:textSize="24sp"
                     android:textStyle="bold" />
 
                 <!-- 播放/暂停(大圆,突出显示) -->
@@ -241,8 +244,8 @@
                     android:id="@+id/btn_play"
                     android:layout_width="@dimen/btn_circle_big_size"
                     android:layout_height="@dimen/btn_circle_big_size"
-                    android:layout_marginLeft="10dp"
-                    android:layout_marginRight="10dp"
+                    android:layout_marginLeft="@dimen/btn_circle_spacing"
+                    android:layout_marginRight="@dimen/btn_circle_spacing"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
                     android:padding="0dp"
@@ -250,7 +253,7 @@
                     android:background="@drawable/bg_btn_circle_big_paused"
                     android:text="▶"
                     android:textColor="@color/btn_paused_text"
-                    android:textSize="28sp"
+                    android:textSize="36sp"
                     android:textStyle="bold" />
 
                 <!-- 下一首(小圆) -->
@@ -265,7 +268,7 @@
                     android:background="@drawable/bg_btn_circle"
                     android:text="▶"
                     android:textColor="@color/btn_text"
-                    android:textSize="18sp"
+                    android:textSize="24sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
@@ -276,8 +279,8 @@
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="right|center_vertical"
-                android:layout_marginLeft="12dp"
-                android:paddingRight="4dp">
+                android:layout_marginLeft="16dp"
+                android:paddingRight="8dp">
 
                 <TextView
                     android:id="@+id/tv_now_title"
