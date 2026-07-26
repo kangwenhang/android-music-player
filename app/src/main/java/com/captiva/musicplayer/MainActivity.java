@@ -374,26 +374,38 @@ public class MainActivity extends AppCompatActivity {
         builder.show();
     }
 
-    /** 时长过滤设置对话框 */
+    /** 时长过滤设置对话框:自定义输入秒数 */
     private void showDurationFilterDialog() {
         final int currentMin = navidromeConfig.getMinDuration();
-        final String[] options = {"不过滤(显示全部)", "10秒", "30秒(推荐)", "60秒", "120秒"};
-        final int[] values = {0, 10, 30, 60, 120};
-        int checkedItem = 2; // 默认30秒
-        for (int i = 0; i < values.length; i++) {
-            if (values[i] == currentMin) {
-                checkedItem = i;
-                break;
-            }
-        }
+
+        // 创建输入框
+        final EditText etInput = new EditText(this);
+        etInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        etInput.setText(currentMin > 0 ? String.valueOf(currentMin) : "");
+        etInput.setHint("输入秒数,如30(0表示不过滤)");
+        etInput.setTextColor(getResources().getColor(R.color.text_primary));
+        etInput.setHintTextColor(getResources().getColor(R.color.search_hint));
+        etInput.setPadding(24, 16, 24, 16);
+        etInput.setBackgroundResource(R.drawable.bg_search);
+
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("最小时长过滤");
-        builder.setSingleChoiceItems(options, checkedItem, new DialogInterface.OnClickListener() {
+        builder.setTitle("最小时长过滤(秒)");
+        builder.setMessage("低于此时长的音频将被过滤\n输入0表示显示全部");
+        builder.setView(etInput);
+        builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                int newMin = values[which];
+                String input = etInput.getText().toString().trim();
+                int newMin = 0;
+                try {
+                    newMin = Integer.parseInt(input);
+                    if (newMin < 0) newMin = 0;
+                    if (newMin > 600) newMin = 600; // 最大10分钟
+                } catch (NumberFormatException e) {
+                    Toast.makeText(MainActivity.this, "输入无效,保持原设置", Toast.LENGTH_SHORT).show();
+                    return;
+                }
                 navidromeConfig.setMinDuration(newMin);
-                dialog.dismiss();
                 Toast.makeText(MainActivity.this,
                         "已设置最小时长: " + (newMin == 0 ? "不过滤" : newMin + "秒"),
                         Toast.LENGTH_SHORT).show();
@@ -677,15 +689,15 @@ public class MainActivity extends AppCompatActivity {
                 });
     }
 
-    /** 更新播放按钮:播放=蓝色,暂停=红色 */
+    /** 更新播放按钮:播放中=蓝色圆形+暂停图标,暂停中=红色圆形+播放图标 */
     private void updatePlayButton(boolean playing) {
         if (playing) {
-            btnPlay.setText("暂停");
-            btnPlay.setBackgroundResource(R.drawable.bg_btn_playing);
+            btnPlay.setText("▌▌");
+            btnPlay.setBackgroundResource(R.drawable.bg_btn_circle_big_playing);
             btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_playing_text));
         } else {
-            btnPlay.setText("播放");
-            btnPlay.setBackgroundResource(R.drawable.bg_btn_paused);
+            btnPlay.setText("▶");
+            btnPlay.setBackgroundResource(R.drawable.bg_btn_circle_big_paused);
             btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_paused_text));
         }
     }

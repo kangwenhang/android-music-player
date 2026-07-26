@@ -35,9 +35,9 @@ public class LrcView extends View {
     private final Paint coverPaint = new Paint();
     private final Paint scrimPaint = new Paint();
 
-    private float lineHeight = 100f;
-    private float currentTextSize = 52f;
-    private float normalTextSize = 40f;
+    private float lineHeight = 120f;
+    private float currentTextSize = 62f;
+    private float normalTextSize = 48f;
     /** 最多显示行数(含当前行,上下各2行) */
     private static final int MAX_VISIBLE_LINES = 5;
 
