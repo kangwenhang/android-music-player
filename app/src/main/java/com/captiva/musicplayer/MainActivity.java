@@ -602,10 +602,27 @@ public class MainActivity extends AppCompatActivity {
         sourceMode = SourceMode.LOCAL;
         tvEmpty.setText("正在扫描本地音乐...");
         tvEmpty.setVisibility(View.VISIBLE);
+        tvCount.setText("统计中...");
+        estimatedLocalCount = 0;
 
+        // 1. 后台快速统计总数(比完整扫描快得多)
         new Thread(new Runnable() {
             @Override
             public void run() {
+                final int count = MusicScanner.countLocalMusic(MainActivity.this);
+
+                // 优先显示总歌曲数
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (count > 0) {
+                            estimatedLocalCount = count;
+                            tvCount.setText("共 " + count + " 首(扫描中...)");
+                        }
+                    }
+                });
+
+                // 2. 完整扫描
                 final List<MusicBean> list = MusicScanner.scan(MainActivity.this);
                 runOnUiThread(new Runnable() {
                     @Override
@@ -615,6 +632,8 @@ public class MainActivity extends AppCompatActivity {
                         musicList.clear();
                         musicList.addAll(list);
                         adapter.setData(musicList);
+                        // 扫描完成,显示实际数量
+                        estimatedLocalCount = 0;
                         updateCount();
                         if (musicList.isEmpty()) {
                             tvEmpty.setVisibility(View.VISIBLE);
@@ -650,6 +669,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int ALBUM_PAGE_SIZE = 10;
     /** 网络歌曲预估总数(从专辑列表统计,优先显示) */
     private int estimatedNetworkCount = 0;
+    /** 本地歌曲预估总数(快速统计,优先显示) */
+    private int estimatedLocalCount = 0;
 
     private void loadNavidromeMusic() {
         final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();

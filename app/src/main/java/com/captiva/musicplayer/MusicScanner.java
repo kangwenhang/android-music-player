@@ -49,6 +49,52 @@ public class MusicScanner {
     }
 
     /**
+     * 快速统计本地音乐总数(不加载完整元数据)
+     * - MediaStore 模式:用 COUNT 查询
+     * - 自定义目录模式:统计音频文件数
+     * @return 预估歌曲总数,失败返回 -1
+     */
+    public static int countLocalMusic(Context context) {
+        if (context == null) return -1;
+        NavidromeConfig config = new NavidromeConfig(context);
+        String scanPath = config.getScanPath();
+
+        if (scanPath != null && !scanPath.isEmpty()) {
+            // 自定义目录:快速统计音频文件数
+            File rootDir = new File(scanPath);
+            if (!rootDir.exists() || !rootDir.isDirectory()) {
+                return 0;
+            }
+            List<File> audioFiles = new ArrayList<>();
+            collectAudioFiles(rootDir, audioFiles);
+            Log.d(TAG, "快速统计: 目录 " + scanPath + " 找到 " + audioFiles.size() + " 个音频文件");
+            return audioFiles.size();
+        } else {
+            // MediaStore:用 COUNT 查询
+            int minDurationSec = config.getMinDuration();
+            long minDurationMs = minDurationSec * 1000L;
+            ContentResolver resolver = context.getContentResolver();
+            Uri uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+            String selection = MediaStore.Audio.Media.IS_MUSIC + " = 1"
+                    + " AND " + MediaStore.Audio.Media.DURATION + " > " + minDurationMs;
+            Cursor cursor = null;
+            try {
+                cursor = resolver.query(uri, new String[]{"COUNT(*)"}, selection, null, null);
+                if (cursor != null && cursor.moveToFirst()) {
+                    int count = cursor.getInt(0);
+                    Log.d(TAG, "快速统计: MediaStore 找到 " + count + " 首音乐");
+                    return count;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "countLocalMusic failed", e);
+            } finally {
+                if (cursor != null) cursor.close();
+            }
+            return -1;
+        }
+    }
+
+    /**
      * 递归扫描指定目录下的音频文件
      */
     private static List<MusicBean> scanDirectory(Context context, String path) {
