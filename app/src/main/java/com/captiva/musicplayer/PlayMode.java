@@ -6,18 +6,20 @@ package com.captiva.musicplayer;
 public enum PlayMode {
 
     /** 顺序播放(播完列表后停止) */
-    SEQUENCE(0, "顺序"),
+    SEQUENCE(0, "顺序", "顺"),
     /** 单曲循环 */
-    REPEAT_ONE(1, "单曲循环"),
+    REPEAT_ONE(1, "单曲循环", "单"),
     /** 随机播放 */
-    SHUFFLE(2, "随机");
+    SHUFFLE(2, "随机", "随");
 
     private final int value;
     private final String label;
+    private final String shortLabel;
 
-    PlayMode(int value, String label) {
+    PlayMode(int value, String label, String shortLabel) {
         this.value = value;
         this.label = label;
+        this.shortLabel = shortLabel;
     }
 
     public int getValue() {
@@ -26,6 +28,11 @@ public enum PlayMode {
 
     public String getLabel() {
         return label;
+    }
+
+    /** 圆形按钮用的单字标签 */
+    public String getShortLabel() {
+        return shortLabel;
     }
 
     /** 切换到下一个模式 */

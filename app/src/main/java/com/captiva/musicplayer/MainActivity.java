@@ -109,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
                 adapter.setPlayingIndex(index);
                 updateNowPlaying(index);
                 updatePlayButton(playing);
-                btnMode.setText(mode.getLabel());
+                btnMode.setText(mode.getShortLabel());
                 if (service != null) {
                     lrcView.setLrcList(service.getCurrentLrc());
                 }
@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
             adapter.setPlayingIndex(idx);
             updateNowPlaying(idx);
             updatePlayButton(service.isPlaying());
-            btnMode.setText(service.getPlayMode().getLabel());
+            btnMode.setText(service.getPlayMode().getShortLabel());
             lrcView.setLrcList(service.getCurrentLrc());
         }
 
@@ -313,7 +313,7 @@ public class MainActivity extends AppCompatActivity {
         btnMode.setOnClickListener(v -> {
             if (service != null) {
                 PlayMode mode = service.cyclePlayMode();
-                btnMode.setText(mode.getLabel());
+                btnMode.setText(mode.getShortLabel());
                 Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
             }
         });
@@ -692,7 +692,7 @@ public class MainActivity extends AppCompatActivity {
     /** 更新播放按钮:播放中=蓝色圆形+暂停图标,暂停中=红色圆形+播放图标 */
     private void updatePlayButton(boolean playing) {
         if (playing) {
-            btnPlay.setText("▌▌");
+            btnPlay.setText("❚❚");
             btnPlay.setBackgroundResource(R.drawable.bg_btn_circle_big_playing);
             btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_playing_text));
         } else {
