@@ -138,51 +138,30 @@
             android:layout_weight="2" />
     </LinearLayout>
 
-    <!-- 底部播放控制栏 -->
+    <!-- 底部播放控制栏(单行+顶部细进度条) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="@dimen/control_bar_padding"
+        android:paddingLeft="@dimen/control_bar_padding"
+        android:paddingRight="@dimen/control_bar_padding"
+        android:paddingTop="0dp"
+        android:paddingBottom="@dimen/control_bar_padding"
         android:background="@drawable/bg_control_bar">
 
-        <!-- 进度条 -->
-        <LinearLayout
+        <!-- 顶部细进度条(全宽,可拖动) -->
+        <SeekBar
+            android:id="@+id/sb_progress"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_height="@dimen/seekbar_height"
+            android:minHeight="@dimen/seekbar_height"
+            android:maxHeight="@dimen/seekbar_height"
+            android:layout_marginLeft="4dp"
+            android:layout_marginRight="4dp"
+            android:progressTint="@color/accent"
+            android:thumbTint="@color/accent" />
 
-            <TextView
-                android:id="@+id/tv_current_time"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="00:00"
-                android:textColor="@color/text_secondary"
-                android:textSize="@dimen/time_text_size" />
-
-            <SeekBar
-                android:id="@+id/sb_progress"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginLeft="8dp"
-                android:layout_marginRight="8dp"
-                android:minHeight="@dimen/seekbar_height"
-                android:maxHeight="@dimen/seekbar_height"
-                android:progressTint="@color/accent"
-                android:thumbTint="@color/accent" />
-
-            <TextView
-                android:id="@+id/tv_total_time"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="00:00"
-                android:textColor="@color/text_secondary"
-                android:textSize="@dimen/time_text_size" />
-        </LinearLayout>
-
-        <!-- 控制按钮区 -->
+        <!-- 单行:歌曲信息+时间 | 按钮组 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -190,7 +169,7 @@
             android:gravity="center_vertical"
             android:layout_marginTop="@dimen/control_row_margin">
 
-            <!-- 左侧当前歌曲信息 -->
+            <!-- 左侧当前歌曲信息 + 时间 -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
@@ -208,14 +187,48 @@
                     android:textSize="@dimen/now_title_text_size"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/tv_now_artist"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:singleLine="true"
-                    android:ellipsize="end"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="@dimen/sub_text_size" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tv_now_artist"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/sub_text_size" />
+
+                    <TextView
+                        android:id="@+id/tv_current_time"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginLeft="6dp"
+                        android:layout_marginRight="2dp"
+                        android:text="00:00"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/time_text_size" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="/"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/time_text_size" />
+
+                    <TextView
+                        android:id="@+id/tv_total_time"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginLeft="2dp"
+                        android:text="00:00"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/time_text_size" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 右侧按钮组 -->
