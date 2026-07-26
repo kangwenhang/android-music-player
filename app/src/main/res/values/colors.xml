@@ -40,4 +40,11 @@
     <!-- Navidrome 来源标识 -->
     <color name="source_network">#66BB6A</color>
     <color name="source_local">#78909C</color>
+
+    <!-- 服务器状态 -->
+    <color name="server_status_connected">#66BB6A</color>
+    <color name="server_status_disconnected">#E53935</color>
+    <color name="server_status_connecting">#FFA726</color>
+    <color name="server_status_retrying">#FF7043</color>
+    <color name="server_status_offline">#78909C</color>
 </resources>

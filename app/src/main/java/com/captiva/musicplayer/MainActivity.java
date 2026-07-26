@@ -1,16 +1,21 @@
 package com.captiva.musicplayer;
 
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -27,7 +32,9 @@ import java.util.List;
 /**
  * 主界面
  * - 本地/Navidrome 双模式音乐播放
- * - 搜索(点击搜索按钮弹出内置键盘搜索对话框)
+ * - 搜索栏实时搜索(系统输入法)
+ * - 均衡器/服务器统一到设置入口
+ * - 服务器状态实时显示,断线30秒自动重连
  * - 歌词叠加在封面上(封面作为底色背景)
  * - 播放按钮颜色:播放蓝色 / 暂停红色
  * - 水波纹/selector 点击反馈(无振动)
@@ -35,12 +42,16 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_STORAGE = 100;
+    /** Navidrome 搜索防抖延迟(ms) */
+    private static final long SEARCH_DEBOUNCE_MS = 600;
 
     // UI - 列表区
     private RecyclerView rvList;
     private TextView tvEmpty, tvCount;
-    // UI - 顶栏按钮
-    private Button btnSearch, btnSource, btnServer, btnEqualizer;
+    // UI - 顶栏
+    private EditText etSearch;
+    private Button btnSource, btnSettings;
+    private TextView tvServerStatus;
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
@@ -65,6 +76,9 @@ public class MainActivity extends AppCompatActivity {
     /** 从设置页返回时需重新加载 Navidrome */
     private boolean needReloadNavidrome = false;
 
+    /** 服务器状态监控器 */
+    private ServerStatusMonitor statusMonitor;
+
     // 进度刷新
     private final Handler handler = new Handler();
     private final Runnable progressTask = new Runnable() {
@@ -75,6 +89,11 @@ public class MainActivity extends AppCompatActivity {
             handler.postDelayed(this, 500);
         }
     };
+
+    /** Navidrome 搜索防抖 Runnable */
+    private Runnable searchDebounceRunnable;
+    /** 当前搜索关键词 */
+    private String currentSearchQuery = "";
 
     // 播放状态广播接收
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
@@ -138,8 +157,20 @@ public class MainActivity extends AppCompatActivity {
             MusicDataHolder.getInstance().setNavidromeEnabled(navidromeConfig.isEnabled());
         }
 
+        // 初始化服务器状态监控器
+        statusMonitor = new ServerStatusMonitor();
+        statusMonitor.setCallback(new ServerStatusMonitor.StatusCallback() {
+            @Override
+            public void onStatusChanged(ServerStatusMonitor.Status status, String message) {
+                updateServerStatusDisplay(status, message);
+            }
+        });
+
         initViews();
         setupListeners();
+
+        // 启动服务器状态监控
+        statusMonitor.start(MusicDataHolder.getInstance().getNavidromeApi());
 
         // 启动并绑定服务
         Intent si = new Intent(this, MusicService.class);
@@ -159,10 +190,10 @@ public class MainActivity extends AppCompatActivity {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
         tvCount = findViewById(R.id.tv_count);
-        btnSearch = findViewById(R.id.btn_search);
+        etSearch = findViewById(R.id.et_search);
         btnSource = findViewById(R.id.btn_source);
-        btnServer = findViewById(R.id.btn_server);
-        btnEqualizer = findViewById(R.id.btn_equalizer);
+        btnSettings = findViewById(R.id.btn_settings);
+        tvServerStatus = findViewById(R.id.tv_server_status);
         tvNowTitle = findViewById(R.id.tv_now_title);
         tvNowArtist = findViewById(R.id.tv_now_artist);
         tvCurrentTime = findViewById(R.id.tv_current_time);
@@ -190,9 +221,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupListeners() {
-        // 搜索:点击弹出搜索对话框(内置键盘)
-        btnSearch.setOnClickListener(v -> {
-            showSearchDialog();
+        // 搜索栏:实时搜索(本地即时过滤,Navidrome 防抖搜索)
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                handleSearchInput(s != null ? s.toString() : "");
+            }
         });
 
         // 来源切换
@@ -200,22 +240,16 @@ public class MainActivity extends AppCompatActivity {
             toggleSource();
         });
 
-        // Navidrome 设置
-        btnServer.setOnClickListener(v -> {
-            needReloadNavidrome = true;
-            startActivity(new Intent(this, ServerSettingsActivity.class));
+        // 设置(均衡器 + 服务器统一入口)
+        btnSettings.setOnClickListener(v -> {
+            showSettingsMenu();
         });
 
-        // 均衡器
-        btnEqualizer.setOnClickListener(v -> {
-            if (service != null && service.isPlaying()) {
-                startActivity(new Intent(this, EqualizerActivity.class));
-            } else {
-                Toast.makeText(this, "请先开始播放音乐,均衡器才能生效", Toast.LENGTH_SHORT).show();
-                if (service != null && !musicList.isEmpty()) {
-                    service.setPlayList(musicList, 0);
-                    service.playIndex(0);
-                }
+        // 点击服务器状态可手动刷新
+        tvServerStatus.setOnClickListener(v -> {
+            if (statusMonitor != null && MusicDataHolder.getInstance().getNavidromeApi() != null) {
+                Toast.makeText(this, "正在检测服务器连接...", Toast.LENGTH_SHORT).show();
+                statusMonitor.checkNow();
             }
         });
 
@@ -251,20 +285,106 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // ==================== 搜索对话框 ====================
+    // ==================== 搜索 ====================
 
-    private void showSearchDialog() {
-        String hint = sourceMode == SourceMode.LOCAL
-                ? "搜索歌曲、艺术家、专辑..."
-                : "搜索 Navidrome 音乐...";
-        SearchDialog dialog = new SearchDialog(this, hint, "");
-        dialog.setOnSearchListener(new SearchDialog.OnSearchListener() {
+    /**
+     * 处理搜索栏输入
+     * - 本地模式:即时过滤
+     * - Navidrome 模式:防抖延迟搜索(避免频繁网络请求)
+     */
+    private void handleSearchInput(String query) {
+        currentSearchQuery = query != null ? query.trim() : "";
+
+        if (sourceMode == SourceMode.LOCAL) {
+            // 本地:即时过滤
+            adapter.filter(currentSearchQuery);
+            updateCount();
+        } else {
+            // Navidrome:防抖搜索
+            if (searchDebounceRunnable != null) {
+                handler.removeCallbacks(searchDebounceRunnable);
+            }
+            searchDebounceRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    doSearch(currentSearchQuery);
+                }
+            };
+            handler.postDelayed(searchDebounceRunnable, SEARCH_DEBOUNCE_MS);
+        }
+    }
+
+    // ==================== 设置菜单 ====================
+
+    /** 弹出设置菜单:均衡器 / 服务器设置 */
+    private void showSettingsMenu() {
+        String[] items = {"均衡器", "服务器设置"};
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("设置");
+        builder.setItems(items, new DialogInterface.OnClickListener() {
             @Override
-            public void onSearch(String query) {
-                doSearch(query);
+            public void onClick(DialogInterface dialog, int which) {
+                if (which == 0) {
+                    // 均衡器
+                    openEqualizer();
+                } else if (which == 1) {
+                    // 服务器设置
+                    needReloadNavidrome = true;
+                    startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
+                }
             }
         });
-        dialog.show();
+        builder.show();
+    }
+
+    /** 打开均衡器(需播放状态) */
+    private void openEqualizer() {
+        if (service != null && service.isPlaying()) {
+            startActivity(new Intent(this, EqualizerActivity.class));
+        } else {
+            Toast.makeText(this, "请先开始播放音乐,均衡器才能生效", Toast.LENGTH_SHORT).show();
+            if (service != null && !musicList.isEmpty()) {
+                service.setPlayList(musicList, 0);
+                service.playIndex(0);
+            }
+        }
+    }
+
+    // ==================== 服务器状态显示 ====================
+
+    /** 更新服务器状态显示 */
+    private void updateServerStatusDisplay(ServerStatusMonitor.Status status, String message) {
+        if (tvServerStatus == null) return;
+
+        String text;
+        int color;
+
+        switch (status) {
+            case CONNECTED:
+                text = "●已连接";
+                color = ContextCompat.getColor(this, R.color.server_status_connected);
+                break;
+            case CONNECTING:
+                text = "●连接中";
+                color = ContextCompat.getColor(this, R.color.server_status_connecting);
+                break;
+            case RETRYING:
+                text = "●" + message;
+                color = ContextCompat.getColor(this, R.color.server_status_retrying);
+                break;
+            case DISCONNECTED:
+                text = "●未连接";
+                color = ContextCompat.getColor(this, R.color.server_status_disconnected);
+                break;
+            case OFFLINE:
+            default:
+                text = "●离线";
+                color = ContextCompat.getColor(this, R.color.server_status_offline);
+                break;
+        }
+
+        tvServerStatus.setText(text);
+        tvServerStatus.setTextColor(color);
     }
 
     // ==================== 来源切换 ====================
@@ -273,17 +393,22 @@ public class MainActivity extends AppCompatActivity {
         if (sourceMode == SourceMode.LOCAL) {
             // 切换到 Navidrome
             if (!navidromeConfig.isConfigured()) {
-                Toast.makeText(this, "请先配置 Navidrome 服务器", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "请先在设置中配置 Navidrome 服务器", Toast.LENGTH_LONG).show();
+                needReloadNavidrome = true;
                 startActivity(new Intent(this, ServerSettingsActivity.class));
                 return;
             }
             sourceMode = SourceMode.NAVIDROME;
             btnSource.setText("网络");
+            etSearch.setHint("搜索 Navidrome 音乐...");
+            etSearch.setText("");
             loadNavidromeMusic();
         } else {
             // 切换到本地
             sourceMode = SourceMode.LOCAL;
             btnSource.setText("本地");
+            etSearch.setHint("搜索歌曲、艺术家、专辑...");
+            etSearch.setText("");
             loadLocalMusic();
         }
     }
@@ -402,6 +527,9 @@ public class MainActivity extends AppCompatActivity {
             if (sourceMode == SourceMode.LOCAL) {
                 adapter.filter("");
                 updateCount();
+            } else {
+                // Navidrome 空搜索:重新加载列表
+                loadNavidromeMusic();
             }
             return;
         }
@@ -411,7 +539,6 @@ public class MainActivity extends AppCompatActivity {
         if (sourceMode == SourceMode.LOCAL) {
             adapter.filter(query);
             updateCount();
-            Toast.makeText(this, "搜索: " + query, Toast.LENGTH_SHORT).show();
         } else {
             searchNavidrome(query);
         }
@@ -426,7 +553,6 @@ public class MainActivity extends AppCompatActivity {
 
         tvEmpty.setText("正在搜索...");
         tvEmpty.setVisibility(View.VISIBLE);
-        btnSearch.setEnabled(false);
 
         new Thread(new Runnable() {
             @Override
@@ -435,7 +561,6 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        btnSearch.setEnabled(true);
                         musicList.clear();
                         if (result != null) {
                             musicList.addAll(result);
@@ -543,6 +668,10 @@ public class MainActivity extends AppCompatActivity {
         if (needReloadNavidrome) {
             needReloadNavidrome = false;
             NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+            // 更新监控器的 API 实例(会触发重新检测)
+            if (statusMonitor != null) {
+                statusMonitor.updateApi(api);
+            }
             if (api != null && sourceMode == SourceMode.NAVIDROME) {
                 loadNavidromeMusic();
             }
@@ -558,10 +687,18 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         unregisterReceiver(stateReceiver);
         handler.removeCallbacks(progressTask);
+        // 移除搜索防抖
+        if (searchDebounceRunnable != null) {
+            handler.removeCallbacks(searchDebounceRunnable);
+        }
     }
 
     @Override
     protected void onDestroy() {
+        // 停止服务器状态监控
+        if (statusMonitor != null) {
+            statusMonitor.stop();
+        }
         if (bound) {
             unbindService(connection);
             bound = false;
