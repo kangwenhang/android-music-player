@@ -38,8 +38,9 @@ public class MusicScanner {
                 MediaStore.Audio.Media.DATA
         };
 
-        // 仅查询音乐,按时长降序过滤过短片段
-        String selection = MediaStore.Audio.Media.IS_MUSIC + " = 1";
+        // 仅查询音乐,且时长超过30秒(过滤铃声、提示音等短音频)
+        String selection = MediaStore.Audio.Media.IS_MUSIC + " = 1"
+                + " AND " + MediaStore.Audio.Media.DURATION + " > 30000";
         String sortOrder = MediaStore.Audio.Media.TITLE + " ASC";
 
         Cursor cursor = null;

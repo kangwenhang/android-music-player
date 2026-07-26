@@ -517,8 +517,8 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 先尝试获取随机歌曲,若无结果则获取最新专辑的歌曲
-                List<MusicBean> list = api.getRandomSongs(100);
+                // 获取大量歌曲(最多1000首),覆盖服务器全量曲库
+                List<MusicBean> list = api.getRandomSongs(1000);
                 if (list == null || list.isEmpty()) {
                     // 回退:获取最新专辑列表,再获取第一个专辑的歌曲
                     List<AlbumBean> albums = api.getAlbumList("newest", 20);
@@ -593,7 +593,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final List<MusicBean> result = api.search(query, 100);
+                final List<MusicBean> result = api.search(query, 1000);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
