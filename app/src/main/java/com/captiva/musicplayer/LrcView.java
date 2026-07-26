@@ -91,7 +91,12 @@ public class LrcView extends View {
             blurredBitmap = null;
         }
         if (coverBitmap != null) {
-            blurredBitmap = createScaledBitmap(coverBitmap);
+            try {
+                blurredBitmap = createScaledBitmap(coverBitmap);
+            } catch (OutOfMemoryError e) {
+                // 车机内存不足时,直接用原图,不模糊
+                blurredBitmap = null;
+            }
         }
         invalidate();
     }
@@ -110,9 +115,19 @@ public class LrcView extends View {
             float scale = Math.max((float) vw / sw, (float) vh / sh);
             int nw = (int) (sw * scale);
             int nh = (int) (sh * scale);
+            // 车机内存有限,限制最大尺寸
+            int maxDim = 800;
+            if (nw > maxDim || nh > maxDim) {
+                float ratio = (float) maxDim / Math.max(nw, nh);
+                nw = (int) (nw * ratio);
+                nh = (int) (nh * ratio);
+            }
             Bitmap scaled = Bitmap.createScaledBitmap(src, nw, nh, true);
             // 简单模糊:缩小再放大(兼容低 API)
             return fastBlur(scaled, 0.4f);
+        } catch (OutOfMemoryError e) {
+            // 内存不足,直接返回原图
+            return src;
         } catch (Exception e) {
             return src;
         }
@@ -130,6 +145,8 @@ public class LrcView extends View {
                 small.recycle();
             }
             return blurred;
+        } catch (OutOfMemoryError e) {
+            return src;
         } catch (Exception e) {
             return src;
         }

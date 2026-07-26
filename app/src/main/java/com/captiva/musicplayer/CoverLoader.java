@@ -32,9 +32,9 @@ import java.util.concurrent.Executors;
 public class CoverLoader {
 
     private static final String TAG = "CoverLoader";
-    private static final int CACHE_SIZE = 8 * 1024 * 1024; // 8MB内存缓存
+    private static final int CACHE_SIZE = 4 * 1024 * 1024; // 4MB内存缓存(车机内存小)
     private static final String DISK_CACHE_DIR = "cover_cache";
-    private static final long DISK_CACHE_MAX_SIZE = 50 * 1024 * 1024; // 50MB磁盘缓存
+    private static final long DISK_CACHE_MAX_SIZE = 30 * 1024 * 1024; // 30MB磁盘缓存
 
     private static CoverLoader instance;
 
@@ -51,9 +51,14 @@ public class CoverLoader {
             protected int sizeOf(String key, Bitmap value) {
                 return value.getRowBytes() * value.getHeight();
             }
+
+            @Override
+            protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
+                // 内存缓存淘汰时不需要回收,GC会处理
+            }
         };
-        // 用优先级较高的线程(3个线程并行加载)
-        executor = Executors.newFixedThreadPool(3);
+        // 车机性能弱,只用1个线程加载封面,避免OOM
+        executor = Executors.newFixedThreadPool(1);
         mainHandler = new Handler(Looper.getMainLooper());
     }
 
@@ -299,25 +304,34 @@ public class CoverLoader {
     private Bitmap loadLocalCover(MusicBean bean, int size) {
         MediaMetadataRetriever mmr = null;
         try {
-            mmr = new MediaMetadataRetriever();
             String path = bean.getData();
             if (path == null || path.isEmpty()) {
                 return null;
             }
+            mmr = new MediaMetadataRetriever();
             mmr.setDataSource(path);
             byte[] art = mmr.getEmbeddedPicture();
             if (art == null || art.length == 0) {
                 return null;
             }
+            // 车机内存有限,限制解码尺寸
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(art, 0, art.length, opts);
-            opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, size);
+            // 车机封面尺寸不要太大,最大200px
+            int targetSize = Math.min(size, 200);
+            opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
+            opts.inPurgeable = true; // 允许回收解码内存
             return BitmapFactory.decodeByteArray(art, 0, art.length, opts);
         } catch (Exception e) {
             Log.w(TAG, "loadLocalCover failed: " + bean.getData(), e);
+            return null;
+        } catch (OutOfMemoryError e) {
+            Log.e(TAG, "loadLocalCover OOM: " + bean.getData(), e);
+            // 清理内存缓存
+            cache.evictAll();
             return null;
         } finally {
             if (mmr != null) {
@@ -363,12 +377,19 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
-            opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, size);
+            // 车机封面尺寸限制
+            int targetSize = Math.min(size, 200);
+            opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            opts.inPurgeable = true;
             return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
         } catch (Exception e) {
             Log.w(TAG, "loadNetworkCover failed: " + coverArtId, e);
+            return null;
+        } catch (OutOfMemoryError e) {
+            Log.e(TAG, "loadNetworkCover OOM: " + coverArtId, e);
+            cache.evictAll();
             return null;
         } finally {
             if (is != null) try { is.close(); } catch (Exception ignored) {}

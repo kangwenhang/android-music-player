@@ -646,6 +646,9 @@ public class MainActivity extends AppCompatActivity {
         return days + "天前";
     }
 
+    /** 每批获取的专辑数量(车机性能弱,小批量) */
+    private static final int ALBUM_PAGE_SIZE = 10;
+
     private void loadNavidromeMusic() {
         final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
         if (api == null) {
@@ -680,23 +683,23 @@ public class MainActivity extends AppCompatActivity {
         // 禁用来源按钮防止重复点击
         btnSource.setEnabled(false);
 
-        // 2. 后台从服务器加载最新数据
+        // 2. 后台从服务器加载最新数据(通过专辑分页,准确无重复)
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 先获取第一页(50首)快速显示
-                final List<MusicBean> firstPage = api.getSongsPage(0, 50);
-                final int totalCount = firstPage != null ? firstPage.size() : 0;
+                // 获取第一批专辑的歌曲用于快速显示
+                final List<MusicBean> firstBatch = api.getSongsByAlbumPage(0, ALBUM_PAGE_SIZE);
+                final int totalCount = firstBatch != null ? firstBatch.size() : 0;
 
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         btnSource.setEnabled(true);
 
-                        if (firstPage != null && !firstPage.isEmpty()) {
+                        if (firstBatch != null && !firstBatch.isEmpty()) {
                             // 服务器有数据,替换为最新
                             musicList.clear();
-                            musicList.addAll(firstPage);
+                            musicList.addAll(firstBatch);
                             adapter.setData(musicList);
                             updateCount();
                             tvEmpty.setVisibility(View.GONE);
@@ -704,13 +707,8 @@ public class MainActivity extends AppCompatActivity {
                                 service.setPlayList(musicList, 0);
                             }
 
-                            // 如果第一页已满50,后台继续加载剩余
-                            if (totalCount >= 50) {
-                                loadRemainingNavidromeSongs(api, 50);
-                            } else {
-                                // 没有更多了,保存完整缓存
-                                songCache.save(musicList);
-                            }
+                            // 后台继续加载剩余专辑的歌曲
+                            loadRemainingNavidromeSongs(api, ALBUM_PAGE_SIZE);
                         } else if (!hasCache) {
                             // 服务器无数据且无缓存
                             tvEmpty.setVisibility(View.VISIBLE);
@@ -726,37 +724,33 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 后台加载剩余的网络歌曲(分页,不阻塞UI) */
-    private void loadRemainingNavidromeSongs(final NavidromeApi api, final int startOffset) {
+    /** 后台加载剩余的网络歌曲(按专辑分页,不阻塞UI) */
+    private void loadRemainingNavidromeSongs(final NavidromeApi api, final int startAlbumOffset) {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                int offset = startOffset;
-                int pageSize = 50;
+                int albumOffset = startAlbumOffset;
                 while (true) {
                     try {
-                        final List<MusicBean> page = api.getSongsPage(offset, pageSize);
-                        if (page == null || page.isEmpty()) {
+                        final List<MusicBean> batch = api.getSongsByAlbumPage(albumOffset, ALBUM_PAGE_SIZE);
+                        if (batch == null || batch.isEmpty()) {
                             break;
                         }
-                        final int pageStart = musicList.size();
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                // 追加到列表(不刷新整个列表)
-                                musicList.addAll(page);
-                                // 通知 adapter 有新数据(它内部会处理分批显示)
-                                adapter.appendData(page);
+                                // 追加到列表(adapter 内部会去重)
+                                musicList.addAll(batch);
+                                adapter.appendData(batch);
                                 updateCount();
                                 if (service != null && !musicList.isEmpty()) {
                                     service.setPlayList(musicList, service.getCurrentIndex());
                                 }
                             }
                         });
-                        if (page.size() < pageSize) {
-                            break;
-                        }
-                        offset += pageSize;
+                        // 每批之间稍微停顿,避免请求过于密集
+                        try { Thread.sleep(100); } catch (InterruptedException ignored) { break; }
+                        albumOffset += ALBUM_PAGE_SIZE;
                     } catch (Exception e) {
                         break;
                     }
@@ -859,8 +853,8 @@ public class MainActivity extends AppCompatActivity {
         sbProgress.setMax((int) bean.getDuration());
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
 
-        // 加载封面到歌词区作为背景
-        int coverSize = 400; // 较大尺寸用于背景
+        // 加载封面到歌词区作为背景(车机内存有限,控制在300px)
+        int coverSize = 300; // 背景封面尺寸
         CoverLoader.getInstance().loadBitmap(bean, coverSize,
                 new CoverLoader.BitmapCallback() {
                     @Override

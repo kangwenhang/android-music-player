@@ -490,9 +490,9 @@ public class MusicService extends Service {
             // 本地歌曲:优先用 content uri,失败回退文件路径
             if (bean.isNetwork() && bean.getStreamUrl() != null) {
                 player.setDataSource(bean.getStreamUrl());
-            } else if (bean.getUri() != null) {
+            } else if (bean.getUri() != null && !bean.getUri().isEmpty()) {
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
-            } else if (bean.getData() != null) {
+            } else if (bean.getData() != null && !bean.getData().isEmpty()) {
                 player.setDataSource(bean.getData());
             } else {
                 return;
@@ -500,6 +500,7 @@ public class MusicService extends Service {
             // API 21 之前用 setAudioStreamType
             player.setAudioStreamType(AudioManager.STREAM_MUSIC);
             player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
+            final MusicBean currentBean = bean;
             player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
@@ -507,21 +508,25 @@ public class MusicService extends Service {
                     if (token != playToken) {
                         return;
                     }
-                    isPrepared = true;
-                    mp.start();
-                    // 初始化均衡器(绑定当前 audioSession)
                     try {
-                        int sessionId = mp.getAudioSessionId();
-                        equalizerManager.init(sessionId);
+                        isPrepared = true;
+                        mp.start();
+                        // 初始化均衡器(绑定当前 audioSession)
+                        try {
+                            int sessionId = mp.getAudioSessionId();
+                            equalizerManager.init(sessionId);
+                        } catch (Exception e) {
+                            Log.w(TAG, "equalizer init failed", e);
+                        }
+                        // 加载歌词
+                        loadLyrics(currentBean);
+                        updateRemoteControlMetadata(currentBean);
+                        updateRemoteControlPlayState(true);
+                        notifyState();
+                        updateNotification();
                     } catch (Exception e) {
-                        Log.w(TAG, "equalizer init failed", e);
+                        Log.e(TAG, "onPrepared start failed", e);
                     }
-                    // 加载歌词
-                    loadLyrics(bean);
-                    updateRemoteControlMetadata(bean);
-                    updateRemoteControlPlayState(true);
-                    notifyState();
-                    updateNotification();
                 }
             });
             player.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {

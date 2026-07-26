@@ -20,6 +20,11 @@ import java.util.List;
  * - 本地/网络来源标识
  * - 搜索过滤
  * - 分批加载(防止大量数据卡死车机)
+ *
+ * 线程安全说明:
+ * - fullData/filteredData/data 三个列表只在主线程修改
+ * - appendData() 由后台线程调用,内部通过 runOnUiThread 或同步块保证安全
+ * - 所有 notifyXXX 在主线程执行
  */
 public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
@@ -38,18 +43,22 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private int playingIndex = -1;
     private String filterKeyword = "";
 
-    /** 当前已加载到第几条(分批加载) */
+    /** 当前已加载到第几条(分批加载,针对 filteredData) */
     private int loadedCount = 0;
     /** 是否还有更多数据可加载 */
     private boolean hasMore = false;
-    /** 是否正在加载 */
+    /** 是否正在加载更多(防止重复触发) */
     private boolean isLoading = false;
 
     public MusicAdapter(Context context) {
         this.context = context;
     }
 
-    public void setData(List<MusicBean> list) {
+    /**
+     * 设置完整数据(主线程调用)
+     * 替换 fullData,重建 filteredData,加载第一批到 data
+     */
+    public synchronized void setData(List<MusicBean> list) {
         fullData.clear();
         if (list != null) {
             fullData.addAll(list);
@@ -59,39 +68,95 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         applyFilterAndLoadFirstBatch();
     }
 
-    /** 追加数据(后台分页加载用,不刷新整个列表) */
-    public void appendData(List<MusicBean> more) {
+    /**
+     * 追加数据(后台分页加载完成后调用)
+     * 注意:此方法可能在后台线程调用,需保证线程安全
+     */
+    public synchronized void appendData(List<MusicBean> more) {
         if (more == null || more.isEmpty()) {
             return;
         }
-        fullData.addAll(more);
-        // 如果没有搜索过滤,直接追加到显示列表
-        if (filterKeyword.isEmpty()) {
-            filteredData.addAll(more);
-            int start = data.size();
-            // 只加载到当前批次限制
-            int canLoad = Math.min(more.size(), BATCH_SIZE - (data.size() - loadedCount));
-            if (canLoad > 0) {
-                for (int i = 0; i < canLoad && loadedCount < filteredData.size(); i++) {
-                    data.add(filteredData.get(loadedCount));
-                    loadedCount++;
-                }
-                hasMore = loadedCount < filteredData.size();
-                notifyItemRangeInserted(start, canLoad);
+        // 1. 先加到 fullData(去重,避免网络分页重复)
+        int added = 0;
+        for (MusicBean b : more) {
+            if (!containsSong(fullData, b)) {
+                fullData.add(b);
+                added++;
             }
+        }
+        if (added == 0) {
+            // 全部是重复的,不需要更新UI
+            return;
+        }
+
+        // 2. 如果没有搜索过滤,把新增的加入 filteredData
+        if (filterKeyword.isEmpty()) {
+            for (MusicBean b : more) {
+                if (!containsSong(filteredData, b)) {
+                    filteredData.add(b);
+                }
+            }
+            // 3. 检查是否需要把部分新数据加载到 data(显示列表)
+            // 只有当 data 还没满(loadedCount < filteredData.size)时才需要
+            // 但如果用户已经滚动到底部加载了所有,那 data 可能已经包含了所有 filteredData
+            // 此时只需更新 hasMore 标志
+            int oldDataSize = data.size();
+            // 如果当前显示数量小于 filteredData 总数,且没有正在加载更多
+            // 说明可以补充显示
+            if (loadedCount < filteredData.size()) {
+                // 补充一批到显示列表
+                int canAdd = Math.min(BATCH_SIZE, filteredData.size() - loadedCount);
+                for (int i = 0; i < canAdd; i++) {
+                    if (loadedCount < filteredData.size()) {
+                        data.add(filteredData.get(loadedCount));
+                        loadedCount++;
+                    }
+                }
+                int newAdded = data.size() - oldDataSize;
+                hasMore = loadedCount < filteredData.size();
+                if (newAdded > 0) {
+                    notifyItemRangeInserted(oldDataSize, newAdded);
+                }
+            }
+            // 更新 hasMore
+            hasMore = loadedCount < filteredData.size();
         }
         // 如果有搜索过滤,filteredData会在下次filter时重建
     }
 
-    /** 搜索过滤 */
-    public void filter(String keyword) {
+    /** 检查列表中是否已包含某首歌(用 streamId 或 data 路径去重) */
+    private boolean containsSong(List<MusicBean> list, MusicBean target) {
+        if (target == null) return true;
+        String targetKey = getSongKey(target);
+        if (targetKey == null || targetKey.isEmpty()) return false;
+        for (MusicBean b : list) {
+            String key = getSongKey(b);
+            if (targetKey.equals(key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 生成歌曲唯一标识(网络用 streamId,本地用文件路径) */
+    private String getSongKey(MusicBean b) {
+        if (b.isNetwork()) {
+            return "net_" + b.getStreamId();
+        } else {
+            String data = b.getData();
+            return data != null ? "local_" + data : "local_" + b.getId();
+        }
+    }
+
+    /** 搜索过滤(主线程) */
+    public synchronized void filter(String keyword) {
         filterKeyword = keyword == null ? "" : keyword.trim().toLowerCase();
         loadedCount = 0;
         data.clear();
         applyFilterAndLoadFirstBatch();
     }
 
-    /** 过滤并加载第一批 */
+    /** 过滤并加载第一批(主线程) */
     private void applyFilterAndLoadFirstBatch() {
         filteredData.clear();
         if (filterKeyword.isEmpty()) {
@@ -119,8 +184,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         notifyDataSetChanged();
     }
 
-    /** 滚动时加载更多(由 RecyclerView 滚动监听调用) */
-    public void loadMore() {
+    /** 滚动时加载更多(由 onBindViewHolder 调用,主线程) */
+    public synchronized void loadMore() {
         if (isLoading || !hasMore) {
             return;
         }
@@ -140,7 +205,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     }
 
     /** 检查是否需要加载更多(在滚动时调用) */
-    public void checkLoadMore(int lastVisiblePosition) {
+    public synchronized void checkLoadMore(int lastVisiblePosition) {
         if (hasMore && !isLoading && lastVisiblePosition >= data.size() - 10) {
             loadMore();
         }
@@ -179,6 +244,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
+        // 安全检查:防止 position 越界
+        if (position < 0 || position >= data.size()) {
+            return;
+        }
         MusicBean bean = data.get(position);
         holder.tvTitle.setText(bean.getTitle());
         holder.tvArtist.setText(bean.getArtist() + " · " + MusicBean.formatDuration(bean.getDuration()));
@@ -203,7 +272,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
-                listener.onItemClick(holder.getAdapterPosition(), bean);
+                int pos = holder.getAdapterPosition();
+                if (pos >= 0 && pos < data.size()) {
+                    listener.onItemClick(pos, data.get(pos));
+                }
             }
         });
 

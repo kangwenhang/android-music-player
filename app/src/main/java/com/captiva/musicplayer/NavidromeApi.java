@@ -161,9 +161,20 @@ public class NavidromeApi {
      * @return 专辑列表
      */
     public List<AlbumBean> getAlbumList(String type, int count) {
+        return getAlbumList(type, count, 0);
+    }
+
+    /**
+     * getAlbumList2:获取专辑列表(支持分页)
+     * @param type   newest | random | frequent | recent | alphabeticalByName
+     * @param size   每页数量
+     * @param offset 偏移量
+     * @return 该页专辑列表
+     */
+    public List<AlbumBean> getAlbumList(String type, int size, int offset) {
         List<AlbumBean> list = new ArrayList<>();
         try {
-            String params = "type=" + type + "&size=" + count;
+            String params = "type=" + type + "&size=" + size + "&offset=" + offset;
             String json = httpGet(apiUrl("getAlbumList2", params));
             JSONObject root = new JSONObject(json);
             JSONObject resp = root.optJSONObject("subsonic-response");
@@ -324,6 +335,9 @@ public class NavidromeApi {
 
     /**
      * 分页获取歌曲(单次请求)
+     * 使用 search3 接口以空查询匹配全部,分页拉取
+     * 注意:search3 的空查询搜索可能有最大返回限制和分页不精确问题,
+     * 建议用 getSongsPageByAlbum 替代以获得准确数量
      * @param offset 偏移量
      * @param count 每页数量
      * @return 该页歌曲列表
@@ -349,6 +363,46 @@ public class NavidromeApi {
             Log.d(TAG, "getSongsPage: offset=" + offset + " count=" + count + " got=" + list.size());
         } catch (Exception e) {
             Log.e(TAG, "getSongsPage failed", e);
+        }
+        return list;
+    }
+
+    /**
+     * 通过专辑列表分页获取全部歌曲(准确,无重复)
+     * 流程:按字母排序分页获取专辑 → 逐专辑获取歌曲
+     * 相比 search3 空查询,此方式能准确获取全部歌曲且不会重复
+     *
+     * @param albumOffset 专辑偏移量(用于分页)
+     * @param albumCount   每次获取的专辑数量
+     * @return 该批专辑下的所有歌曲
+     */
+    public List<MusicBean> getSongsByAlbumPage(int albumOffset, int albumCount) {
+        List<MusicBean> list = new ArrayList<>();
+        try {
+            // 1. 获取一批专辑
+            List<AlbumBean> albums = getAlbumList("alphabeticalByName", albumCount, albumOffset);
+            if (albums == null || albums.isEmpty()) {
+                Log.d(TAG, "getSongsByAlbumPage: no more albums at offset=" + albumOffset);
+                return list;
+            }
+
+            // 2. 逐专辑获取歌曲
+            for (AlbumBean album : albums) {
+                if (album.getId() == null || album.getId().isEmpty()) {
+                    continue;
+                }
+                List<MusicBean> albumSongs = getAlbum(album.getId());
+                if (albumSongs != null && !albumSongs.isEmpty()) {
+                    list.addAll(albumSongs);
+                }
+            }
+
+            Log.d(TAG, "getSongsByAlbumPage: albumOffset=" + albumOffset
+                    + " albumCount=" + albumCount
+                    + " albums=" + albums.size()
+                    + " songs=" + list.size());
+        } catch (Exception e) {
+            Log.e(TAG, "getSongsByAlbumPage failed", e);
         }
         return list;
     }
