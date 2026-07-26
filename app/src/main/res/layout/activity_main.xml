@@ -59,30 +59,28 @@
             android:imeOptions="actionSearch"
             android:inputType="text" />
 
-        <!-- 来源切换:本地/网络(颜色区分当前模式) -->
+        <!-- 来源切换:本地/网络(颜色区分当前模式,电阻屏加大) -->
         <Button
             android:id="@+id/btn_source"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginLeft="6dp"
-            android:minWidth="72dp"
-            android:minHeight="0dp"
+            android:layout_height="@dimen/top_btn_height"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
+            android:minWidth="@dimen/top_btn_min_width"
             android:background="@drawable/bg_btn_source_local"
             android:text="本地"
             android:textColor="#FFFFFF"
             android:textStyle="bold"
             android:textSize="@dimen/sub_text_size" />
 
-        <!-- 设置(均衡器+服务器统一入口) -->
+        <!-- 设置(均衡器+服务器统一入口,电阻屏加大) -->
         <Button
             android:id="@+id/btn_settings"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginLeft="6dp"
-            android:minWidth="60dp"
-            android:minHeight="0dp"
+            android:layout_height="@dimen/top_btn_height"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
+            android:minWidth="@dimen/top_btn_min_width"
             android:background="@drawable/bg_btn"
             android:text="设置"
             android:textColor="@color/btn_text"
@@ -93,8 +91,8 @@
             android:id="@+id/tv_server_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_marginLeft="6dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
             android:text="●未连接"
             android:textColor="@color/server_status_disconnected"
             android:textSize="@dimen/sub_text_size"

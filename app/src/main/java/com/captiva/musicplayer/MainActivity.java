@@ -604,7 +604,7 @@ public class MainActivity extends AppCompatActivity {
     // ==================== Navidrome 音乐 ====================
 
     private void loadNavidromeMusic() {
-        NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
         if (api == null) {
             Toast.makeText(this, "Navidrome 未配置", Toast.LENGTH_SHORT).show();
             return;
@@ -613,18 +613,24 @@ public class MainActivity extends AppCompatActivity {
         tvEmpty.setText("正在从 Navidrome 加载...");
         tvEmpty.setVisibility(View.VISIBLE);
 
+        // 禁用来源按钮防止重复点击
+        btnSource.setEnabled(false);
+
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 获取全部歌曲:先按字母排序分页获取,确保覆盖全部曲库
-                List<MusicBean> list = api.getAllSongs();
+                // 先获取第一页(500首)快速显示
+                final List<MusicBean> firstPage = api.getSongsPage(0, 500);
+                final int totalCount = firstPage != null ? firstPage.size() : 0;
 
-                final List<MusicBean> result = list != null ? list : new ArrayList<MusicBean>();
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        btnSource.setEnabled(true);
                         musicList.clear();
-                        musicList.addAll(result);
+                        if (firstPage != null) {
+                            musicList.addAll(firstPage);
+                        }
                         adapter.setData(musicList);
                         updateCount();
                         if (musicList.isEmpty()) {
@@ -636,8 +642,52 @@ public class MainActivity extends AppCompatActivity {
                         if (service != null && !musicList.isEmpty()) {
                             service.setPlayList(musicList, 0);
                         }
+
+                        // 如果第一页已满500,后台继续加载剩余
+                        if (totalCount >= 500) {
+                            loadRemainingNavidromeSongs(api, 500);
+                        }
                     }
                 });
+            }
+        }).start();
+    }
+
+    /** 后台加载剩余的网络歌曲(分页,不阻塞UI) */
+    private void loadRemainingNavidromeSongs(final NavidromeApi api, final int startOffset) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int offset = startOffset;
+                int pageSize = 500;
+                while (true) {
+                    try {
+                        final List<MusicBean> page = api.getSongsPage(offset, pageSize);
+                        if (page == null || page.isEmpty()) {
+                            break;
+                        }
+                        final int pageStart = musicList.size();
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                // 追加到列表(不刷新整个列表)
+                                musicList.addAll(page);
+                                // 通知 adapter 有新数据(它内部会处理分批显示)
+                                adapter.appendData(page);
+                                updateCount();
+                                if (service != null && !musicList.isEmpty()) {
+                                    service.setPlayList(musicList, service.getCurrentIndex());
+                                }
+                            }
+                        });
+                        if (page.size() < pageSize) {
+                            break;
+                        }
+                        offset += pageSize;
+                    } catch (Exception e) {
+                        break;
+                    }
+                }
             }
         }).start();
     }

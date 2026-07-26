@@ -302,43 +302,55 @@ public class NavidromeApi {
     public List<MusicBean> getAllSongs() {
         List<MusicBean> all = new ArrayList<>();
         try {
-            // 使用 search3 分页获取:每页500首
             int pageSize = 500;
             int offset = 0;
             while (true) {
-                String params = "query="
-                        + "&songCount=" + pageSize
-                        + "&songOffset=" + offset
-                        + "&albumCount=0"
-                        + "&artistCount=0";
-                String json = httpGet(apiUrl("search3", params));
-                JSONObject root = new JSONObject(json);
-                JSONObject resp = root.optJSONObject("subsonic-response");
-                if (resp != null && "ok".equals(resp.optString("status"))) {
-                    JSONObject result = resp.optJSONObject("searchResult3");
-                    if (result != null) {
-                        JSONArray songs = result.optJSONArray("song");
-                        if (songs == null || songs.length() == 0) {
-                            break; // 没有更多了
-                        }
-                        List<MusicBean> page = parseSongs(songs);
-                        all.addAll(page);
-                        if (page.size() < pageSize) {
-                            break; // 最后一页
-                        }
-                        offset += pageSize;
-                    } else {
-                        break;
-                    }
-                } else {
+                List<MusicBean> page = getSongsPage(offset, pageSize);
+                if (page == null || page.isEmpty()) {
                     break;
                 }
+                all.addAll(page);
+                if (page.size() < pageSize) {
+                    break;
+                }
+                offset += pageSize;
             }
             Log.d(TAG, "getAllSongs: 共获取 " + all.size() + " 首");
         } catch (Exception e) {
             Log.e(TAG, "getAllSongs failed", e);
         }
         return all;
+    }
+
+    /**
+     * 分页获取歌曲(单次请求)
+     * @param offset 偏移量
+     * @param count 每页数量
+     * @return 该页歌曲列表
+     */
+    public List<MusicBean> getSongsPage(int offset, int count) {
+        List<MusicBean> list = new ArrayList<>();
+        try {
+            String params = "query="
+                    + "&songCount=" + count
+                    + "&songOffset=" + offset
+                    + "&albumCount=0"
+                    + "&artistCount=0";
+            String json = httpGet(apiUrl("search3", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject result = resp.optJSONObject("searchResult3");
+                if (result != null) {
+                    JSONArray songs = result.optJSONArray("song");
+                    list = parseSongs(songs);
+                }
+            }
+            Log.d(TAG, "getSongsPage: offset=" + offset + " count=" + count + " got=" + list.size());
+        } catch (Exception e) {
+            Log.e(TAG, "getSongsPage failed", e);
+        }
+        return list;
     }
 
     /**
