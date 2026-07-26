@@ -14,6 +14,7 @@ import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.SeekBar;
@@ -143,6 +144,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // 全屏沉浸模式:隐藏状态栏和虚拟导航键
+        hideSystemUI();
+
         setContentView(R.layout.activity_main);
 
         navidromeConfig = new NavidromeConfig(this);
@@ -183,6 +188,35 @@ public class MainActivity extends AppCompatActivity {
         } else {
             ActivityCompat.requestPermissions(this,
                     new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+        }
+    }
+
+    /**
+     * 隐藏系统 UI,进入全屏沉浸模式
+     * - 隐藏状态栏
+     * - 隐藏虚拟导航键
+     * - 兼容 Android 4.0(API 14)到新版本
+     */
+    private void hideSystemUI() {
+        View decorView = getWindow().getDecorView();
+        // API 19+ 使用沉浸式 sticky 模式
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        } else {
+            // API 14-18:隐藏状态栏和导航键(非沉浸式)
+            decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LOW_PROFILE
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
+            // 同时请求全屏窗口
+            getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN);
         }
     }
 
@@ -664,6 +698,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 从其他页面返回时重新隐藏系统 UI
+        hideSystemUI();
         // 从设置页面返回时,如果配置有更新则重新加载 Navidrome
         if (needReloadNavidrome) {
             needReloadNavidrome = false;

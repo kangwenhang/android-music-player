@@ -16,16 +16,16 @@
         android:background="@color/bg_title_bar">
 
         <ImageView
-            android:layout_width="32dp"
-            android:layout_height="32dp"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
             android:src="@drawable/ic_music_note"
             android:contentDescription="@string/app_name" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_marginLeft="10dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginLeft="6dp"
             android:text="@string/app_name"
             android:textColor="@color/text_title"
             android:textSize="@dimen/title_text_size"
@@ -35,8 +35,8 @@
             android:id="@+id/tv_count"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:layout_marginLeft="12dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/sub_text_size" />
 
@@ -46,8 +46,8 @@
             android:layout_width="0dp"
             android:layout_height="@dimen/search_height"
             android:layout_weight="1"
-            android:layout_marginStart="12dp"
-            android:layout_marginLeft="12dp"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
             android:background="@drawable/bg_search"
             android:hint="搜索歌曲、艺术家、专辑..."
             android:textColorHint="@color/search_hint"
@@ -64,9 +64,10 @@
             android:id="@+id/btn_source"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_marginLeft="8dp"
-            android:minWidth="80dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginLeft="6dp"
+            android:minWidth="64dp"
+            android:minHeight="0dp"
             android:background="@drawable/bg_btn"
             android:text="本地"
             android:textColor="@color/btn_text"
@@ -77,9 +78,10 @@
             android:id="@+id/btn_settings"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_marginLeft="8dp"
-            android:minWidth="72dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginLeft="6dp"
+            android:minWidth="60dp"
+            android:minHeight="0dp"
             android:background="@drawable/bg_btn"
             android:text="设置"
             android:textColor="@color/btn_text"
@@ -90,8 +92,8 @@
             android:id="@+id/tv_server_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_marginLeft="8dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginLeft="6dp"
             android:text="●未连接"
             android:textColor="@color/server_status_disconnected"
             android:textSize="@dimen/sub_text_size"
@@ -164,8 +166,8 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginLeft="12dp"
-                android:layout_marginRight="12dp"
+                android:layout_marginLeft="8dp"
+                android:layout_marginRight="8dp"
                 android:maxHeight="4dp"
                 android:progressTint="@color/accent"
                 android:thumbTint="@color/accent" />
@@ -185,7 +187,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="8dp">
+            android:layout_marginTop="4dp">
 
             <!-- 左侧当前歌曲信息 -->
             <LinearLayout
@@ -229,13 +231,13 @@
                     android:background="@drawable/bg_btn"
                     android:text="顺序"
                     android:textColor="@color/btn_text"
-                    android:textSize="16sp" />
+                    android:textSize="14sp" />
 
                 <Button
                     android:id="@+id/btn_prev"
                     android:layout_width="@dimen/btn_size"
                     android:layout_height="@dimen/btn_size"
-                    android:layout_marginLeft="12dp"
+                    android:layout_marginLeft="8dp"
                     android:background="@drawable/bg_btn"
                     android:text="上一首"
                     android:textColor="@color/btn_text"
@@ -245,8 +247,8 @@
                     android:id="@+id/btn_play"
                     android:layout_width="@dimen/btn_size_play"
                     android:layout_height="@dimen/btn_size_play"
-                    android:layout_marginLeft="16dp"
-                    android:layout_marginRight="16dp"
+                    android:layout_marginLeft="10dp"
+                    android:layout_marginRight="10dp"
                     android:background="@drawable/bg_btn_paused"
                     android:text="播放"
                     android:textColor="@color/btn_paused_text"
