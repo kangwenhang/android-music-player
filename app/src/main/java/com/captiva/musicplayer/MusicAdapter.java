@@ -279,8 +279,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             }
         });
 
-        // 检查是否需要加载更多
-        checkLoadMore(position);
+        // 检查是否需要加载更多(用 post 延迟执行,避免在 onBindViewHolder 布局计算时调用 notifyItemRangeInserted 抛出 IllegalStateException)
+        holder.itemView.post(() -> checkLoadMore(position));
     }
 
     @Override
