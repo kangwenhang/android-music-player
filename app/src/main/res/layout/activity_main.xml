@@ -32,7 +32,7 @@
             android:textStyle="bold" />
 
         <TextView
-            android:id="+id/tv_count"
+            android:id="@+id/tv_count"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
@@ -42,7 +42,7 @@
 
         <!-- 搜索栏(实时搜索,系统输入法) -->
         <EditText
-            android:id="+id/et_search"
+            android:id="@+id/et_search"
             android:layout_width="0dp"
             android:layout_height="@dimen/search_height"
             android:layout_weight="1"
@@ -61,7 +61,7 @@
 
         <!-- 来源切换:本地/网络(颜色区分当前模式) -->
         <Button
-            android:id="+id/btn_source"
+            android:id="@+id/btn_source"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
@@ -76,7 +76,7 @@
 
         <!-- 设置(均衡器+服务器统一入口) -->
         <Button
-            android:id="+id/btn_settings"
+            android:id="@+id/btn_settings"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
@@ -90,7 +90,7 @@
 
         <!-- 服务器状态指示 -->
         <TextView
-            android:id="+id/tv_server_status"
+            android:id="@+id/tv_server_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
@@ -115,14 +115,14 @@
             android:layout_weight="3">
 
             <androidx.recyclerview.widget.RecyclerView
-                android:id="+id/rv_list"
+                android:id="@+id/rv_list"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:scrollbars="vertical"
                 android:overScrollMode="ifContentScrolls" />
 
             <TextView
-                android:id="+id/tv_empty"
+                android:id="@+id/tv_empty"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
@@ -133,7 +133,7 @@
 
         <!-- 右侧:歌词区(封面放大模糊作为底色,歌词叠加在上) -->
         <com.captiva.musicplayer.LrcView
-            android:id="+id/lrc_view"
+            android:id="@+id/lrc_view"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="2" />
@@ -152,7 +152,7 @@
 
         <!-- 顶部细进度条(全宽,可拖动) -->
         <SeekBar
-            android:id="+id/sb_progress"
+            android:id="@+id/sb_progress"
             android:layout_width="match_parent"
             android:layout_height="@dimen/seekbar_height"
             android:minHeight="@dimen/seekbar_height"
@@ -178,7 +178,7 @@
                 android:orientation="vertical">
 
                 <TextView
-                    android:id="+id/tv_now_title"
+                    android:id="@+id/tv_now_title"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
@@ -189,7 +189,7 @@
                     android:textStyle="bold" />
 
                 <TextView
-                    android:id="+id/tv_now_artist"
+                    android:id="@+id/tv_now_artist"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
@@ -208,7 +208,7 @@
                 android:layout_marginLeft="8dp">
 
                 <TextView
-                    android:id="+id/tv_current_time"
+                    android:id="@+id/tv_current_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="00:00"
@@ -225,7 +225,7 @@
                     android:textSize="@dimen/time_text_size" />
 
                 <TextView
-                    android:id="+id/tv_total_time"
+                    android:id="@+id/tv_total_time"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="00:00"
@@ -241,7 +241,7 @@
                 android:gravity="center_vertical">
 
                 <Button
-                    android:id="+id/btn_mode"
+                    android:id="@+id/btn_mode"
                     android:layout_width="@dimen/btn_size"
                     android:layout_height="@dimen/btn_size"
                     android:background="@drawable/bg_btn"
@@ -250,7 +250,7 @@
                     android:textSize="13sp" />
 
                 <Button
-                    android:id="+id/btn_prev"
+                    android:id="@+id/btn_prev"
                     android:layout_width="@dimen/btn_size"
                     android:layout_height="@dimen/btn_size"
                     android:layout_marginLeft="6dp"
@@ -260,7 +260,7 @@
                     android:textSize="@dimen/btn_text_size" />
 
                 <Button
-                    android:id="+id/btn_play"
+                    android:id="@+id/btn_play"
                     android:layout_width="@dimen/btn_size_play"
                     android:layout_height="@dimen/btn_size_play"
                     android:layout_marginLeft="8dp"
@@ -272,7 +272,7 @@
                     android:textStyle="bold" />
 
                 <Button
-                    android:id="+id/btn_next"
+                    android:id="@+id/btn_next"
                     android:layout_width="@dimen/btn_size"
                     android:layout_height="@dimen/btn_size"
                     android:background="@drawable/bg_btn"
