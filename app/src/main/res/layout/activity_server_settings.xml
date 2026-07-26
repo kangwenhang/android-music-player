@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Navidrome 服务器设置界面 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_main">
+
+    <!-- 标题栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="@dimen/title_bar_padding"
+        android:background="@color/bg_title_bar">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Navidrome 服务器设置"
+            android:textColor="@color/text_title"
+            android:textSize="@dimen/title_text_size"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_back"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_btn"
+            android:text="返回"
+            android:textColor="@color/btn_text"
+            android:textSize="@dimen/sub_text_size"
+            android:minWidth="72dp" />
+    </LinearLayout>
+
+    <!-- 表单 -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 服务器地址 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="服务器地址"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginBottom="6dp" />
+
+            <EditText
+                android:id="@+id/et_server_url"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/search_height"
+                android:background="@drawable/bg_search"
+                android:hint="http://192.168.1.100:4533"
+                android:textColorHint="@color/search_hint"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/search_text_size"
+                android:paddingLeft="@dimen/search_padding"
+                android:paddingRight="@dimen/search_padding"
+                android:singleLine="true"
+                android:inputType="textUri" />
+
+            <!-- 用户名 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="用户名"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="6dp" />
+
+            <EditText
+                android:id="@+id/et_username"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/search_height"
+                android:background="@drawable/bg_search"
+                android:hint="admin"
+                android:textColorHint="@color/search_hint"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/search_text_size"
+                android:paddingLeft="@dimen/search_padding"
+                android:paddingRight="@dimen/search_padding"
+                android:singleLine="true" />
+
+            <!-- 密码 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="密码"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="6dp" />
+
+            <EditText
+                android:id="@+id/et_password"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/search_height"
+                android:background="@drawable/bg_search"
+                android:hint="password"
+                android:textColorHint="@color/search_hint"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/search_text_size"
+                android:paddingLeft="@dimen/search_padding"
+                android:paddingRight="@dimen/search_padding"
+                android:singleLine="true"
+                android:inputType="textPassword" />
+
+            <!-- 测试结果 -->
+            <TextView
+                android:id="@+id/tv_test_result"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:visibility="gone" />
+
+            <!-- 按钮区 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="24dp"
+                android:gravity="center">
+
+                <Button
+                    android:id="@+id/btn_test"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="@dimen/btn_size"
+                    android:layout_marginRight="12dp"
+                    android:layout_marginEnd="12dp"
+                    android:background="@drawable/bg_btn"
+                    android:text="测试连接"
+                    android:textColor="@color/btn_text"
+                    android:textSize="@dimen/btn_text_size" />
+
+                <Button
+                    android:id="@+id/btn_save"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="@dimen/btn_size"
+                    android:background="@drawable/bg_btn_play"
+                    android:text="保存"
+                    android:textColor="@color/btn_play_text"
+                    android:textSize="@dimen/btn_text_size" />
+            </LinearLayout>
+
+            <!-- 说明 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="说明:\n1. 服务器地址格式:http://IP:端口\n2. Navidrome 默认端口 4533\n3. 确保车机和 Navidrome 服务器在同一局域网\n4. 建议使用内网 IP,避免域名解析延迟"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:lineSpacingExtra="4dp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+</LinearLayout>

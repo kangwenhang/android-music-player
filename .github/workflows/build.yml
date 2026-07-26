@@ -2,7 +2,7 @@ name: Build and Release Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up JDK 11
         uses: actions/setup-java@v4
@@ -20,37 +20,43 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
 
-      - name: Setup Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 7.5
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-30 build-tools;30.0.3'
+
       - name: Build Debug APK
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
-        run: gradle assembleDebug
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: captiva-music-debug
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-          APK_NAME=$(basename "$APK_PATH")
           TAG="v$(date +'%Y%m%d-%H%M%S')"
           gh release create "$TAG" "$APK_PATH" \
             --title "科帕奇音乐播放器 $TAG" \
             --notes "自动构建版本
 
-          - 编译时间: $(date -u +'+%Y-%m-%d %H:%M:%S UTC')
-          - APK 文件: $APK_NAME
-          - 适配安卓 4.0 (API 14) 车机
-
-          下载 APK 安装即可使用。" \
+          更新内容:
+          - 增加歌曲封面显示(本地嵌入式 + Navidrome)
+          - 放大歌词显示界面和文字
+          - 增加本地音乐搜索功能
+          - 播放按钮颜色:播放蓝色/暂停红色
+          - 增加按键震动反馈
+          - 对接 Navidrome 服务器(Subsonic API)
+          - 支持网络音乐流式播放" \
             --prerelease

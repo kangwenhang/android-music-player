@@ -24,4 +24,20 @@
     <color name="btn_text">#FFFFFF</color>
     <color name="btn_play_bg">#4FC3F7</color>
     <color name="btn_play_text">#0A1A2A</color>
+    <!-- 播放状态:蓝色 / 暂停状态:红色 -->
+    <color name="btn_playing_bg">#1E88E5</color>
+    <color name="btn_playing_text">#FFFFFF</color>
+    <color name="btn_paused_bg">#E53935</color>
+    <color name="btn_paused_text">#FFFFFF</color>
+
+    <!-- 搜索栏 -->
+    <color name="search_bg">#2A2A30</color>
+    <color name="search_hint">#6A6A70</color>
+
+    <!-- 封面占位 -->
+    <color name="cover_placeholder">#333338</color>
+
+    <!-- Navidrome 来源标识 -->
+    <color name="source_network">#66BB6A</color>
+    <color name="source_local">#78909C</color>
 </resources>
