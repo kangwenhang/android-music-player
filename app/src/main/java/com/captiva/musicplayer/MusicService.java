@@ -302,7 +302,7 @@ public class MusicService extends Service {
 
     /**
      * 加载歌词
-     * - 本地歌曲:从同名 .lrc 文件加载
+     * - 本地歌曲:先从内嵌ID3标签提取,再回退同名 .lrc 文件,最后从Navidrome获取(异步)
      * - 网络歌曲:异步从 Navidrome API 获取
      */
     private void loadLyrics(final MusicBean bean) {
@@ -313,9 +313,101 @@ public class MusicService extends Service {
             // 网络歌曲:异步从 Navidrome 获取歌词
             loadNetworkLyrics(bean);
         } else {
-            // 本地歌曲:从同名 .lrc 文件加载
-            currentLrc = LrcParser.loadLrc(bean.getData());
+            // 本地歌曲:异步加载(内嵌歌词 + lrc文件 + Navidrome回退)
+            loadLocalLyrics(bean);
         }
+    }
+
+    /** 异步加载本地歌曲歌词 */
+    private void loadLocalLyrics(final MusicBean bean) {
+        final String filePath = bean.getData();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<LrcEntry> lyrics = null;
+
+                // 1. 优先从音乐文件内嵌标签提取歌词
+                if (filePath != null && !filePath.isEmpty()) {
+                    try {
+                        String embedded = EmbeddedLyricsExtractor.extract(filePath);
+                        if (embedded != null && !embedded.isEmpty()) {
+                            // 判断是 LRC 格式(含时间标签)还是纯文本
+                            if (embedded.contains("[") && embedded.contains(":") && embedded.contains("]")) {
+                                lyrics = LrcParser.parseLrcText(embedded);
+                                Log.d(TAG, "内嵌LRC歌词解析: " + lyrics.size() + " 行");
+                            } else {
+                                // 纯文本歌词:按 5 秒间隔分配时间戳
+                                lyrics = LrcParser.parsePlainTextLyrics(embedded, 5000);
+                                Log.d(TAG, "内嵌纯文本歌词解析: " + lyrics.size() + " 行");
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "提取内嵌歌词失败", e);
+                    }
+
+                    // 2. 内嵌歌词没有,回退同名 .lrc 文件
+                    if (lyrics == null || lyrics.isEmpty()) {
+                        try {
+                            lyrics = LrcParser.loadLrc(filePath);
+                            if (lyrics != null && !lyrics.isEmpty()) {
+                                Log.d(TAG, "从 .lrc 文件加载歌词: " + lyrics.size() + " 行");
+                            }
+                        } catch (Exception e) {
+                            Log.w(TAG, "加载 .lrc 文件失败", e);
+                        }
+                    }
+                }
+
+                // 3. 本地歌词都没有,尝试从 Navidrome 按歌手+歌名获取歌词
+                if (lyrics == null || lyrics.isEmpty()) {
+                    NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+                    if (api != null && MusicDataHolder.getInstance().isNavidromeEnabled()) {
+                        try {
+                            String plainText = api.getLyrics(bean.getArtist(), bean.getTitle());
+                            if (plainText != null && !plainText.isEmpty()) {
+                                if (plainText.contains("[") && plainText.contains(":") && plainText.contains("]")) {
+                                    lyrics = LrcParser.parseLrcText(plainText);
+                                } else {
+                                    lyrics = LrcParser.parsePlainTextLyrics(plainText, 5000);
+                                }
+                                Log.d(TAG, "本地歌曲从Navidrome获取歌词: " + lyrics.size() + " 行");
+                            }
+                        } catch (Exception e) {
+                            Log.w(TAG, "从Navidrome获取本地歌曲歌词失败", e);
+                        }
+                    }
+                }
+
+                final List<LrcEntry> result = lyrics != null ? lyrics : new ArrayList<LrcEntry>();
+                // 在主线程更新歌词并通知 UI
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        // 确保仍然是当前歌曲(用歌名+歌手比较,兼容无文件路径的情况)
+                        MusicBean current = getCurrentMusic();
+                        if (current != null && isSameSong(current, bean)) {
+                            currentLrc = result;
+                            notifyState();
+                            Log.d(TAG, "本地歌词加载完成: " + result.size() + " 行");
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 判断两首歌曲是否为同一首(优先用文件路径,其次用歌名+歌手) */
+    private boolean isSameSong(MusicBean a, MusicBean b) {
+        if (a == null || b == null) return false;
+        // 优先比较文件路径
+        if (a.getData() != null && b.getData() != null) {
+            return a.getData().equals(b.getData());
+        }
+        // 回退到歌名+歌手比较
+        String aKey = (a.getTitle() != null ? a.getTitle() : "") + "|" + (a.getArtist() != null ? a.getArtist() : "");
+        String bKey = (b.getTitle() != null ? b.getTitle() : "") + "|" + (b.getArtist() != null ? b.getArtist() : "");
+        return aKey.equals(bKey);
     }
 
     /** 异步加载网络歌曲歌词 */
