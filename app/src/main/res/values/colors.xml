@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主背景 -->
+    <color name="bg_main">#1A1A1E</color>
+    <color name="bg_title_bar">#232328</color>
+    <color name="bg_control_bar">#232328</color>
+
+    <!-- 列表 -->
+    <color name="list_item_bg">#1A1A1E</color>
+    <color name="playing_highlight">#2C3E50</color>
+
+    <!-- 文本 -->
+    <color name="text_primary">#F0F0F0</color>
+    <color name="text_secondary">#9A9AA0</color>
+    <color name="text_title">#FFFFFF</color>
+    <color name="playing_text">#4FC3F7</color>
+    <color name="playing_text_sub">#82D4F7</color>
+
+    <!-- 强调色 -->
+    <color name="accent">#4FC3F7</color>
+
+    <!-- 按钮 -->
+    <color name="btn_bg">#3A3A42</color>
+    <color name="btn_text">#FFFFFF</color>
+    <color name="btn_play_bg">#4FC3F7</color>
+    <color name="btn_play_text">#0A1A2A</color>
+</resources>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 矢量启动图标(替代 PNG,兼容 API 14+) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- 深蓝背景 -->
+    <path
+        android:fillColor="#1A237E"
+        android:pathData="M0,0h48v48h-48z" />
+    <!-- 音符 -->
+    <path
+        android:fillColor="#4FC3F7"
+        android:pathData="M20,10v18.5c-1.2,-0.7 -2.6,-1.1 -4,-1.1 -3.3,0 -6,2.7 -6,6s2.7,6 6,6 6,-2.7 6,-6V16h8v-6h-10z" />
+</vector>
