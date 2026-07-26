@@ -619,8 +619,8 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 先获取第一页(500首)快速显示
-                final List<MusicBean> firstPage = api.getSongsPage(0, 500);
+                // 先获取第一页(50首)快速显示
+                final List<MusicBean> firstPage = api.getSongsPage(0, 50);
                 final int totalCount = firstPage != null ? firstPage.size() : 0;
 
                 runOnUiThread(new Runnable() {
@@ -643,9 +643,9 @@ public class MainActivity extends AppCompatActivity {
                             service.setPlayList(musicList, 0);
                         }
 
-                        // 如果第一页已满500,后台继续加载剩余
-                        if (totalCount >= 500) {
-                            loadRemainingNavidromeSongs(api, 500);
+                        // 如果第一页已满50,后台继续加载剩余
+                        if (totalCount >= 50) {
+                            loadRemainingNavidromeSongs(api, 50);
                         }
                     }
                 });
@@ -659,7 +659,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void run() {
                 int offset = startOffset;
-                int pageSize = 500;
+                int pageSize = 50;
                 while (true) {
                     try {
                         final List<MusicBean> page = api.getSongsPage(offset, pageSize);

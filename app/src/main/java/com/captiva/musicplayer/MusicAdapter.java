@@ -27,8 +27,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         void onItemClick(int position, MusicBean bean);
     }
 
-    /** 滚动加载每批数量 */
-    private static final int BATCH_SIZE = 100;
+    /** 滚动加载每批数量(车机性能弱,小批量) */
+    private static final int BATCH_SIZE = 50;
 
     private final List<MusicBean> fullData = new ArrayList<>();  // 完整列表
     private final List<MusicBean> filteredData = new ArrayList<>(); // 过滤后的完整列表
