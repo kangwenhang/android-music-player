@@ -1,15 +1,15 @@
-name: Build Android APK
+name: Build and Release Android APK
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,9 +30,27 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: gradle assembleDebug
 
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: captiva-music-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK_NAME=$(basename "$APK_PATH")
+          TAG="v$(date +'%Y%m%d-%H%M%S')"
+          gh release create "$TAG" "$APK_PATH" \
+            --title "科帕奇音乐播放器 $TAG" \
+            --notes "自动构建版本
+
+          - 编译时间: $(date -u +'+%Y-%m-%d %H:%M:%S UTC')
+          - APK 文件: $APK_NAME
+          - 适配安卓 4.0 (API 14) 车机
+
+          下载 APK 安装即可使用。" \
+            --prerelease
