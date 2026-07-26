@@ -74,6 +74,8 @@ public class MainActivity extends AppCompatActivity {
     private SourceMode sourceMode = SourceMode.LOCAL;
 
     private NavidromeConfig navidromeConfig;
+    /** 网络歌曲列表缓存(切换网络模式时秒开) */
+    private SongCache songCache;
     /** 从设置页返回时需重新加载 Navidrome */
     private boolean needReloadNavidrome = false;
 
@@ -151,6 +153,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         navidromeConfig = new NavidromeConfig(this);
+        songCache = new SongCache(this);
 
         // 初始化 NavidromeApi(如果已配置)
         if (navidromeConfig.isConfigured()) {
@@ -350,9 +353,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 扫描目录 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 扫描目录 / 清除缓存 */
     private void showSettingsMenu() {
-        String[] items = {"均衡器", "服务器设置", "时长过滤设置", "扫描目录设置"};
+        String[] items = {"均衡器", "服务器设置", "时长过滤设置", "扫描目录设置", "清除网络缓存"};
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("设置");
         builder.setItems(items, new DialogInterface.OnClickListener() {
@@ -371,9 +374,36 @@ public class MainActivity extends AppCompatActivity {
                 } else if (which == 3) {
                     // 扫描目录设置
                     showScanPathDialog();
+                } else if (which == 4) {
+                    // 清除网络缓存
+                    showClearCacheDialog();
                 }
             }
         });
+        builder.show();
+    }
+
+    /** 清除网络缓存确认对话框 */
+    private void showClearCacheDialog() {
+        boolean hasCache = songCache.exists();
+        String msg = hasCache
+                ? "缓存时间: " + formatCacheTime(songCache.getCachedAt())
+                : "当前无缓存数据";
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("清除网络缓存");
+        builder.setMessage(msg + "\n清除后下次切换到网络模式将直接从服务器加载");
+        if (hasCache) {
+            builder.setPositiveButton("清除", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    songCache.clear();
+                    Toast.makeText(MainActivity.this, "网络缓存已清除", Toast.LENGTH_SHORT).show();
+                }
+            });
+            builder.setNegativeButton("取消", null);
+        } else {
+            builder.setPositiveButton("确定", null);
+        }
         builder.show();
     }
 
@@ -603,6 +633,19 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== Navidrome 音乐 ====================
 
+    /** 格式化缓存时间为相对时间描述 */
+    private String formatCacheTime(long timestamp) {
+        if (timestamp == 0) return "未知时间";
+        long diff = System.currentTimeMillis() - timestamp;
+        long minutes = diff / (60 * 1000);
+        if (minutes < 1) return "刚刚";
+        if (minutes < 60) return minutes + "分钟前";
+        long hours = minutes / 60;
+        if (hours < 24) return hours + "小时前";
+        long days = hours / 24;
+        return days + "天前";
+    }
+
     private void loadNavidromeMusic() {
         final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
         if (api == null) {
@@ -610,12 +653,34 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        tvEmpty.setText("正在从 Navidrome 加载...");
-        tvEmpty.setVisibility(View.VISIBLE);
+        // 1. 先尝试加载缓存(秒开,无网络等待)
+        final List<MusicBean> cached = songCache.load();
+        final boolean hasCache = cached != null && !cached.isEmpty();
+
+        if (hasCache) {
+            // 立即显示缓存数据,不阻塞UI
+            musicList.clear();
+            musicList.addAll(cached);
+            adapter.setData(musicList);
+            updateCount();
+            tvEmpty.setVisibility(View.GONE);
+            if (service != null && !musicList.isEmpty()) {
+                service.setPlayList(musicList, 0);
+            }
+            // 提示用户正在使用缓存
+            String timeStr = formatCacheTime(songCache.getCachedAt());
+            Toast.makeText(this, "已加载缓存(" + cached.size() + "首," + timeStr + ")\n正在从服务器更新...",
+                    Toast.LENGTH_LONG).show();
+        } else {
+            // 无缓存,显示加载中
+            tvEmpty.setText("正在从 Navidrome 加载...");
+            tvEmpty.setVisibility(View.VISIBLE);
+        }
 
         // 禁用来源按钮防止重复点击
         btnSource.setEnabled(false);
 
+        // 2. 后台从服务器加载最新数据
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -627,25 +692,33 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void run() {
                         btnSource.setEnabled(true);
-                        musicList.clear();
-                        if (firstPage != null) {
+
+                        if (firstPage != null && !firstPage.isEmpty()) {
+                            // 服务器有数据,替换为最新
+                            musicList.clear();
                             musicList.addAll(firstPage);
-                        }
-                        adapter.setData(musicList);
-                        updateCount();
-                        if (musicList.isEmpty()) {
+                            adapter.setData(musicList);
+                            updateCount();
+                            tvEmpty.setVisibility(View.GONE);
+                            if (service != null) {
+                                service.setPlayList(musicList, 0);
+                            }
+
+                            // 如果第一页已满50,后台继续加载剩余
+                            if (totalCount >= 50) {
+                                loadRemainingNavidromeSongs(api, 50);
+                            } else {
+                                // 没有更多了,保存完整缓存
+                                songCache.save(musicList);
+                            }
+                        } else if (!hasCache) {
+                            // 服务器无数据且无缓存
                             tvEmpty.setVisibility(View.VISIBLE);
                             tvEmpty.setText("Navidrome 上未找到音乐");
                         } else {
-                            tvEmpty.setVisibility(View.GONE);
-                        }
-                        if (service != null && !musicList.isEmpty()) {
-                            service.setPlayList(musicList, 0);
-                        }
-
-                        // 如果第一页已满50,后台继续加载剩余
-                        if (totalCount >= 50) {
-                            loadRemainingNavidromeSongs(api, 50);
+                            // 服务器连接失败但有缓存,继续使用缓存
+                            Toast.makeText(MainActivity.this,
+                                    "服务器连接失败,使用缓存数据", Toast.LENGTH_SHORT).show();
                         }
                     }
                 });
@@ -688,6 +761,13 @@ public class MainActivity extends AppCompatActivity {
                         break;
                     }
                 }
+                // 所有页面加载完成,在UI线程保存完整缓存(避免并发修改)
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        songCache.save(musicList);
+                    }
+                });
             }
         }).start();
     }
