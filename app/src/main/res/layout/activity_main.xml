@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主界面:横屏,左侧列表 + 右侧歌词,顶部功能栏,底部控制栏,适配 1024x600 车机 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_main">
+
+    <!-- 顶部标题栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="@dimen/title_bar_padding"
+        android:background="@color/bg_title_bar">
+
+        <ImageView
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_music_note"
+            android:contentDescription="@string/app_name" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:layout_marginLeft="12dp"
+            android:text="@string/app_name"
+            android:textColor="@color/text_title"
+            android:textSize="@dimen/title_text_size"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/sub_text_size" />
+
+        <!-- 功能按钮 -->
+        <Button
+            android:id="@+id/btn_folder"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginLeft="12dp"
+            android:minWidth="72dp"
+            android:text="文件夹"
+            android:textSize="@dimen/sub_text_size" />
+
+        <Button
+            android:id="@+id/btn_equalizer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
+            android:minWidth="72dp"
+            android:text="均衡器"
+            android:textSize="@dimen/sub_text_size" />
+    </LinearLayout>
+
+    <!-- 中部:左侧歌曲列表 + 右侧歌词 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <!-- 左侧歌曲列表 -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="3">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scrollbars="vertical"
+                android:overScrollMode="ifContentScrolls" />
+
+            <TextView
+                android:id="@+id/tv_empty"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- 右侧歌词区 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="2"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:background="@color/bg_title_bar">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="歌词"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginBottom="8dp" />
+
+            <com.captiva.musicplayer.LrcView
+                android:id="@+id/lrc_view"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 底部播放控制栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/control_bar_padding"
+        android:background="@drawable/bg_control_bar">
+
+        <!-- 进度条 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tv_current_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/time_text_size" />
+
+            <SeekBar
+                android:id="@+id/sb_progress"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginLeft="12dp"
+                android:layout_marginRight="12dp"
+                android:maxHeight="4dp"
+                android:progressTint="@color/accent"
+                android:thumbTint="@color/accent" />
+
+            <TextView
+                android:id="@+id/tv_total_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/time_text_size" />
+        </LinearLayout>
+
+        <!-- 控制按钮区 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp">
+
+            <!-- 左侧当前歌曲信息 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_now_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:text="未在播放"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/now_title_text_size"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tv_now_artist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/sub_text_size" />
+            </LinearLayout>
+
+            <!-- 右侧按钮组 -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <Button
+                    android:id="@+id/btn_mode"
+                    android:layout_width="@dimen/btn_size"
+                    android:layout_height="@dimen/btn_size"
+                    android:background="@drawable/bg_btn"
+                    android:text="顺序"
+                    android:textColor="@color/btn_text"
+                    android:textSize="16sp" />
+
+                <Button
+                    android:id="@+id/btn_prev"
+                    android:layout_width="@dimen/btn_size"
+                    android:layout_height="@dimen/btn_size"
+                    android:layout_marginLeft="12dp"
+                    android:background="@drawable/bg_btn"
+                    android:text="上一首"
+                    android:textColor="@color/btn_text"
+                    android:textSize="@dimen/btn_text_size" />
+
+                <Button
+                    android:id="@+id/btn_play"
+                    android:layout_width="@dimen/btn_size_play"
+                    android:layout_height="@dimen/btn_size_play"
+                    android:layout_marginLeft="16dp"
+                    android:layout_marginRight="16dp"
+                    android:background="@drawable/bg_btn_play"
+                    android:text="播放"
+                    android:textColor="@color/btn_play_text"
+                    android:textSize="@dimen/btn_play_text_size"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btn_next"
+                    android:layout_width="@dimen/btn_size"
+                    android:layout_height="@dimen/btn_size"
+                    android:background="@drawable/bg_btn"
+                    android:text="下一首"
+                    android:textColor="@color/btn_text"
+                    android:textSize="@dimen/btn_text_size" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>
