@@ -23,6 +23,8 @@
 
 用 Android Studio 打开本目录,同步后即可编译运行。确保已安装 Android SDK Platform 30。
 
+GitHub Actions 已配置自动构建,每次 push 后会自动生成 Debug APK。
+
 ## 说明
 
 ExoPlayer/Media3 最低需 API 16,无法用于安卓 4.0,故采用系统原生 MediaPlayer。
