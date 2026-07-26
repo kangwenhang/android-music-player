@@ -50,10 +50,19 @@ jobs:
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           TAG="v$(date +'%Y%m%d-%H%M%S')"
 
-          # 动态生成更新内容:取最近 20 条 commit 的信息
-          CHANGELOG=$(git log --pretty=format:"- %s" -20 | grep -v "^- Merge" || true)
+          # 获取上一个 Release 的 tag
+          PREV_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+
+          # 只显示自上次 Release 以来的新 commit
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" | grep -v "^- Merge" || true)
+          else
+            # 没有上一个 Release,只取最近 5 条
+            CHANGELOG=$(git log --pretty=format:"- %s" -5 | grep -v "^- Merge" || true)
+          fi
+
           if [ -z "$CHANGELOG" ]; then
-            CHANGELOG="- 手动触发构建版本"
+            CHANGELOG="- 无代码变更(重新构建)"
           fi
 
           # 获取构建时间
@@ -66,7 +75,7 @@ jobs:
           - 版本标签: ${TAG}
           - 构建类型: Debug
 
-          ## 更新内容
+          ## 本次更新
           ${CHANGELOG}
 
           ## 安装说明
