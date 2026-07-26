@@ -1,8 +1,7 @@
 name: Build and Release Android APK
 
 on:
-  push:
-    branches: [ main, master ]
+  # 仅手动触发,不再每次 push 自动构建
   workflow_dispatch:
 
 jobs:
@@ -50,14 +49,11 @@ jobs:
           TAG="v$(date +'%Y%m%d-%H%M%S')"
           gh release create "$TAG" "$APK_PATH" \
             --title "科帕奇音乐播放器 $TAG" \
-            --notes "自动构建版本
+            --notes "手动触发构建版本
 
           更新内容:
-          - 增加歌曲封面显示(本地嵌入式 + Navidrome)
-          - 放大歌词显示界面和文字
-          - 增加本地音乐搜索功能
-          - 播放按钮颜色:播放蓝色/暂停红色
-          - 增加按键震动反馈
-          - 对接 Navidrome 服务器(Subsonic API)
-          - 支持网络音乐流式播放" \
+          - 歌词叠加在封面上(封面作为底色背景)
+          - 移除振动反馈,改用水波纹点击反馈
+          - 搜索改为按钮触发(默认隐藏,点击展开)
+          - 内置简易输入法(适配车机输入法问题)" \
             --prerelease
