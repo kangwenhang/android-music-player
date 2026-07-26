@@ -10,7 +10,7 @@
     <dimen name="time_text_size">14sp</dimen>
 
     <!-- 当前播放 -->
-    <dimen name="now_title_text_size">18sp</dimen>
+    <dimen name="now_title_text_size">16sp</dimen>
 
     <!-- 列表(紧凑,增加可见行数) -->
     <dimen name="list_item_padding">8dp</dimen>

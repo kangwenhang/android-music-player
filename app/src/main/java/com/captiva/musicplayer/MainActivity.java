@@ -350,9 +350,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 */
     private void showSettingsMenu() {
-        String[] items = {"均衡器", "服务器设置"};
+        String[] items = {"均衡器", "服务器设置", "时长过滤设置"};
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("设置");
         builder.setItems(items, new DialogInterface.OnClickListener() {
@@ -365,9 +365,45 @@ public class MainActivity extends AppCompatActivity {
                     // 服务器设置
                     needReloadNavidrome = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
+                } else if (which == 2) {
+                    // 时长过滤设置
+                    showDurationFilterDialog();
                 }
             }
         });
+        builder.show();
+    }
+
+    /** 时长过滤设置对话框 */
+    private void showDurationFilterDialog() {
+        final int currentMin = navidromeConfig.getMinDuration();
+        final String[] options = {"不过滤(显示全部)", "10秒", "30秒(推荐)", "60秒", "120秒"};
+        final int[] values = {0, 10, 30, 60, 120};
+        int checkedItem = 2; // 默认30秒
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == currentMin) {
+                checkedItem = i;
+                break;
+            }
+        }
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("最小时长过滤");
+        builder.setSingleChoiceItems(options, checkedItem, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                int newMin = values[which];
+                navidromeConfig.setMinDuration(newMin);
+                dialog.dismiss();
+                Toast.makeText(MainActivity.this,
+                        "已设置最小时长: " + (newMin == 0 ? "不过滤" : newMin + "秒"),
+                        Toast.LENGTH_SHORT).show();
+                // 重新加载本地音乐
+                if (sourceMode == SourceMode.LOCAL) {
+                    loadLocalMusic();
+                }
+            }
+        });
+        builder.setNegativeButton("取消", null);
         builder.show();
     }
 
@@ -517,22 +553,9 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 获取大量歌曲(最多1000首),覆盖服务器全量曲库
-                List<MusicBean> list = api.getRandomSongs(1000);
-                if (list == null || list.isEmpty()) {
-                    // 回退:获取最新专辑列表,再获取第一个专辑的歌曲
-                    List<AlbumBean> albums = api.getAlbumList("newest", 20);
-                    if (albums != null && !albums.isEmpty()) {
-                        list = new ArrayList<>();
-                        for (AlbumBean album : albums) {
-                            List<MusicBean> songs = api.getAlbum(album.getId());
-                            if (songs != null && !songs.isEmpty()) {
-                                list.addAll(songs);
-                                if (list.size() >= 100) break;
-                            }
-                        }
-                    }
-                }
+                // 获取全部歌曲:先按字母排序分页获取,确保覆盖全部曲库
+                List<MusicBean> list = api.getAllSongs();
+
                 final List<MusicBean> result = list != null ? list : new ArrayList<MusicBean>();
                 runOnUiThread(new Runnable() {
                     @Override
@@ -593,7 +616,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final List<MusicBean> result = api.search(query, 1000);
+                final List<MusicBean> result = api.search(query, 5000);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -703,7 +726,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 从其他页面返回时重新隐藏系统 UI
         hideSystemUI();
-        // 从设置页面返回时,如果配置有更新则重新加载 Navidrome
+        // 从设置页面返回时,如果配置有更新则重新加载
         if (needReloadNavidrome) {
             needReloadNavidrome = false;
             NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
@@ -713,6 +736,10 @@ public class MainActivity extends AppCompatActivity {
             }
             if (api != null && sourceMode == SourceMode.NAVIDROME) {
                 loadNavidromeMusic();
+            }
+            // 无论什么模式,重新加载本地(可能改了时长过滤)
+            if (sourceMode == SourceMode.LOCAL) {
+                loadLocalMusic();
             }
         }
 

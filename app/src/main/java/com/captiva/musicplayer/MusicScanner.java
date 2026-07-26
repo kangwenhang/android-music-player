@@ -18,12 +18,18 @@ public class MusicScanner {
 
     /**
      * 扫描外部存储中的所有音乐
+     * @param context 上下文(用于读取时长过滤配置)
      */
     public static List<MusicBean> scan(Context context) {
         List<MusicBean> list = new ArrayList<>();
         if (context == null) {
             return list;
         }
+
+        // 从配置中读取最小时长过滤(秒),转毫秒
+        NavidromeConfig config = new NavidromeConfig(context);
+        int minDurationSec = config.getMinDuration();
+        long minDurationMs = minDurationSec * 1000L;
 
         ContentResolver resolver = context.getContentResolver();
         Uri uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
@@ -38,9 +44,9 @@ public class MusicScanner {
                 MediaStore.Audio.Media.DATA
         };
 
-        // 仅查询音乐,且时长超过30秒(过滤铃声、提示音等短音频)
+        // 仅查询音乐,按时长过滤(配置中可自定义)
         String selection = MediaStore.Audio.Media.IS_MUSIC + " = 1"
-                + " AND " + MediaStore.Audio.Media.DURATION + " > 30000";
+                + " AND " + MediaStore.Audio.Media.DURATION + " > " + minDurationMs;
         String sortOrder = MediaStore.Audio.Media.TITLE + " ASC";
 
         Cursor cursor = null;

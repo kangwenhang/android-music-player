@@ -295,6 +295,53 @@ public class NavidromeApi {
     }
 
     /**
+     * 获取全部歌曲(分页获取,无数量限制)
+     * 使用 search3 接口以空查询匹配全部,分页拉取直到没有更多
+     * @return 全部歌曲列表
+     */
+    public List<MusicBean> getAllSongs() {
+        List<MusicBean> all = new ArrayList<>();
+        try {
+            // 使用 search3 分页获取:每页500首
+            int pageSize = 500;
+            int offset = 0;
+            while (true) {
+                String params = "query="
+                        + "&songCount=" + pageSize
+                        + "&songOffset=" + offset
+                        + "&albumCount=0"
+                        + "&artistCount=0";
+                String json = httpGet(apiUrl("search3", params));
+                JSONObject root = new JSONObject(json);
+                JSONObject resp = root.optJSONObject("subsonic-response");
+                if (resp != null && "ok".equals(resp.optString("status"))) {
+                    JSONObject result = resp.optJSONObject("searchResult3");
+                    if (result != null) {
+                        JSONArray songs = result.optJSONArray("song");
+                        if (songs == null || songs.length() == 0) {
+                            break; // 没有更多了
+                        }
+                        List<MusicBean> page = parseSongs(songs);
+                        all.addAll(page);
+                        if (page.size() < pageSize) {
+                            break; // 最后一页
+                        }
+                        offset += pageSize;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            Log.d(TAG, "getAllSongs: 共获取 " + all.size() + " 首");
+        } catch (Exception e) {
+            Log.e(TAG, "getAllSongs failed", e);
+        }
+        return all;
+    }
+
+    /**
      * getLyricsBySongId:获取歌曲歌词(结构化,支持同步)
      * Subsonic API 1.16.1+
      * @param songId 歌曲 ID

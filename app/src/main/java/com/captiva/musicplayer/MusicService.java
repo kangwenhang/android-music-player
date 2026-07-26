@@ -73,6 +73,11 @@ public class MusicService extends Service {
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
 
+    /** 防止快速切歌导致卡死:记录当前播放请求的唯一标识 */
+    private volatile int playToken = 0;
+    /** 切歌防抖:最小间隔(ms),避免连续快速切歌 */
+    private static final long SWITCH_DEBOUNCE_MS = 300;
+
     private final IBinder binder = new MusicBinder();
 
     /** 供 Activity 绑定调用 */
@@ -468,13 +473,18 @@ public class MusicService extends Service {
         }).start();
     }
 
-    /** 准备并播放当前曲目 */
+    /** 准备并播放当前曲目(增加防抖,避免快速切歌卡死) */
     private void prepareAndPlay() {
         MusicBean bean = getCurrentMusic();
         if (bean == null) {
             return;
         }
+        // 增加 token:每次切歌都递增,旧请求自动作废
+        final int token = ++playToken;
+        
+        // 先重置 MediaPlayer,取消之前的异步准备
         resetPlayer();
+        
         try {
             // 网络歌曲:用 Navidrome stream URL
             // 本地歌曲:优先用 content uri,失败回退文件路径
@@ -493,6 +503,10 @@ public class MusicService extends Service {
             player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
+                    // 检查 token:如果已切到下一首,放弃这次准备
+                    if (token != playToken) {
+                        return;
+                    }
                     isPrepared = true;
                     mp.start();
                     // 初始化均衡器(绑定当前 audioSession)
@@ -522,6 +536,17 @@ public class MusicService extends Service {
                 public boolean onError(MediaPlayer mp, int what, int extra) {
                     Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
                     isPrepared = false;
+                    // 出错时自动跳下一首(避免卡住)
+                    if (token == playToken) {
+                        mainHandler.postDelayed(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (token == playToken) {
+                                    next();
+                                }
+                            }
+                        }, 1000);
+                    }
                     return true;
                 }
             });
@@ -529,6 +554,15 @@ public class MusicService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "prepareAndPlay failed", e);
             isPrepared = false;
+            // 异常时也尝试跳下一首
+            mainHandler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (token == playToken) {
+                        next();
+                    }
+                }
+            }, 1000);
         }
     }
 

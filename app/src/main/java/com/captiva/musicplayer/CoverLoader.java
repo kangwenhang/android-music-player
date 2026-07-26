@@ -10,28 +10,40 @@ import android.util.Log;
 import android.util.LruCache;
 import android.widget.ImageView;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 封面图异步加载器
+ * 封面图异步加载器(优化版)
+ * - 三级缓存:内存LruCache → 磁盘缓存 → 网络/文件加载
  * - 本地歌曲:从嵌入式专辑封面提取(MediaMetadataRetriever)
  * - Navidrome 歌曲:从 getCoverArt URL 下载
- * - 使用 LruCache 缓存已加载的封面,避免重复加载
+ * - 磁盘缓存避免重复网络请求,大幅提升二次加载速度
  */
 public class CoverLoader {
 
     private static final String TAG = "CoverLoader";
-    private static final int CACHE_SIZE = 4 * 1024 * 1024; // 4MB
+    private static final int CACHE_SIZE = 8 * 1024 * 1024; // 8MB内存缓存
+    private static final String DISK_CACHE_DIR = "cover_cache";
+    private static final long DISK_CACHE_MAX_SIZE = 50 * 1024 * 1024; // 50MB磁盘缓存
 
     private static CoverLoader instance;
 
     private final LruCache<String, Bitmap> cache;
+    /** 正在加载中的回调集合,防止重复请求 */
+    private final Map<String, BitmapCallback> pendingCallbacks = new HashMap<>();
     private final ExecutorService executor;
     private final Handler mainHandler;
+    private File diskCacheDir;
 
     private CoverLoader() {
         cache = new LruCache<String, Bitmap>(CACHE_SIZE) {
@@ -40,6 +52,7 @@ public class CoverLoader {
                 return value.getRowBytes() * value.getHeight();
             }
         };
+        // 用优先级较高的线程(3个线程并行加载)
         executor = Executors.newFixedThreadPool(3);
         mainHandler = new Handler(Looper.getMainLooper());
     }
@@ -49,6 +62,20 @@ public class CoverLoader {
             instance = new CoverLoader();
         }
         return instance;
+    }
+
+    /** 初始化磁盘缓存目录(需在 Application 或 Activity 中调用) */
+    public void initDiskCache(Context context) {
+        if (context == null) return;
+        try {
+            File cacheDir = context.getCacheDir();
+            diskCacheDir = new File(cacheDir, DISK_CACHE_DIR);
+            if (!diskCacheDir.exists()) {
+                diskCacheDir.mkdirs();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "initDiskCache failed", e);
+        }
     }
 
     /**
@@ -67,7 +94,7 @@ public class CoverLoader {
             return;
         }
 
-        // 先查缓存
+        // 1. 先查内存缓存
         Bitmap cached = cache.get(key);
         if (cached != null) {
             iv.setImageBitmap(cached);
@@ -87,7 +114,6 @@ public class CoverLoader {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            // 检查 ImageView 是否仍对应同一首歌
                             Object tag = iv.getTag();
                             if (tag != null && tag.equals(key)) {
                                 iv.setBackgroundResource(0);
@@ -99,7 +125,6 @@ public class CoverLoader {
             }
         });
 
-        // 标记当前 ImageView 对应的 key,防止列表复用时错位
         iv.setTag(key);
     }
 
@@ -118,18 +143,30 @@ public class CoverLoader {
             callback.onBitmapLoaded(null);
             return;
         }
-        // 先查缓存
+        // 1. 先查内存缓存
         Bitmap cached = cache.get(key);
         if (cached != null) {
             callback.onBitmapLoaded(cached);
             return;
         }
+
+        // 2. 查磁盘缓存(快速,不阻塞)
+        final Bitmap diskCached = loadFromDiskCache(key);
+        if (diskCached != null) {
+            cache.put(key, diskCached);
+            callback.onBitmapLoaded(diskCached);
+            return;
+        }
+
+        // 3. 异步加载(网络/文件)
         executor.execute(new Runnable() {
             @Override
             public void run() {
                 final Bitmap bmp = loadBitmap(bean, key, size);
                 if (bmp != null) {
                     cache.put(key, bmp);
+                    // 写入磁盘缓存
+                    saveToDiskCache(key, bmp);
                 }
                 mainHandler.post(new Runnable() {
                     @Override
@@ -163,10 +200,98 @@ public class CoverLoader {
 
     /** 实际加载 Bitmap */
     private Bitmap loadBitmap(MusicBean bean, String key, int size) {
+        // 先查磁盘缓存
+        Bitmap diskCached = loadFromDiskCache(key);
+        if (diskCached != null) {
+            return diskCached;
+        }
         if (bean.isNetwork()) {
             return loadNetworkCover(bean, size);
         } else {
             return loadLocalCover(bean, size);
+        }
+    }
+
+    /** 从磁盘缓存加载 */
+    private Bitmap loadFromDiskCache(String key) {
+        if (diskCacheDir == null) return null;
+        try {
+            String fileName = md5(key) + ".cover";
+            File file = new File(diskCacheDir, fileName);
+            if (!file.exists()) return null;
+            FileInputStream fis = null;
+            try {
+                fis = new FileInputStream(file);
+                return BitmapFactory.decodeStream(fis);
+            } finally {
+                if (fis != null) fis.close();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 保存到磁盘缓存 */
+    private void saveToDiskCache(String key, Bitmap bmp) {
+        if (diskCacheDir == null || bmp == null) return;
+        try {
+            String fileName = md5(key) + ".cover";
+            File file = new File(diskCacheDir, fileName);
+            FileOutputStream fos = null;
+            try {
+                fos = new FileOutputStream(file);
+                bmp.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+                fos.flush();
+            } finally {
+                if (fos != null) fos.close();
+            }
+            // 清理过期缓存
+            cleanDiskCacheIfNeeded();
+        } catch (Exception e) {
+            Log.w(TAG, "saveToDiskCache failed", e);
+        }
+    }
+
+    /** 清理磁盘缓存(超过大小限制时删除最旧文件) */
+    private void cleanDiskCacheIfNeeded() {
+        try {
+            if (diskCacheDir == null) return;
+            File[] files = diskCacheDir.listFiles();
+            if (files == null) return;
+            long totalSize = 0;
+            for (File f : files) {
+                totalSize += f.length();
+            }
+            if (totalSize > DISK_CACHE_MAX_SIZE) {
+                // 按最后修改时间排序,删除最旧的
+                java.util.Arrays.sort(files, new java.util.Comparator<File>() {
+                    @Override
+                    public int compare(File a, File b) {
+                        return Long.compare(a.lastModified(), b.lastModified());
+                    }
+                });
+                for (File f : files) {
+                    if (totalSize <= DISK_CACHE_MAX_SIZE) break;
+                    totalSize -= f.length();
+                    f.delete();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** MD5 哈希(用于磁盘缓存文件名) */
+    private String md5(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b & 0xFF));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return String.valueOf(input.hashCode());
         }
     }
 
@@ -189,6 +314,7 @@ public class CoverLoader {
             BitmapFactory.decodeByteArray(art, 0, art.length, opts);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, size);
             opts.inJustDecodeBounds = false;
+            opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
             return BitmapFactory.decodeByteArray(art, 0, art.length, opts);
         } catch (Exception e) {
             Log.w(TAG, "loadLocalCover failed: " + bean.getData(), e);
@@ -209,7 +335,6 @@ public class CoverLoader {
         if (coverArtId == null || coverArtId.isEmpty()) {
             return null;
         }
-        // 使用 MusicDataHolder 中保存的 NavidromeApi 构建 URL
         NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
         if (api == null) {
             return null;
@@ -223,24 +348,24 @@ public class CoverLoader {
         try {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(8000);
             conn.setDoInput(true);
             int code = conn.getResponseCode();
             if (code != 200) {
                 return null;
             }
             is = conn.getInputStream();
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inJustDecodeBounds = true;
-            // 先读入字节数组再解码(需要两次读)
             byte[] data = readAll(is);
             if (data == null || data.length == 0) {
                 return null;
             }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, size);
             opts.inJustDecodeBounds = false;
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
             return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
         } catch (Exception e) {
             Log.w(TAG, "loadNetworkCover failed: " + coverArtId, e);
@@ -255,7 +380,7 @@ public class CoverLoader {
     private byte[] readAll(InputStream is) {
         try {
             java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
+            byte[] buf = new byte[8192];
             int n;
             while ((n = is.read(buf)) != -1) {
                 bos.write(buf, 0, n);

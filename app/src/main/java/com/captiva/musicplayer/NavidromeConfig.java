@@ -4,8 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * Navidrome 服务器配置管理
- * 使用 SharedPreferences 存储服务器地址、用户名、密码
+ * 应用配置管理
+ * 使用 SharedPreferences 存储服务器地址、用户名、密码、时长过滤等设置
  */
 public class NavidromeConfig {
 
@@ -14,6 +14,8 @@ public class NavidromeConfig {
     private static final String KEY_USERNAME = "username";
     private static final String KEY_PASSWORD = "password";
     private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
+    private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
 
@@ -57,6 +59,16 @@ public class NavidromeConfig {
 
     public void setEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    /** 获取最小时长过滤(秒),低于此时长的音频不显示 */
+    public int getMinDuration() {
+        return prefs.getInt(KEY_MIN_DURATION, DEFAULT_MIN_DURATION);
+    }
+
+    /** 设置最小时长过滤(秒) */
+    public void setMinDuration(int seconds) {
+        prefs.edit().putInt(KEY_MIN_DURATION, seconds).apply();
     }
 
     /** 判断是否已配置完整的服务器信息 */

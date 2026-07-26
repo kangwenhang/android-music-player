@@ -35,9 +35,11 @@ public class LrcView extends View {
     private final Paint coverPaint = new Paint();
     private final Paint scrimPaint = new Paint();
 
-    private float lineHeight = 80f;
-    private float currentTextSize = 38f;
-    private float normalTextSize = 28f;
+    private float lineHeight = 100f;
+    private float currentTextSize = 52f;
+    private float normalTextSize = 40f;
+    /** 最多显示行数(含当前行,上下各2行) */
+    private static final int MAX_VISIBLE_LINES = 5;
 
     public LrcView(Context context) {
         super(context);
@@ -208,22 +210,26 @@ public class LrcView extends View {
             currentIndex = 0;
         }
 
-        // 绘制上方行(从当前行往上)
-        for (int i = currentIndex; i >= 0; i--) {
+        // 绘制上方行(最多显示2行)
+        int upLimit = MAX_VISIBLE_LINES / 2;
+        for (int i = currentIndex; i >= 0 && upLimit >= 0; i--) {
             float y = cy - (currentIndex - i) * lineHeight;
             if (y < -lineHeight) break;
             if (i == currentIndex) {
                 canvas.drawText(lrcList.get(i).getText(), cx, y, currentPaint);
             } else {
                 canvas.drawText(lrcList.get(i).getText(), cx, y, normalPaint);
+                upLimit--;
             }
         }
 
-        // 绘制下方行
-        for (int i = currentIndex + 1; i < lrcList.size(); i++) {
+        // 绘制下方行(最多显示2行)
+        int downLimit = MAX_VISIBLE_LINES / 2;
+        for (int i = currentIndex + 1; i < lrcList.size() && downLimit > 0; i++) {
             float y = cy + (i - currentIndex) * lineHeight;
             if (y > vh + lineHeight) break;
             canvas.drawText(lrcList.get(i).getText(), cx, y, normalPaint);
+            downLimit--;
         }
     }
 }
