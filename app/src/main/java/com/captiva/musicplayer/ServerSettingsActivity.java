@@ -1,10 +1,11 @@
 package com.captiva.musicplayer;
 
+import android.app.Dialog;
 import android.os.Bundle;
-import android.os.Vibrator;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -13,6 +14,7 @@ import androidx.appcompat.app.AppCompatActivity;
 /**
  * Navidrome 服务器设置界面
  * 输入服务器地址、用户名、密码,支持测试连接
+ * 使用内置键盘(适配车机输入法问题)
  */
 public class ServerSettingsActivity extends AppCompatActivity {
 
@@ -41,20 +43,108 @@ public class ServerSettingsActivity extends AppCompatActivity {
         etUser.setText(config.getUsername());
         etPass.setText(config.getPassword());
 
+        // 点击输入框时弹出内置键盘(禁用系统输入法)
+        setupEditTextWithKeyboard(etUrl, "http://192.168.1.100:4533");
+        setupEditTextWithKeyboard(etUser, "admin");
+        setupEditTextWithKeyboard(etPass, "password");
+
         btnBack.setOnClickListener(v -> {
-            vibrate(v);
             finish();
         });
 
         btnTest.setOnClickListener(v -> {
-            vibrate(v);
             testConnection();
         });
 
         btnSave.setOnClickListener(v -> {
-            vibrate(v);
             saveConfig();
         });
+    }
+
+    /** 为 EditText 设置内置键盘(禁用系统输入法) */
+    private void setupEditTextWithKeyboard(final EditText et, final String hint) {
+        et.setHint(hint);
+        et.setFocusable(false);
+        et.setFocusableInTouchMode(false);
+        et.setOnClickListener(v -> {
+            showKeyboardDialog(et);
+        });
+    }
+
+    /** 弹出内置键盘对话框 */
+    private void showKeyboardDialog(final EditText targetEt) {
+        final Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(getResources().getColor(R.color.bg_main));
+        root.setPadding(16, 16, 16, 16);
+
+        // 输入显示框
+        final EditText tvInput = new EditText(this);
+        tvInput.setTextSize(18);
+        tvInput.setTextColor(getResources().getColor(R.color.text_primary));
+        tvInput.setBackgroundColor(getResources().getColor(R.color.search_bg));
+        tvInput.setText(targetEt.getText().toString());
+        tvInput.setSingleLine(true);
+        tvInput.setPadding(24, 16, 24, 16);
+        LinearLayout.LayoutParams inputLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        inputLp.bottomMargin = 8;
+        root.addView(tvInput, inputLp);
+
+        // 内置键盘
+        SimpleKeyboardView keyboard = new SimpleKeyboardView(this);
+        LinearLayout.LayoutParams kbLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        root.addView(keyboard, kbLp);
+
+        keyboard.bindInputTextView(tvInput);
+        keyboard.setText(targetEt.getText().toString());
+        keyboard.setOnTextChangedListener(new SimpleKeyboardView.OnTextChangedListener() {
+            @Override
+            public void onTextChanged(String text) {
+                tvInput.setText(text);
+            }
+        });
+
+        // 按钮栏
+        LinearLayout btnRow = new LinearLayout(this);
+        btnRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnRow.setPadding(8, 8, 8, 8);
+
+        Button btnCancel = new Button(this);
+        btnCancel.setText("取消");
+        btnCancel.setBackgroundResource(R.drawable.bg_btn);
+        btnCancel.setTextColor(getResources().getColor(R.color.btn_text));
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        cancelLp.setMargins(0, 0, 8, 0);
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
+        btnRow.addView(btnCancel, cancelLp);
+
+        Button btnConfirm = new Button(this);
+        btnConfirm.setText("确定");
+        btnConfirm.setBackgroundResource(R.drawable.bg_btn_play);
+        btnConfirm.setTextColor(getResources().getColor(R.color.btn_play_text));
+        LinearLayout.LayoutParams confirmLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        btnConfirm.setOnClickListener(v -> {
+            targetEt.setText(tvInput.getText().toString());
+            dialog.dismiss();
+        });
+        btnRow.addView(btnConfirm, confirmLp);
+
+        root.addView(btnRow);
+
+        dialog.setContentView(root);
+        dialog.getWindow().setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        dialog.show();
     }
 
     /** 测试连接(异步) */
@@ -123,16 +213,5 @@ public class ServerSettingsActivity extends AppCompatActivity {
         tvResult.setTextColor(success
                 ? getResources().getColor(R.color.source_network)
                 : getResources().getColor(R.color.btn_paused_bg));
-    }
-
-    private void vibrate(View v) {
-        try {
-            Vibrator vibrator = (Vibrator) v.getContext()
-                    .getSystemService(VIBRATOR_SERVICE);
-            if (vibrator != null && vibrator.hasVibrator()) {
-                vibrator.vibrate(20);
-            }
-        } catch (Exception ignored) {
-        }
     }
 }
