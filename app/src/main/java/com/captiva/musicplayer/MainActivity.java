@@ -9,13 +9,8 @@ import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.Vibrator;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.View;
 import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -32,10 +27,10 @@ import java.util.List;
 /**
  * 主界面
  * - 本地/Navidrome 双模式音乐播放
- * - 搜索(本地过滤 / Navidrome search3)
- * - 歌词显示、封面、播放模式、均衡器
+ * - 搜索(点击搜索按钮弹出内置键盘搜索对话框)
+ * - 歌词叠加在封面上(封面作为底色背景)
  * - 播放按钮颜色:播放蓝色 / 暂停红色
- * - 按键震动反馈
+ * - 水波纹/selector 点击反馈(无振动)
  */
 public class MainActivity extends AppCompatActivity {
 
@@ -44,17 +39,13 @@ public class MainActivity extends AppCompatActivity {
     // UI - 列表区
     private RecyclerView rvList;
     private TextView tvEmpty, tvCount;
-    // UI - 搜索
-    private EditText etSearch;
-    private Button btnSearch;
     // UI - 顶栏按钮
-    private Button btnSource, btnServer, btnEqualizer;
+    private Button btnSearch, btnSource, btnServer, btnEqualizer;
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
     private Button btnPrev, btnPlay, btnNext, btnMode;
-    private ImageView ivNowCover;
-    // UI - 歌词
+    // UI - 歌词区(封面做底色)
     private LrcView lrcView;
 
     private MusicAdapter adapter;
@@ -168,7 +159,6 @@ public class MainActivity extends AppCompatActivity {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
         tvCount = findViewById(R.id.tv_count);
-        etSearch = findViewById(R.id.et_search);
         btnSearch = findViewById(R.id.btn_search);
         btnSource = findViewById(R.id.btn_source);
         btnServer = findViewById(R.id.btn_server);
@@ -182,7 +172,6 @@ public class MainActivity extends AppCompatActivity {
         btnPlay = findViewById(R.id.btn_play);
         btnNext = findViewById(R.id.btn_next);
         btnMode = findViewById(R.id.btn_mode);
-        ivNowCover = findViewById(R.id.iv_now_cover);
         lrcView = findViewById(R.id.lrc_view);
 
         adapter = new MusicAdapter(this);
@@ -201,45 +190,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupListeners() {
-        // 搜索:实时过滤(本地) / 按钮触发(网络)
-        etSearch.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-            @Override
-            public void afterTextChanged(Editable s) {
-                if (sourceMode == SourceMode.LOCAL) {
-                    // 本地模式:实时过滤
-                    adapter.filter(s.toString());
-                    updateCount();
-                }
-            }
-        });
-
+        // 搜索:点击弹出搜索对话框(内置键盘)
         btnSearch.setOnClickListener(v -> {
-            vibrate(v);
-            doSearch();
+            showSearchDialog();
         });
 
         // 来源切换
         btnSource.setOnClickListener(v -> {
-            vibrate(v);
             toggleSource();
         });
 
         // Navidrome 设置
         btnServer.setOnClickListener(v -> {
-            vibrate(v);
             needReloadNavidrome = true;
             startActivity(new Intent(this, ServerSettingsActivity.class));
         });
 
         // 均衡器
         btnEqualizer.setOnClickListener(v -> {
-            vibrate(v);
             if (service != null && service.isPlaying()) {
                 startActivity(new Intent(this, EqualizerActivity.class));
             } else {
@@ -269,19 +237,34 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // 播放控制
-        btnPrev.setOnClickListener(v -> { vibrate(v); if (service != null) service.prev(); });
-        btnPlay.setOnClickListener(v -> { vibrate(v); if (service != null) service.toggle(); });
-        btnNext.setOnClickListener(v -> { vibrate(v); if (service != null) service.next(); });
+        btnPrev.setOnClickListener(v -> { if (service != null) service.prev(); });
+        btnPlay.setOnClickListener(v -> { if (service != null) service.toggle(); });
+        btnNext.setOnClickListener(v -> { if (service != null) service.next(); });
 
         // 播放模式
         btnMode.setOnClickListener(v -> {
-            vibrate(v);
             if (service != null) {
                 PlayMode mode = service.cyclePlayMode();
                 btnMode.setText(mode.getLabel());
                 Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    // ==================== 搜索对话框 ====================
+
+    private void showSearchDialog() {
+        String hint = sourceMode == SourceMode.LOCAL
+                ? "搜索歌曲、艺术家、专辑..."
+                : "搜索 Navidrome 音乐...";
+        SearchDialog dialog = new SearchDialog(this, hint, "");
+        dialog.setOnSearchListener(new SearchDialog.OnSearchListener() {
+            @Override
+            public void onSearch(String query) {
+                doSearch(query);
+            }
+        });
+        dialog.show();
     }
 
     // ==================== 来源切换 ====================
@@ -296,13 +279,11 @@ public class MainActivity extends AppCompatActivity {
             }
             sourceMode = SourceMode.NAVIDROME;
             btnSource.setText("网络");
-            etSearch.setHint("搜索 Navidrome 音乐...");
             loadNavidromeMusic();
         } else {
             // 切换到本地
             sourceMode = SourceMode.LOCAL;
             btnSource.setText("本地");
-            etSearch.setHint("搜索歌曲、艺术家、专辑...");
             loadLocalMusic();
         }
     }
@@ -416,9 +397,8 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 搜索 ====================
 
-    private void doSearch() {
-        String query = etSearch.getText().toString().trim();
-        if (query.isEmpty()) {
+    private void doSearch(String query) {
+        if (query == null || query.trim().isEmpty()) {
             if (sourceMode == SourceMode.LOCAL) {
                 adapter.filter("");
                 updateCount();
@@ -426,9 +406,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        query = query.trim();
+
         if (sourceMode == SourceMode.LOCAL) {
             adapter.filter(query);
             updateCount();
+            Toast.makeText(this, "搜索: " + query, Toast.LENGTH_SHORT).show();
         } else {
             searchNavidrome(query);
         }
@@ -489,8 +472,8 @@ public class MainActivity extends AppCompatActivity {
             sbProgress.setProgress(0);
             tvCurrentTime.setText("00:00");
             tvTotalTime.setText("00:00");
-            ivNowCover.setImageResource(android.R.color.transparent);
-            ivNowCover.setBackgroundResource(R.drawable.bg_cover_placeholder);
+            // 清除歌词区封面
+            lrcView.setCoverBitmap(null);
             return;
         }
         MusicBean bean = musicList.get(index);
@@ -499,9 +482,15 @@ public class MainActivity extends AppCompatActivity {
         sbProgress.setMax((int) bean.getDuration());
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
 
-        // 加载当前播放封面
-        int coverSize = (int) getResources().getDimension(R.dimen.cover_size_now);
-        CoverLoader.getInstance().load(bean, ivNowCover, coverSize);
+        // 加载封面到歌词区作为背景
+        int coverSize = 400; // 较大尺寸用于背景
+        CoverLoader.getInstance().loadBitmap(bean, coverSize,
+                new CoverLoader.BitmapCallback() {
+                    @Override
+                    public void onBitmapLoaded(android.graphics.Bitmap bitmap) {
+                        lrcView.setCoverBitmap(bitmap);
+                    }
+                });
     }
 
     /** 更新播放按钮:播放=蓝色,暂停=红色 */
@@ -543,18 +532,6 @@ public class MainActivity extends AppCompatActivity {
         int pos = service.getCurrentPosition();
         int idx = LrcParser.findLrcIndex(lrc, pos);
         lrcView.setCurrentIndex(idx);
-    }
-
-    /** 震动反馈 */
-    private void vibrate(View v) {
-        try {
-            Vibrator vibrator = (Vibrator) v.getContext()
-                    .getSystemService(Context.VIBRATOR_SERVICE);
-            if (vibrator != null && vibrator.hasVibrator()) {
-                vibrator.vibrate(20);
-            }
-        } catch (Exception ignored) {
-        }
     }
 
     // ==================== 生命周期 ====================
