@@ -67,6 +67,9 @@ public class MusicService extends Service {
     // 均衡器
     private EqualizerManager equalizerManager;
 
+    // 主线程 Handler(用于异步歌词加载后更新 UI)
+    private final android.os.Handler mainHandler = new android.os.Handler();
+
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
 
@@ -297,6 +300,82 @@ public class MusicService extends Service {
         return currentLrc;
     }
 
+    /**
+     * 加载歌词
+     * - 本地歌曲:从同名 .lrc 文件加载
+     * - 网络歌曲:异步从 Navidrome API 获取
+     */
+    private void loadLyrics(final MusicBean bean) {
+        // 先清空当前歌词
+        currentLrc = new ArrayList<>();
+
+        if (bean.isNetwork()) {
+            // 网络歌曲:异步从 Navidrome 获取歌词
+            loadNetworkLyrics(bean);
+        } else {
+            // 本地歌曲:从同名 .lrc 文件加载
+            currentLrc = LrcParser.loadLrc(bean.getData());
+        }
+    }
+
+    /** 异步加载网络歌曲歌词 */
+    private void loadNetworkLyrics(final MusicBean bean) {
+        final String songId = bean.getStreamId();
+        if (songId == null || songId.isEmpty()) {
+            return;
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<LrcEntry> lyrics = null;
+                NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+
+                if (api != null) {
+                    // 优先尝试 getLyricsBySongId(结构化同步歌词)
+                    try {
+                        lyrics = api.getLyricsBySongId(songId);
+                    } catch (Exception e) {
+                        Log.w(TAG, "getLyricsBySongId failed", e);
+                    }
+
+                    // 如果没有获取到,回退到 getLyrics(纯文本)
+                    if (lyrics == null || lyrics.isEmpty()) {
+                        try {
+                            String plainText = api.getLyrics(bean.getArtist(), bean.getTitle());
+                            if (plainText != null && !plainText.isEmpty()) {
+                                // 检查是否为 LRC 格式(含时间标签)
+                                if (plainText.contains("[") && plainText.contains(":") && plainText.contains("]")) {
+                                    lyrics = LrcParser.parseLrcText(plainText);
+                                } else {
+                                    // 纯文本歌词:按 5 秒间隔分配时间戳
+                                    lyrics = LrcParser.parsePlainTextLyrics(plainText, 5000);
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.w(TAG, "getLyrics fallback failed", e);
+                        }
+                    }
+                }
+
+                final List<LrcEntry> result = lyrics != null ? lyrics : new ArrayList<LrcEntry>();
+                // 在主线程更新歌词并通知 UI
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        // 确保仍然是当前歌曲(避免切歌后更新旧歌词)
+                        MusicBean current = getCurrentMusic();
+                        if (current != null && songId.equals(current.getStreamId())) {
+                            currentLrc = result;
+                            notifyState();
+                            Log.d(TAG, "网络歌词加载完成: " + result.size() + " 行");
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
     /** 准备并播放当前曲目 */
     private void prepareAndPlay() {
         MusicBean bean = getCurrentMusic();
@@ -332,7 +411,7 @@ public class MusicService extends Service {
                         Log.w(TAG, "equalizer init failed", e);
                     }
                     // 加载歌词
-                    currentLrc = LrcParser.loadLrc(bean.getData());
+                    loadLyrics(bean);
                     updateRemoteControlMetadata(bean);
                     updateRemoteControlPlayState(true);
                     notifyState();

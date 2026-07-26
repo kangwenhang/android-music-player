@@ -14,6 +14,7 @@ import java.net.URLEncoder;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -291,6 +292,104 @@ public class NavidromeApi {
             Log.e(TAG, "getStarred2 failed", e);
         }
         return list;
+    }
+
+    /**
+     * getLyricsBySongId:获取歌曲歌词(结构化,支持同步)
+     * Subsonic API 1.16.1+
+     * @param songId 歌曲 ID
+     * @return 歌词列表,可能为空
+     */
+    public List<LrcEntry> getLyricsBySongId(String songId) {
+        List<LrcEntry> list = new ArrayList<>();
+        try {
+            String params = "id=" + URLEncoder.encode(songId, "UTF-8");
+            String json = httpGet(apiUrl("getLyricsBySongId", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject lyricsList = resp.optJSONObject("lyricsList");
+                if (lyricsList != null) {
+                    // 优先取 structuredLyrics 中 synced=true 的
+                    JSONArray structured = lyricsList.optJSONArray("structuredLyrics");
+                    if (structured != null) {
+                        for (int i = 0; i < structured.length(); i++) {
+                            JSONObject sl = structured.optJSONObject(i);
+                            if (sl != null && sl.optBoolean("synced", false)) {
+                                JSONArray lines = sl.optJSONArray("line");
+                                if (lines != null) {
+                                    for (int j = 0; j < lines.length(); j++) {
+                                        JSONObject line = lines.optJSONObject(j);
+                                        if (line != null) {
+                                            String text = line.optString("value", "");
+                                            long start = line.optLong("start", -1);
+                                            if (start >= 0) {
+                                                list.add(new LrcEntry(start, text));
+                                            }
+                                        }
+                                    }
+                                    // 找到同步歌词就返回
+                                    if (!list.isEmpty()) {
+                                        Collections.sort(list);
+                                        return list;
+                                    }
+                                }
+                            }
+                        }
+                        // 没有同步歌词,尝试非同步歌词(无时间戳)
+                        for (int i = 0; i < structured.length(); i++) {
+                            JSONObject sl = structured.optJSONObject(i);
+                            if (sl != null) {
+                                JSONArray lines = sl.optJSONArray("line");
+                                if (lines != null && lines.length() > 0) {
+                                    // 非同步歌词:按固定间隔生成时间戳
+                                    long interval = 5000; // 每 5 秒一行
+                                    for (int j = 0; j < lines.length(); j++) {
+                                        JSONObject line = lines.optJSONObject(j);
+                                        if (line != null) {
+                                            String text = line.optString("value", "");
+                                            list.add(new LrcEntry(j * interval, text));
+                                        }
+                                    }
+                                    if (!list.isEmpty()) {
+                                        return list;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getLyricsBySongId failed", e);
+        }
+        return list;
+    }
+
+    /**
+     * getLyrics:获取歌曲歌词(纯文本,通过艺术家和标题)
+     * 作为 getLyricsBySongId 的回退方案
+     * @param artist 艺术家
+     * @param title 歌曲标题
+     * @return 歌词文本,可能为 null
+     */
+    public String getLyrics(String artist, String title) {
+        try {
+            String params = "artist=" + URLEncoder.encode(artist, "UTF-8")
+                    + "&title=" + URLEncoder.encode(title, "UTF-8");
+            String json = httpGet(apiUrl("getLyrics", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject lyrics = resp.optJSONObject("lyrics");
+                if (lyrics != null) {
+                    return lyrics.optString("value", null);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getLyrics failed", e);
+        }
+        return null;
     }
 
     // ==================== URL 构建 ====================

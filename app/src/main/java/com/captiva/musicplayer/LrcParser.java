@@ -121,6 +121,47 @@ public class LrcParser {
     }
 
     /**
+     * 从 LRC 格式文本解析歌词
+     * 用于网络歌词(从 Navidrome API 获取的纯文本 LRC)
+     * @param lrcText LRC 格式文本,如 "[00:01.23]歌词内容"
+     * @return 歌词列表,可能为空
+     */
+    public static List<LrcEntry> parseLrcText(String lrcText) {
+        List<LrcEntry> list = new ArrayList<>();
+        if (lrcText == null || lrcText.isEmpty()) {
+            return list;
+        }
+        String[] lines = lrcText.split("\n");
+        for (String line : lines) {
+            parseLine(line, list);
+        }
+        Collections.sort(list);
+        return list;
+    }
+
+    /**
+     * 将纯文本歌词(无时间标签)转换为歌词列表
+     * 按固定间隔分配时间戳
+     * @param plainText 纯文本歌词
+     * @param intervalMs 每行间隔(毫秒)
+     * @return 歌词列表
+     */
+    public static List<LrcEntry> parsePlainTextLyrics(String plainText, long intervalMs) {
+        List<LrcEntry> list = new ArrayList<>();
+        if (plainText == null || plainText.isEmpty()) {
+            return list;
+        }
+        String[] lines = plainText.split("\n");
+        for (int i = 0; i < lines.length; i++) {
+            String text = lines[i].trim();
+            if (!text.isEmpty()) {
+                list.add(new LrcEntry(i * intervalMs, text));
+            }
+        }
+        return list;
+    }
+
+    /**
      * 根据当前播放位置查找歌词索引
      */
     public static int findLrcIndex(List<LrcEntry> list, long position) {
