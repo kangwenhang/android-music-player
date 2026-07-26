@@ -1,0 +1,346 @@
+package com.captiva.musicplayer;
+
+import android.util.Log;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Navidrome / Subsonic API 客户端
+ * 兼容 Subsonic API 1.16.1
+ * 支持:ping / getAlbumList2 / getAlbum / search3 / getCoverArt / stream
+ *
+ * 认证方式:token = MD5(password + salt),salt 为随机六位十六进制
+ */
+public class NavidromeApi {
+
+    private static final String TAG = "NavidromeApi";
+    private static final String API_VERSION = "1.16.1";
+    private static final String CLIENT_NAME = "CaptivaMusic";
+    private static final int CONNECT_TIMEOUT = 10000;
+    private static final int READ_TIMEOUT = 15000;
+
+    private final String serverUrl;
+    private final String username;
+    private final String password;
+
+    public NavidromeApi(String serverUrl, String username, String password) {
+        // 统一去掉末尾斜杠
+        if (serverUrl != null && serverUrl.endsWith("/")) {
+            serverUrl = serverUrl.substring(0, serverUrl.length() - 1);
+        }
+        this.serverUrl = serverUrl;
+        this.username = username;
+        this.password = password;
+    }
+
+    // ==================== 认证相关 ====================
+
+    /** 生成随机 salt(6 位十六进制) */
+    private String generateSalt() {
+        SecureRandom rnd = new SecureRandom();
+        byte[] bytes = new byte[3];
+        rnd.nextBytes(bytes);
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b & 0xFF));
+        }
+        return sb.toString();
+    }
+
+    /** 计算 MD5(password + salt) */
+    private String md5Hex(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b & 0xFF));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "MD5 failed", e);
+            return "";
+        }
+    }
+
+    /** 构建带认证参数的 base query string */
+    private String authParams() {
+        String salt = generateSalt();
+        String token = md5Hex(password + salt);
+        return "u=" + URLEncoder.encode(username)
+                + "&t=" + token
+                + "&s=" + salt
+                + "&v=" + API_VERSION
+                + "&c=" + CLIENT_NAME
+                + "&f=json";
+    }
+
+    /** 构建完整 API URL */
+    private String apiUrl(String endpoint, String extraParams) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(serverUrl);
+        sb.append("/rest/");
+        sb.append(endpoint);
+        sb.append(".view?");
+        sb.append(authParams());
+        if (extraParams != null && !extraParams.isEmpty()) {
+            sb.append("&").append(extraParams);
+        }
+        return sb.toString();
+    }
+
+    // ==================== HTTP 请求 ====================
+
+    /** 执行 GET 请求,返回响应体字符串 */
+    private String httpGet(String urlStr) throws Exception {
+        HttpURLConnection conn = null;
+        InputStream is = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(CONNECT_TIMEOUT);
+            conn.setReadTimeout(READ_TIMEOUT);
+            conn.setDoInput(true);
+
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                throw new Exception("HTTP " + code);
+            }
+            is = conn.getInputStream();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            return sb.toString();
+        } finally {
+            if (is != null) try { is.close(); } catch (Exception ignored) {}
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    // ==================== API 方法 ====================
+
+    /**
+     * ping:测试服务器连通性
+     * @return true 如果服务器正常响应
+     */
+    public boolean ping() {
+        try {
+            String json = httpGet(apiUrl("ping", null));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null) {
+                return "ok".equals(resp.optString("status"));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "ping failed", e);
+        }
+        return false;
+    }
+
+    /**
+     * getAlbumList2:获取专辑列表
+     * @param type  newest | random | frequent | recent | alphabeticalByName
+     * @param count 返回数量
+     * @return 专辑列表
+     */
+    public List<AlbumBean> getAlbumList(String type, int count) {
+        List<AlbumBean> list = new ArrayList<>();
+        try {
+            String params = "type=" + type + "&size=" + count;
+            String json = httpGet(apiUrl("getAlbumList2", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject albumList = resp.optJSONObject("albumList2");
+                if (albumList != null) {
+                    JSONArray albums = albumList.optJSONArray("album");
+                    if (albums != null) {
+                        for (int i = 0; i < albums.length(); i++) {
+                            JSONObject a = albums.optJSONObject(i);
+                            if (a != null) {
+                                AlbumBean bean = new AlbumBean();
+                                bean.setId(a.optString("id"));
+                                bean.setName(a.optString("name"));
+                                bean.setArtist(a.optString("artist"));
+                                bean.setCoverArtId(a.optString("coverArt"));
+                                bean.setSongCount(a.optInt("songCount", 0));
+                                bean.setDuration(a.optLong("duration", 0));
+                                list.add(bean);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getAlbumList failed", e);
+        }
+        return list;
+    }
+
+    /**
+     * getAlbum:获取专辑详情(含歌曲列表)
+     * @param albumId 专辑 ID
+     * @return 歌曲列表
+     */
+    public List<MusicBean> getAlbum(String albumId) {
+        List<MusicBean> list = new ArrayList<>();
+        try {
+            String params = "id=" + URLEncoder.encode(albumId);
+            String json = httpGet(apiUrl("getAlbum", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject album = resp.optJSONObject("album");
+                if (album != null) {
+                    JSONArray songs = album.optJSONArray("song");
+                    list = parseSongs(songs);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getAlbum failed", e);
+        }
+        return list;
+    }
+
+    /**
+     * search3:搜索歌曲
+     * @param query 搜索关键词
+     * @param count 返回数量
+     * @return 匹配的歌曲列表
+     */
+    public List<MusicBean> search(String query, int count) {
+        List<MusicBean> list = new ArrayList<>();
+        try {
+            String params = "query=" + URLEncoder.encode(query, "UTF-8")
+                    + "&songCount=" + count
+                    + "&albumCount=0"
+                    + "&artistCount=0";
+            String json = httpGet(apiUrl("search3", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject result = resp.optJSONObject("searchResult3");
+                if (result != null) {
+                    JSONArray songs = result.optJSONArray("song");
+                    list = parseSongs(songs);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "search failed", e);
+        }
+        return list;
+    }
+
+    /**
+     * getRandomSongs:获取随机歌曲
+     * @param count 返回数量
+     */
+    public List<MusicBean> getRandomSongs(int count) {
+        List<MusicBean> list = new ArrayList<>();
+        try {
+            String params = "size=" + count;
+            String json = httpGet(apiUrl("getRandomSongs", params));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject result = resp.optJSONObject("randomSongs");
+                if (result != null) {
+                    JSONArray songs = result.optJSONArray("song");
+                    list = parseSongs(songs);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getRandomSongs failed", e);
+        }
+        return list;
+    }
+
+    /**
+     * getStarred2:获取收藏的歌曲
+     */
+    public List<MusicBean> getStarredSongs() {
+        List<MusicBean> list = new ArrayList<>();
+        try {
+            String json = httpGet(apiUrl("getStarred2", null));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            if (resp != null && "ok".equals(resp.optString("status"))) {
+                JSONObject result = resp.optJSONObject("starred2");
+                if (result != null) {
+                    JSONArray songs = result.optJSONArray("song");
+                    list = parseSongs(songs);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getStarred2 failed", e);
+        }
+        return list;
+    }
+
+    // ==================== URL 构建 ====================
+
+    /** 构建封面图 URL */
+    public String getCoverArtUrl(String coverArtId, int size) {
+        if (coverArtId == null || coverArtId.isEmpty()) {
+            return null;
+        }
+        StringBuilder params = new StringBuilder();
+        params.append("id=").append(URLEncoder.encode(coverArtId));
+        if (size > 0) {
+            params.append("&size=").append(size);
+        }
+        return apiUrl("getCoverArt", params.toString());
+    }
+
+    /** 构建流式播放 URL */
+    public String getStreamUrl(String songId) {
+        if (songId == null || songId.isEmpty()) {
+            return null;
+        }
+        String params = "id=" + URLEncoder.encode(songId);
+        return apiUrl("stream", params);
+    }
+
+    // ==================== 解析辅助 ====================
+
+    /** 从 JSONArray 解析歌曲列表 */
+    private List<MusicBean> parseSongs(JSONArray songs) {
+        List<MusicBean> list = new ArrayList<>();
+        if (songs == null) {
+            return list;
+        }
+        for (int i = 0; i < songs.length(); i++) {
+            JSONObject s = songs.optJSONObject(i);
+            if (s != null) {
+                MusicBean bean = new MusicBean();
+                bean.setNetwork(true);
+                bean.setStreamId(s.optString("id"));
+                bean.setTitle(s.optString("title"));
+                bean.setArtist(s.optString("artist"));
+                bean.setAlbum(s.optString("album"));
+                bean.setDuration(s.optLong("duration", 0) * 1000); // Subsonic 返回秒,转毫秒
+                bean.setCoverArtId(s.optString("coverArt"));
+                // 预生成流式 URL
+                bean.setStreamUrl(getStreamUrl(s.optString("id")));
+                list.add(bean);
+            }
+        }
+        return list;
+    }
+}
