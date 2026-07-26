@@ -16,14 +16,16 @@
     <dimen name="list_item_padding">8dp</dimen>
     <dimen name="list_title_text_size">17sp</dimen>
 
-    <!-- 控制栏(紧凑) -->
-    <dimen name="control_bar_padding">8dp</dimen>
+    <!-- 控制栏(更紧凑) -->
+    <dimen name="control_bar_padding">4dp</dimen>
+    <dimen name="control_row_margin">2dp</dimen>
+    <dimen name="seekbar_height">16dp</dimen>
 
-    <!-- 按钮(适当减小,保持可触控) -->
-    <dimen name="btn_size">64dp</dimen>
-    <dimen name="btn_size_play">76dp</dimen>
-    <dimen name="btn_text_size">18sp</dimen>
-    <dimen name="btn_play_text_size">22sp</dimen>
+    <!-- 按钮(减小,保持可触控) -->
+    <dimen name="btn_size">50dp</dimen>
+    <dimen name="btn_size_play">58dp</dimen>
+    <dimen name="btn_text_size">16sp</dimen>
+    <dimen name="btn_play_text_size">20sp</dimen>
 
     <!-- 封面 -->
     <dimen name="cover_size_list">48dp</dimen>

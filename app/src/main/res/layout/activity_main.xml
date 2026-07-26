@@ -168,7 +168,8 @@
                 android:layout_weight="1"
                 android:layout_marginLeft="8dp"
                 android:layout_marginRight="8dp"
-                android:maxHeight="4dp"
+                android:minHeight="@dimen/seekbar_height"
+                android:maxHeight="@dimen/seekbar_height"
                 android:progressTint="@color/accent"
                 android:thumbTint="@color/accent" />
 
@@ -187,7 +188,7 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="@dimen/control_row_margin">
 
             <!-- 左侧当前歌曲信息 -->
             <LinearLayout
@@ -231,13 +232,13 @@
                     android:background="@drawable/bg_btn"
                     android:text="顺序"
                     android:textColor="@color/btn_text"
-                    android:textSize="14sp" />
+                    android:textSize="13sp" />
 
                 <Button
                     android:id="@+id/btn_prev"
                     android:layout_width="@dimen/btn_size"
                     android:layout_height="@dimen/btn_size"
-                    android:layout_marginLeft="8dp"
+                    android:layout_marginLeft="6dp"
                     android:background="@drawable/bg_btn"
                     android:text="上一首"
                     android:textColor="@color/btn_text"
@@ -247,8 +248,8 @@
                     android:id="@+id/btn_play"
                     android:layout_width="@dimen/btn_size_play"
                     android:layout_height="@dimen/btn_size_play"
-                    android:layout_marginLeft="10dp"
-                    android:layout_marginRight="10dp"
+                    android:layout_marginLeft="8dp"
+                    android:layout_marginRight="8dp"
                     android:background="@drawable/bg_btn_paused"
                     android:text="播放"
                     android:textColor="@color/btn_paused_text"
