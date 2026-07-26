@@ -103,6 +103,49 @@ public class CoverLoader {
         iv.setTag(key);
     }
 
+    /**
+     * 异步加载封面 Bitmap(不绑定 ImageView)
+     * @param bean     歌曲信息
+     * @param size     期望尺寸
+     * @param callback 回调
+     */
+    public void loadBitmap(MusicBean bean, final int size, final BitmapCallback callback) {
+        if (bean == null || callback == null) {
+            return;
+        }
+        final String key = getCacheKey(bean);
+        if (key == null) {
+            callback.onBitmapLoaded(null);
+            return;
+        }
+        // 先查缓存
+        Bitmap cached = cache.get(key);
+        if (cached != null) {
+            callback.onBitmapLoaded(cached);
+            return;
+        }
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                final Bitmap bmp = loadBitmap(bean, key, size);
+                if (bmp != null) {
+                    cache.put(key, bmp);
+                }
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        callback.onBitmapLoaded(bmp);
+                    }
+                });
+            }
+        });
+    }
+
+    /** Bitmap 加载回调 */
+    public interface BitmapCallback {
+        void onBitmapLoaded(Bitmap bitmap);
+    }
+
     /** 生成缓存 key */
     private String getCacheKey(MusicBean bean) {
         if (bean.isNetwork()) {
