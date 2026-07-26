@@ -33,12 +33,6 @@
             </intent-filter>
         </activity>
 
-        <!-- 文件夹分类界面 -->
-        <activity
-            android:name=".FolderActivity"
-            android:screenOrientation="landscape"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
-
         <!-- 均衡器界面 -->
         <activity
             android:name=".EqualizerActivity"
