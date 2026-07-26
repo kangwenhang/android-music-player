@@ -1,0 +1,5 @@
+// 顶层工程配置
+// 适配安卓 4.0(API 14)车机项目
+
+rootProject.name = "AndroidMusicPlayer"
+include ':app'

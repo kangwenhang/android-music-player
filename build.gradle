@@ -1,0 +1,24 @@
+// 顶层 build 文件,可在此添加全局构建配置
+// 使用 AGP 7.4.2 对低 minSdk 友好,Gradle 7.5
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // AGP 7.4.x 对老版本 minSdk 兼容性较好
+        classpath 'com.android.tools.build:gradle:7.4.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
