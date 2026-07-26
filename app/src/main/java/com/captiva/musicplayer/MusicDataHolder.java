@@ -1,0 +1,42 @@
+package com.captiva.musicplayer;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 全局音乐数据持有者
+ * 用于在 Activity 间共享已扫描的音乐列表
+ */
+public class MusicDataHolder {
+
+    private static final MusicDataHolder INSTANCE = new MusicDataHolder();
+
+    private final List<MusicBean> musicList = new ArrayList<>();
+    private EqualizerManager equalizerManager;
+
+    private MusicDataHolder() {
+    }
+
+    public static MusicDataHolder getInstance() {
+        return INSTANCE;
+    }
+
+    public List<MusicBean> getMusicList() {
+        return musicList;
+    }
+
+    public void setMusicList(List<MusicBean> list) {
+        musicList.clear();
+        if (list != null) {
+            musicList.addAll(list);
+        }
+    }
+
+    public EqualizerManager getEqualizerManager() {
+        return equalizerManager;
+    }
+
+    public void setEqualizerManager(EqualizerManager manager) {
+        this.equalizerManager = manager;
+    }
+}
