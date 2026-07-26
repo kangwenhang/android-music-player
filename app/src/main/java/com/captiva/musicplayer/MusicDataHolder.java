@@ -13,6 +13,8 @@ public class MusicDataHolder {
 
     private final List<MusicBean> musicList = new ArrayList<>();
     private EqualizerManager equalizerManager;
+    private NavidromeApi navidromeApi;
+    private boolean navidromeEnabled = false;
 
     private MusicDataHolder() {
     }
@@ -38,5 +40,21 @@ public class MusicDataHolder {
 
     public void setEqualizerManager(EqualizerManager manager) {
         this.equalizerManager = manager;
+    }
+
+    public NavidromeApi getNavidromeApi() {
+        return navidromeApi;
+    }
+
+    public void setNavidromeApi(NavidromeApi api) {
+        this.navidromeApi = api;
+    }
+
+    public boolean isNavidromeEnabled() {
+        return navidromeEnabled;
+    }
+
+    public void setNavidromeEnabled(boolean enabled) {
+        this.navidromeEnabled = enabled;
     }
 }

@@ -305,8 +305,11 @@ public class MusicService extends Service {
         }
         resetPlayer();
         try {
-            // 优先用 content uri,失败回退文件路径
-            if (bean.getUri() != null) {
+            // 网络歌曲:用 Navidrome stream URL
+            // 本地歌曲:优先用 content uri,失败回退文件路径
+            if (bean.isNetwork() && bean.getStreamUrl() != null) {
+                player.setDataSource(bean.getStreamUrl());
+            } else if (bean.getUri() != null) {
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
             } else if (bean.getData() != null) {
                 player.setDataSource(bean.getData());

@@ -22,9 +22,9 @@ public class LrcView extends View {
     private final Paint currentPaint = new Paint();
     private final Paint normalPaint = new Paint();
 
-    private float lineHeight = 56f;
-    private float currentTextSize = 24f;
-    private float normalTextSize = 18f;
+    private float lineHeight = 72f;
+    private float currentTextSize = 32f;
+    private float normalTextSize = 24f;
 
     public LrcView(Context context) {
         super(context);

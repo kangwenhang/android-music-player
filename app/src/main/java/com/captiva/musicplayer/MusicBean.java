@@ -2,7 +2,7 @@ package com.captiva.musicplayer;
 
 /**
  * 音乐数据模型
- * 对应一条本地音频文件
+ * 对应一条本地音频文件或 Navidrome 网络歌曲
  */
 public class MusicBean {
 
@@ -11,8 +11,14 @@ public class MusicBean {
     private String artist;     // 艺术家
     private String album;      // 专辑
     private long duration;     // 时长(毫秒)
-    private String data;       // 文件路径
-    private String uri;        // content uri 字符串
+    private String data;       // 文件路径(本地)
+    private String uri;        // content uri 字符串(本地)
+
+    // 网络播放(Navidrome)相关字段
+    private boolean network;   // 是否为网络歌曲
+    private String coverArtId; // Navidrome 封面 art ID(getCoverArt 用)
+    private String streamId;   // Navidrome 歌曲 ID(stream 用)
+    private String streamUrl;  // 完整流式播放 URL(可选,预先生成)
 
     public MusicBean() {
     }
@@ -71,6 +77,38 @@ public class MusicBean {
 
     public void setUri(String uri) {
         this.uri = uri;
+    }
+
+    public boolean isNetwork() {
+        return network;
+    }
+
+    public void setNetwork(boolean network) {
+        this.network = network;
+    }
+
+    public String getCoverArtId() {
+        return coverArtId;
+    }
+
+    public void setCoverArtId(String coverArtId) {
+        this.coverArtId = coverArtId;
+    }
+
+    public String getStreamId() {
+        return streamId;
+    }
+
+    public void setStreamId(String streamId) {
+        this.streamId = streamId;
+    }
+
+    public String getStreamUrl() {
+        return streamUrl;
+    }
+
+    public void setStreamUrl(String streamUrl) {
+        this.streamUrl = streamUrl;
     }
 
     /**

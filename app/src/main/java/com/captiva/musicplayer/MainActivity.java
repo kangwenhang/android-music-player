@@ -9,8 +9,13 @@ import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Vibrator;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -26,27 +31,48 @@ import java.util.List;
 
 /**
  * 主界面
- * - 扫描本地音乐并展示列表
- * - 绑定 MusicService 进行播放控制
- * - 接收播放状态广播更新 UI
- * - 歌词显示、播放模式、均衡器入口
+ * - 本地/Navidrome 双模式音乐播放
+ * - 搜索(本地过滤 / Navidrome search3)
+ * - 歌词显示、封面、播放模式、均衡器
+ * - 播放按钮颜色:播放蓝色 / 暂停红色
+ * - 按键震动反馈
  */
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_STORAGE = 100;
 
+    // UI - 列表区
     private RecyclerView rvList;
-    private TextView tvEmpty, tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime, tvCount;
+    private TextView tvEmpty, tvCount;
+    // UI - 搜索
+    private EditText etSearch;
+    private Button btnSearch;
+    // UI - 顶栏按钮
+    private Button btnSource, btnServer, btnEqualizer;
+    // UI - 控制区
+    private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
-    private Button btnPrev, btnPlay, btnNext, btnMode, btnEqualizer;
+    private Button btnPrev, btnPlay, btnNext, btnMode;
+    private ImageView ivNowCover;
+    // UI - 歌词
     private LrcView lrcView;
 
     private MusicAdapter adapter;
     private MusicService service;
     private boolean bound = false;
 
-    /** 音乐列表 */
+    /** 本地音乐列表(完整) */
+    private final List<MusicBean> localMusicList = new ArrayList<>();
+    /** 当前模式使用的列表 */
     private final List<MusicBean> musicList = new ArrayList<>();
+
+    /** 数据源模式 */
+    private enum SourceMode { LOCAL, NAVIDROME }
+    private SourceMode sourceMode = SourceMode.LOCAL;
+
+    private NavidromeConfig navidromeConfig;
+    /** 从设置页返回时需重新加载 Navidrome */
+    private boolean needReloadNavidrome = false;
 
     // 进度刷新
     private final Handler handler = new Handler();
@@ -71,9 +97,8 @@ public class MainActivity extends AppCompatActivity {
 
                 adapter.setPlayingIndex(index);
                 updateNowPlaying(index);
-                btnPlay.setText(playing ? "暂停" : "播放");
+                updatePlayButton(playing);
                 btnMode.setText(mode.getLabel());
-                // 歌词随状态广播刷新一次(切换曲目时)
                 if (service != null) {
                     lrcView.setLrcList(service.getCurrentLrc());
                 }
@@ -87,15 +112,13 @@ public class MainActivity extends AppCompatActivity {
             MusicService.MusicBinder b = (MusicService.MusicBinder) ibinder;
             service = b.getService();
             bound = true;
-            // 把已扫描列表交给 service
             if (!musicList.isEmpty()) {
                 service.setPlayList(musicList, 0);
             }
-            // 同步当前状态
             int idx = service.getCurrentIndex();
             adapter.setPlayingIndex(idx);
             updateNowPlaying(idx);
-            btnPlay.setText(service.isPlaying() ? "暂停" : "播放");
+            updatePlayButton(service.isPlaying());
             btnMode.setText(service.getPlayMode().getLabel());
             lrcView.setLrcList(service.getCurrentLrc());
         }
@@ -112,9 +135,44 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        navidromeConfig = new NavidromeConfig(this);
+
+        // 初始化 NavidromeApi(如果已配置)
+        if (navidromeConfig.isConfigured()) {
+            NavidromeApi api = new NavidromeApi(
+                    navidromeConfig.getServerUrl(),
+                    navidromeConfig.getUsername(),
+                    navidromeConfig.getPassword());
+            MusicDataHolder.getInstance().setNavidromeApi(api);
+            MusicDataHolder.getInstance().setNavidromeEnabled(navidromeConfig.isEnabled());
+        }
+
+        initViews();
+        setupListeners();
+
+        // 启动并绑定服务
+        Intent si = new Intent(this, MusicService.class);
+        startService(si);
+        bindService(si, connection, Context.BIND_AUTO_CREATE);
+
+        // 默认加载本地音乐
+        if (hasStoragePermission()) {
+            loadLocalMusic();
+        } else {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+        }
+    }
+
+    private void initViews() {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
         tvCount = findViewById(R.id.tv_count);
+        etSearch = findViewById(R.id.et_search);
+        btnSearch = findViewById(R.id.btn_search);
+        btnSource = findViewById(R.id.btn_source);
+        btnServer = findViewById(R.id.btn_server);
+        btnEqualizer = findViewById(R.id.btn_equalizer);
         tvNowTitle = findViewById(R.id.tv_now_title);
         tvNowArtist = findViewById(R.id.tv_now_artist);
         tvCurrentTime = findViewById(R.id.tv_current_time);
@@ -124,13 +182,15 @@ public class MainActivity extends AppCompatActivity {
         btnPlay = findViewById(R.id.btn_play);
         btnNext = findViewById(R.id.btn_next);
         btnMode = findViewById(R.id.btn_mode);
-        btnEqualizer = findViewById(R.id.btn_equalizer);
+        ivNowCover = findViewById(R.id.iv_now_cover);
         lrcView = findViewById(R.id.lrc_view);
 
         adapter = new MusicAdapter(this);
         adapter.setOnItemClickListener((position, bean) -> {
             if (service != null) {
-                service.setPlayList(musicList, position);
+                // 用当前显示的列表作为播放列表
+                List<MusicBean> displayList = adapter.getDisplayList();
+                service.setPlayList(displayList, position);
                 service.playIndex(position);
             }
         });
@@ -138,41 +198,48 @@ public class MainActivity extends AppCompatActivity {
         rvList.setAdapter(adapter);
         tvEmpty.setText("正在扫描本地音乐...");
         tvEmpty.setVisibility(View.VISIBLE);
+    }
 
-        // 拖动进度
-        sbProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+    private void setupListeners() {
+        // 搜索:实时过滤(本地) / 按钮触发(网络)
+        etSearch.addTextChangedListener(new TextWatcher() {
             @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && service != null) {
-                    service.seekTo(progress);
-                    tvCurrentTime.setText(MusicBean.formatDuration(progress));
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (sourceMode == SourceMode.LOCAL) {
+                    // 本地模式:实时过滤
+                    adapter.filter(s.toString());
+                    updateCount();
                 }
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
             }
         });
 
-        btnPrev.setOnClickListener(v -> { if (service != null) service.prev(); });
-        btnPlay.setOnClickListener(v -> { if (service != null) service.toggle(); });
-        btnNext.setOnClickListener(v -> { if (service != null) service.next(); });
+        btnSearch.setOnClickListener(v -> {
+            vibrate(v);
+            doSearch();
+        });
 
-        // 播放模式切换
-        btnMode.setOnClickListener(v -> {
-            if (service != null) {
-                PlayMode mode = service.cyclePlayMode();
-                btnMode.setText(mode.getLabel());
-                Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
-            }
+        // 来源切换
+        btnSource.setOnClickListener(v -> {
+            vibrate(v);
+            toggleSource();
+        });
+
+        // Navidrome 设置
+        btnServer.setOnClickListener(v -> {
+            vibrate(v);
+            needReloadNavidrome = true;
+            startActivity(new Intent(this, ServerSettingsActivity.class));
         });
 
         // 均衡器
         btnEqualizer.setOnClickListener(v -> {
+            vibrate(v);
             if (service != null && service.isPlaying()) {
                 startActivity(new Intent(this, EqualizerActivity.class));
             } else {
@@ -184,19 +251,63 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 启动并绑定服务
-        Intent si = new Intent(this, MusicService.class);
-        startService(si);
-        bindService(si, connection, Context.BIND_AUTO_CREATE);
+        // 进度条
+        sbProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && service != null) {
+                    service.seekTo(progress);
+                    tvCurrentTime.setText(MusicBean.formatDuration(progress));
+                }
+            }
 
-        // 检查存储权限(API 23+ 需要,4.0 直接放行)
-        if (hasStoragePermission()) {
-            loadMusic();
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        // 播放控制
+        btnPrev.setOnClickListener(v -> { vibrate(v); if (service != null) service.prev(); });
+        btnPlay.setOnClickListener(v -> { vibrate(v); if (service != null) service.toggle(); });
+        btnNext.setOnClickListener(v -> { vibrate(v); if (service != null) service.next(); });
+
+        // 播放模式
+        btnMode.setOnClickListener(v -> {
+            vibrate(v);
+            if (service != null) {
+                PlayMode mode = service.cyclePlayMode();
+                btnMode.setText(mode.getLabel());
+                Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    // ==================== 来源切换 ====================
+
+    private void toggleSource() {
+        if (sourceMode == SourceMode.LOCAL) {
+            // 切换到 Navidrome
+            if (!navidromeConfig.isConfigured()) {
+                Toast.makeText(this, "请先配置 Navidrome 服务器", Toast.LENGTH_LONG).show();
+                startActivity(new Intent(this, ServerSettingsActivity.class));
+                return;
+            }
+            sourceMode = SourceMode.NAVIDROME;
+            btnSource.setText("网络");
+            etSearch.setHint("搜索 Navidrome 音乐...");
+            loadNavidromeMusic();
         } else {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+            // 切换到本地
+            sourceMode = SourceMode.LOCAL;
+            btnSource.setText("本地");
+            etSearch.setHint("搜索歌曲、艺术家、专辑...");
+            loadLocalMusic();
         }
     }
+
+    // ==================== 本地音乐 ====================
 
     private boolean hasStoragePermission() {
         return ContextCompat.checkSelfPermission(this,
@@ -209,15 +320,18 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_STORAGE) {
             if (grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                loadMusic();
+                loadLocalMusic();
             } else {
                 Toast.makeText(this, "需要存储权限才能读取本地音乐", Toast.LENGTH_LONG).show();
             }
         }
     }
 
-    /** 异步扫描音乐,避免阻塞 UI */
-    private void loadMusic() {
+    private void loadLocalMusic() {
+        sourceMode = SourceMode.LOCAL;
+        tvEmpty.setText("正在扫描本地音乐...");
+        tvEmpty.setVisibility(View.VISIBLE);
+
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -225,10 +339,12 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        localMusicList.clear();
+                        localMusicList.addAll(list);
                         musicList.clear();
                         musicList.addAll(list);
                         adapter.setData(musicList);
-                        tvCount.setText(musicList.isEmpty() ? "" : "共 " + musicList.size() + " 首");
+                        updateCount();
                         if (musicList.isEmpty()) {
                             tvEmpty.setVisibility(View.VISIBLE);
                             tvEmpty.setText("未找到本地音乐,请将音乐文件放入存储");
@@ -244,6 +360,127 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    // ==================== Navidrome 音乐 ====================
+
+    private void loadNavidromeMusic() {
+        NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        if (api == null) {
+            Toast.makeText(this, "Navidrome 未配置", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        tvEmpty.setText("正在从 Navidrome 加载...");
+        tvEmpty.setVisibility(View.VISIBLE);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // 先尝试获取随机歌曲,若无结果则获取最新专辑的歌曲
+                List<MusicBean> list = api.getRandomSongs(100);
+                if (list == null || list.isEmpty()) {
+                    // 回退:获取最新专辑列表,再获取第一个专辑的歌曲
+                    List<AlbumBean> albums = api.getAlbumList("newest", 20);
+                    if (albums != null && !albums.isEmpty()) {
+                        list = new ArrayList<>();
+                        for (AlbumBean album : albums) {
+                            List<MusicBean> songs = api.getAlbum(album.getId());
+                            if (songs != null && !songs.isEmpty()) {
+                                list.addAll(songs);
+                                if (list.size() >= 100) break;
+                            }
+                        }
+                    }
+                }
+                final List<MusicBean> result = list != null ? list : new ArrayList<MusicBean>();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        musicList.clear();
+                        musicList.addAll(result);
+                        adapter.setData(musicList);
+                        updateCount();
+                        if (musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("Navidrome 上未找到音乐");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+                        if (service != null && !musicList.isEmpty()) {
+                            service.setPlayList(musicList, 0);
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    // ==================== 搜索 ====================
+
+    private void doSearch() {
+        String query = etSearch.getText().toString().trim();
+        if (query.isEmpty()) {
+            if (sourceMode == SourceMode.LOCAL) {
+                adapter.filter("");
+                updateCount();
+            }
+            return;
+        }
+
+        if (sourceMode == SourceMode.LOCAL) {
+            adapter.filter(query);
+            updateCount();
+        } else {
+            searchNavidrome(query);
+        }
+    }
+
+    private void searchNavidrome(final String query) {
+        NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        if (api == null) {
+            Toast.makeText(this, "Navidrome 未配置", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        tvEmpty.setText("正在搜索...");
+        tvEmpty.setVisibility(View.VISIBLE);
+        btnSearch.setEnabled(false);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<MusicBean> result = api.search(query, 100);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        btnSearch.setEnabled(true);
+                        musicList.clear();
+                        if (result != null) {
+                            musicList.addAll(result);
+                        }
+                        adapter.setData(musicList);
+                        updateCount();
+                        if (musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("未找到匹配的歌曲");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+                        if (service != null && !musicList.isEmpty()) {
+                            service.setPlayList(musicList, 0);
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    // ==================== UI 更新 ====================
+
+    private void updateCount() {
+        int count = adapter.getItemCount();
+        tvCount.setText(count == 0 ? "" : "共 " + count + " 首");
+    }
+
     private void updateNowPlaying(int index) {
         if (index < 0 || index >= musicList.size()) {
             tvNowTitle.setText("未在播放");
@@ -252,6 +489,8 @@ public class MainActivity extends AppCompatActivity {
             sbProgress.setProgress(0);
             tvCurrentTime.setText("00:00");
             tvTotalTime.setText("00:00");
+            ivNowCover.setImageResource(android.R.color.transparent);
+            ivNowCover.setBackgroundResource(R.drawable.bg_cover_placeholder);
             return;
         }
         MusicBean bean = musicList.get(index);
@@ -259,6 +498,23 @@ public class MainActivity extends AppCompatActivity {
         tvNowArtist.setText(bean.getArtist());
         sbProgress.setMax((int) bean.getDuration());
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
+
+        // 加载当前播放封面
+        int coverSize = (int) getResources().getDimension(R.dimen.cover_size_now);
+        CoverLoader.getInstance().load(bean, ivNowCover, coverSize);
+    }
+
+    /** 更新播放按钮:播放=蓝色,暂停=红色 */
+    private void updatePlayButton(boolean playing) {
+        if (playing) {
+            btnPlay.setText("暂停");
+            btnPlay.setBackgroundResource(R.drawable.bg_btn_playing);
+            btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_playing_text));
+        } else {
+            btnPlay.setText("播放");
+            btnPlay.setBackgroundResource(R.drawable.bg_btn_paused);
+            btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_paused_text));
+        }
     }
 
     private void updateProgress() {
@@ -276,7 +532,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 刷新歌词当前行 */
     private void updateLrc() {
         if (service == null || !bound) {
             return;
@@ -290,9 +545,32 @@ public class MainActivity extends AppCompatActivity {
         lrcView.setCurrentIndex(idx);
     }
 
+    /** 震动反馈 */
+    private void vibrate(View v) {
+        try {
+            Vibrator vibrator = (Vibrator) v.getContext()
+                    .getSystemService(Context.VIBRATOR_SERVICE);
+            if (vibrator != null && vibrator.hasVibrator()) {
+                vibrator.vibrate(20);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    // ==================== 生命周期 ====================
+
     @Override
     protected void onResume() {
         super.onResume();
+        // 从设置页面返回时,如果配置有更新则重新加载 Navidrome
+        if (needReloadNavidrome) {
+            needReloadNavidrome = false;
+            NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+            if (api != null && sourceMode == SourceMode.NAVIDROME) {
+                loadNavidromeMusic();
+            }
+        }
+
         IntentFilter f = new IntentFilter(MusicService.ACTION_STATE_CHANGED);
         registerReceiver(stateReceiver, f);
         handler.post(progressTask);
