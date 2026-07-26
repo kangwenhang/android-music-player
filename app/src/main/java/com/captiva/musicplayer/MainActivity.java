@@ -29,29 +29,24 @@ import java.util.List;
  * - 扫描本地音乐并展示列表
  * - 绑定 MusicService 进行播放控制
  * - 接收播放状态广播更新 UI
- * - 歌词显示、播放模式、文件夹分类、均衡器入口
+ * - 歌词显示、播放模式、均衡器入口
  */
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_STORAGE = 100;
-    private static final int REQ_FOLDER = 200;
 
     private RecyclerView rvList;
     private TextView tvEmpty, tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime, tvCount;
     private SeekBar sbProgress;
-    private Button btnPrev, btnPlay, btnNext, btnMode, btnFolder, btnEqualizer;
+    private Button btnPrev, btnPlay, btnNext, btnMode, btnEqualizer;
     private LrcView lrcView;
 
     private MusicAdapter adapter;
     private MusicService service;
     private boolean bound = false;
 
-    /** 完整音乐库 */
-    private final List<MusicBean> allMusic = new ArrayList<>();
-    /** 当前显示的列表(可能是文件夹筛选后的子集) */
+    /** 音乐列表 */
     private final List<MusicBean> musicList = new ArrayList<>();
-    /** 当前筛选的文件夹路径,null 表示全部 */
-    private String currentFolder = null;
 
     // 进度刷新
     private final Handler handler = new Handler();
@@ -93,8 +88,8 @@ public class MainActivity extends AppCompatActivity {
             service = b.getService();
             bound = true;
             // 把已扫描列表交给 service
-            if (!allMusic.isEmpty()) {
-                service.setPlayList(allMusic, 0);
+            if (!musicList.isEmpty()) {
+                service.setPlayList(musicList, 0);
             }
             // 同步当前状态
             int idx = service.getCurrentIndex();
@@ -129,14 +124,12 @@ public class MainActivity extends AppCompatActivity {
         btnPlay = findViewById(R.id.btn_play);
         btnNext = findViewById(R.id.btn_next);
         btnMode = findViewById(R.id.btn_mode);
-        btnFolder = findViewById(R.id.btn_folder);
         btnEqualizer = findViewById(R.id.btn_equalizer);
         lrcView = findViewById(R.id.lrc_view);
 
         adapter = new MusicAdapter(this);
         adapter.setOnItemClickListener((position, bean) -> {
             if (service != null) {
-                // 把当前显示列表交给 service,从点击位置开始播放
                 service.setPlayList(musicList, position);
                 service.playIndex(position);
             }
@@ -178,21 +171,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 文件夹分类
-        btnFolder.setOnClickListener(v -> {
-            MusicDataHolder.getInstance().setMusicList(allMusic);
-            Intent intent = new Intent(this, FolderActivity.class);
-            startActivityForResult(intent, REQ_FOLDER);
-        });
-
         // 均衡器
         btnEqualizer.setOnClickListener(v -> {
             if (service != null && service.isPlaying()) {
                 startActivity(new Intent(this, EqualizerActivity.class));
             } else {
                 Toast.makeText(this, "请先开始播放音乐,均衡器才能生效", Toast.LENGTH_SHORT).show();
-                if (service != null && !allMusic.isEmpty()) {
-                    service.setPlayList(allMusic, 0);
+                if (service != null && !musicList.isEmpty()) {
+                    service.setPlayList(musicList, 0);
                     service.playIndex(0);
                 }
             }
@@ -239,51 +225,23 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        allMusic.clear();
-                        allMusic.addAll(list);
-                        MusicDataHolder.getInstance().setMusicList(allMusic);
-                        applyFilterAndShow();
-                        if (service != null && !allMusic.isEmpty()) {
-                            service.setPlayList(allMusic, 0);
+                        musicList.clear();
+                        musicList.addAll(list);
+                        adapter.setData(musicList);
+                        tvCount.setText(musicList.isEmpty() ? "" : "共 " + musicList.size() + " 首");
+                        if (musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("未找到本地音乐,请将音乐文件放入存储");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+                        if (service != null && !musicList.isEmpty()) {
+                            service.setPlayList(musicList, 0);
                         }
                     }
                 });
             }
         }).start();
-    }
-
-    /** 根据当前文件夹筛选,刷新列表显示 */
-    private void applyFilterAndShow() {
-        musicList.clear();
-        if (currentFolder == null) {
-            musicList.addAll(allMusic);
-        } else {
-            for (MusicBean b : allMusic) {
-                if (b.getData() != null && b.getData().startsWith(currentFolder)) {
-                    musicList.add(b);
-                }
-            }
-        }
-        adapter.setData(musicList);
-        tvCount.setText(musicList.isEmpty() ? "" : "共 " + musicList.size() + " 首");
-        if (musicList.isEmpty()) {
-            tvEmpty.setVisibility(View.VISIBLE);
-            tvEmpty.setText(currentFolder == null ? "未找到本地音乐,请将音乐文件放入存储" : "该文件夹无音乐");
-        } else {
-            tvEmpty.setVisibility(View.GONE);
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_FOLDER && resultCode == RESULT_OK && data != null) {
-            String folderPath = data.getStringExtra(FolderActivity.EXTRA_FOLDER_PATH);
-            String folderName = data.getStringExtra(FolderActivity.EXTRA_FOLDER_NAME);
-            currentFolder = folderPath;
-            applyFilterAndShow();
-            Toast.makeText(this, "已切换到: " + folderName, Toast.LENGTH_SHORT).show();
-        }
     }
 
     private void updateNowPlaying(int index) {
