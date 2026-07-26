@@ -25,7 +25,7 @@ public class SearchDialog extends Dialog {
 
     private OnSearchListener listener;
     private SimpleKeyboardView keyboard;
-    private TextView tvInput;
+    private EditText tvInput;
     private String hintText;
     private String initialText;
 
@@ -66,7 +66,7 @@ public class SearchDialog extends Dialog {
         tvInput.setTextColor(getContext().getResources().getColor(R.color.text_primary));
         tvInput.setBackgroundColor(getContext().getResources().getColor(R.color.search_bg));
         tvInput.setHint(hintText != null ? hintText : "输入搜索内容...");
-        tvInput.setTextColorHint(getContext().getResources().getColor(R.color.search_hint));
+        tvInput.setHintTextColor(getContext().getResources().getColor(R.color.search_hint));
         tvInput.setSingleLine(true);
         tvInput.setPadding(24, 16, 24, 16);
         // 禁用系统输入法
