@@ -408,6 +408,34 @@ public class NavidromeApi {
     }
 
     /**
+     * 获取全部专辑列表(分页拉取到底),用于统计总歌曲数
+     * 每个专辑的 songCount 累加即为总歌曲数
+     * @return 全部专辑列表
+     */
+    public List<AlbumBean> getAllAlbums() {
+        List<AlbumBean> all = new ArrayList<>();
+        try {
+            int offset = 0;
+            int size = 50;
+            while (true) {
+                List<AlbumBean> page = getAlbumList("alphabeticalByName", size, offset);
+                if (page == null || page.isEmpty()) {
+                    break;
+                }
+                all.addAll(page);
+                if (page.size() < size) {
+                    break;
+                }
+                offset += size;
+            }
+            Log.d(TAG, "getAllAlbums: 共 " + all.size() + " 张专辑");
+        } catch (Exception e) {
+            Log.e(TAG, "getAllAlbums failed", e);
+        }
+        return all;
+    }
+
+    /**
      * getLyricsBySongId:获取歌曲歌词(结构化,支持同步)
      * Subsonic API 1.16.1+
      * @param songId 歌曲 ID

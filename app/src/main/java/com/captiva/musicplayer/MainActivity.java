@@ -648,6 +648,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** 每批获取的专辑数量(车机性能弱,小批量) */
     private static final int ALBUM_PAGE_SIZE = 10;
+    /** 网络歌曲预估总数(从专辑列表统计,优先显示) */
+    private int estimatedNetworkCount = 0;
 
     private void loadNavidromeMusic() {
         final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
@@ -678,18 +680,40 @@ public class MainActivity extends AppCompatActivity {
             // 无缓存,显示加载中
             tvEmpty.setText("正在从 Navidrome 加载...");
             tvEmpty.setVisibility(View.VISIBLE);
+            // 先显示"统计中..."
+            tvCount.setText("统计中...");
         }
 
         // 禁用来源按钮防止重复点击
         btnSource.setEnabled(false);
 
-        // 2. 后台从服务器加载最新数据(通过专辑分页,准确无重复)
+        // 2. 后台:先获取专辑列表统计总数,再加载歌曲
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 获取第一批专辑的歌曲用于快速显示
+                // 2a. 先获取全部专辑列表,累加 songCount 得到总歌曲数(快速,只需专辑列表请求)
+                final List<AlbumBean> allAlbums = api.getAllAlbums();
+                int totalSongCount = 0;
+                if (allAlbums != null) {
+                    for (AlbumBean album : allAlbums) {
+                        totalSongCount += album.getSongCount();
+                    }
+                }
+                final int estimatedTotal = totalSongCount;
+
+                // 优先显示总歌曲数
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (estimatedTotal > 0) {
+                            estimatedNetworkCount = estimatedTotal;
+                            tvCount.setText("共 " + estimatedTotal + " 首(加载中...)");
+                        }
+                    }
+                });
+
+                // 2b. 获取第一批专辑的歌曲用于快速显示
                 final List<MusicBean> firstBatch = api.getSongsByAlbumPage(0, ALBUM_PAGE_SIZE);
-                final int totalCount = firstBatch != null ? firstBatch.size() : 0;
 
                 runOnUiThread(new Runnable() {
                     @Override
@@ -701,7 +725,7 @@ public class MainActivity extends AppCompatActivity {
                             musicList.clear();
                             musicList.addAll(firstBatch);
                             adapter.setData(musicList);
-                            updateCount();
+                            updateCountWithEstimate();
                             tvEmpty.setVisibility(View.GONE);
                             if (service != null) {
                                 service.setPlayList(musicList, 0);
@@ -713,15 +737,27 @@ public class MainActivity extends AppCompatActivity {
                             // 服务器无数据且无缓存
                             tvEmpty.setVisibility(View.VISIBLE);
                             tvEmpty.setText("Navidrome 上未找到音乐");
+                            tvCount.setText("");
                         } else {
                             // 服务器连接失败但有缓存,继续使用缓存
                             Toast.makeText(MainActivity.this,
                                     "服务器连接失败,使用缓存数据", Toast.LENGTH_SHORT).show();
+                            updateCount();
                         }
                     }
                 });
             }
         }).start();
+    }
+
+    /** 更新数量显示(带预估总数) */
+    private void updateCountWithEstimate() {
+        int loaded = adapter.getItemCount();
+        if (estimatedNetworkCount > loaded) {
+            tvCount.setText("共 " + estimatedNetworkCount + " 首(已加载 " + loaded + ")");
+        } else {
+            tvCount.setText(loaded == 0 ? "" : "共 " + loaded + " 首");
+        }
     }
 
     /** 后台加载剩余的网络歌曲(按专辑分页,不阻塞UI) */
@@ -742,7 +778,7 @@ public class MainActivity extends AppCompatActivity {
                                 // 追加到列表(adapter 内部会去重)
                                 musicList.addAll(batch);
                                 adapter.appendData(batch);
-                                updateCount();
+                                updateCountWithEstimate();
                                 if (service != null && !musicList.isEmpty()) {
                                     service.setPlayList(musicList, service.getCurrentIndex());
                                 }
@@ -755,11 +791,14 @@ public class MainActivity extends AppCompatActivity {
                         break;
                     }
                 }
-                // 所有页面加载完成,在UI线程保存完整缓存(避免并发修改)
+                // 所有页面加载完成,在UI线程保存完整缓存并更新最终数量
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         songCache.save(musicList);
+                        // 全部加载完成,显示实际数量
+                        estimatedNetworkCount = 0;
+                        updateCount();
                     }
                 });
             }
