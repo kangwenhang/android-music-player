@@ -12,6 +12,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -47,13 +49,31 @@ jobs:
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           TAG="v$(date +'%Y%m%d-%H%M%S')"
-          gh release create "$TAG" "$APK_PATH" \
-            --title "科帕奇音乐播放器 $TAG" \
-            --notes "手动触发构建版本
 
-          更新内容:
-          - 歌词叠加在封面上(封面作为底色背景)
-          - 移除振动反馈,改用水波纹点击反馈
-          - 搜索改为按钮触发(默认隐藏,点击展开)
-          - 内置简易输入法(适配车机输入法问题)" \
+          # 动态生成更新内容:取最近 20 条 commit 的信息
+          CHANGELOG=$(git log --pretty=format:"- %s" -20 | grep -v "^- Merge" || true)
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- 手动触发构建版本"
+          fi
+
+          # 获取构建时间
+          BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')
+
+          # 生成 Release 说明
+          cat > /tmp/release_notes.md << EOF
+          ## 构建信息
+          - 构建时间: ${BUILD_TIME}
+          - 版本标签: ${TAG}
+          - 构建类型: Debug
+
+          ## 更新内容
+          ${CHANGELOG}
+
+          ## 安装说明
+          下载 APK 后传输到车机安装即可。
+          EOF
+
+          gh release create "$TAG" "$APK_PATH" \
+            --title "科帕奇音乐播放器 ${TAG}" \
+            --notes-file /tmp/release_notes.md \
             --prerelease
