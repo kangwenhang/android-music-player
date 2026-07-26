@@ -676,6 +676,7 @@ public class MainActivity extends AppCompatActivity {
                 sbProgress.setMax(dur);
                 sbProgress.setProgress(pos);
                 tvCurrentTime.setText(MusicBean.formatDuration(pos));
+                tvTotalTime.setText(MusicBean.formatDuration(dur));
             }
         }
     }
