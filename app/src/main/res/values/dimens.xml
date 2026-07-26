@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 车机专用尺寸:大字体、大按钮,便于驾驶盲操 -->
 <resources>
-    <!-- 标题栏(紧凑) -->
-    <dimen name="title_bar_padding">6dp</dimen>
-    <dimen name="title_text_size">18sp</dimen>
+    <!-- 标题栏(调大) -->
+    <dimen name="title_bar_padding">10dp</dimen>
+    <dimen name="title_text_size">22sp</dimen>
 
     <!-- 通用文本 -->
-    <dimen name="sub_text_size">14sp</dimen>
-    <dimen name="time_text_size">14sp</dimen>
+    <dimen name="sub_text_size">16sp</dimen>
+    <dimen name="time_text_size">16sp</dimen>
 
     <!-- 当前播放 -->
-    <dimen name="now_title_text_size">16sp</dimen>
+    <dimen name="now_title_text_size">18sp</dimen>
 
     <!-- 列表(紧凑,增加可见行数) -->
     <dimen name="list_item_padding">8dp</dimen>
     <dimen name="list_title_text_size">17sp</dimen>
 
-    <!-- 控制栏(更紧凑) -->
-    <dimen name="control_bar_padding">4dp</dimen>
+    <!-- 控制栏 -->
+    <dimen name="control_bar_padding">6dp</dimen>
     <dimen name="control_row_margin">2dp</dimen>
-    <dimen name="seekbar_height">12dp</dimen>
+    <dimen name="seekbar_height">20dp</dimen>
 
     <!-- 按钮(减小,保持可触控) -->
     <dimen name="btn_size">50dp</dimen>
@@ -28,16 +28,16 @@
     <dimen name="btn_play_text_size">20sp</dimen>
 
     <!-- 圆形按钮 -->
-    <dimen name="btn_circle_size">44dp</dimen>
-    <dimen name="btn_circle_big_size">56dp</dimen>
+    <dimen name="btn_circle_size">48dp</dimen>
+    <dimen name="btn_circle_big_size">60dp</dimen>
 
     <!-- 封面 -->
     <dimen name="cover_size_list">48dp</dimen>
     <dimen name="cover_size_now">96dp</dimen>
     <dimen name="cover_radius">8dp</dimen>
 
-    <!-- 搜索栏(紧凑) -->
-    <dimen name="search_height">36dp</dimen>
-    <dimen name="search_text_size">14sp</dimen>
-    <dimen name="search_padding">8dp</dimen>
+    <!-- 搜索栏(调大) -->
+    <dimen name="search_height">42dp</dimen>
+    <dimen name="search_text_size">16sp</dimen>
+    <dimen name="search_padding">10dp</dimen>
 </resources>

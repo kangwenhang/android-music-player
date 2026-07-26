@@ -171,10 +171,12 @@
             <SeekBar
                 android:id="@+id/sb_progress"
                 android:layout_width="0dp"
-                android:layout_height="@dimen/seekbar_height"
+                android:layout_height="24dp"
                 android:layout_weight="1"
-                android:minHeight="@dimen/seekbar_height"
-                android:maxHeight="@dimen/seekbar_height"
+                android:minHeight="24dp"
+                android:maxHeight="24dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
                 android:progressTint="@color/accent"
                 android:thumbTint="@color/accent" />
 

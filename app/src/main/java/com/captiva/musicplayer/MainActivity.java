@@ -350,9 +350,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 扫描目录 */
     private void showSettingsMenu() {
-        String[] items = {"均衡器", "服务器设置", "时长过滤设置"};
+        String[] items = {"均衡器", "服务器设置", "时长过滤设置", "扫描目录设置"};
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("设置");
         builder.setItems(items, new DialogInterface.OnClickListener() {
@@ -368,6 +368,57 @@ public class MainActivity extends AppCompatActivity {
                 } else if (which == 2) {
                     // 时长过滤设置
                     showDurationFilterDialog();
+                } else if (which == 3) {
+                    // 扫描目录设置
+                    showScanPathDialog();
+                }
+            }
+        });
+        builder.show();
+    }
+
+    /** 扫描目录设置对话框:自定义输入路径 */
+    private void showScanPathDialog() {
+        final String currentPath = navidromeConfig.getScanPath();
+        final String defaultPath = MusicScanner.getDefaultStoragePath();
+
+        // 创建输入框
+        final EditText etInput = new EditText(this);
+        etInput.setText(currentPath);
+        etInput.setHint("留空=扫描全部(默认)\n例如:" + defaultPath + "/Music");
+        etInput.setTextColor(getResources().getColor(R.color.text_primary));
+        etInput.setHintTextColor(getResources().getColor(R.color.search_hint));
+        etInput.setPadding(24, 16, 24, 16);
+        etInput.setBackgroundResource(R.drawable.bg_search);
+        etInput.setSingleLine(true);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("本地音乐扫描目录");
+        builder.setMessage("输入要扫描的目录路径\n留空=使用系统MediaStore扫描全部\n指定目录=递归扫描该目录下所有音频文件");
+        builder.setView(etInput);
+        builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                String input = etInput.getText().toString().trim();
+                navidromeConfig.setScanPath(input);
+                Toast.makeText(MainActivity.this,
+                        input.isEmpty() ? "已设置为扫描全部" : "已设置扫描目录: " + input,
+                        Toast.LENGTH_LONG).show();
+                // 重新加载本地音乐
+                if (sourceMode == SourceMode.LOCAL) {
+                    loadLocalMusic();
+                }
+            }
+        });
+        builder.setNegativeButton("取消", null);
+        // 添加"重置为默认"按钮
+        builder.setNeutralButton("清空(扫描全部)", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                navidromeConfig.setScanPath("");
+                Toast.makeText(MainActivity.this, "已重置为扫描全部", Toast.LENGTH_SHORT).show();
+                if (sourceMode == SourceMode.LOCAL) {
+                    loadLocalMusic();
                 }
             }
         });

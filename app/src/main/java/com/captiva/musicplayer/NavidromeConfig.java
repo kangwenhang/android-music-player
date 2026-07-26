@@ -15,6 +15,7 @@ public class NavidromeConfig {
     private static final String KEY_PASSWORD = "password";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
+    private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -69,6 +70,16 @@ public class NavidromeConfig {
     /** 设置最小时长过滤(秒) */
     public void setMinDuration(int seconds) {
         prefs.edit().putInt(KEY_MIN_DURATION, seconds).apply();
+    }
+
+    /** 获取自定义扫描目录(空表示扫描全部) */
+    public String getScanPath() {
+        return prefs.getString(KEY_SCAN_PATH, "");
+    }
+
+    /** 设置自定义扫描目录 */
+    public void setScanPath(String path) {
+        prefs.edit().putString(KEY_SCAN_PATH, path != null ? path.trim() : "").apply();
     }
 
     /** 判断是否已配置完整的服务器信息 */
