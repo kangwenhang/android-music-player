@@ -434,14 +434,16 @@ public class MainActivity extends AppCompatActivity {
             }
             sourceMode = SourceMode.NAVIDROME;
             btnSource.setText("网络");
-            etSearch.setHint("搜索 Navidrome 音乐...");
+            btnSource.setBackgroundResource(R.drawable.bg_btn_source_network);
+            etSearch.setHint("搜索网络歌曲、歌手、专辑...");
             etSearch.setText("");
             loadNavidromeMusic();
         } else {
             // 切换到本地
             sourceMode = SourceMode.LOCAL;
             btnSource.setText("本地");
-            etSearch.setHint("搜索歌曲、艺术家、专辑...");
+            btnSource.setBackgroundResource(R.drawable.bg_btn_source_local);
+            etSearch.setHint("搜索本地歌曲、歌手、专辑...");
             etSearch.setText("");
             loadLocalMusic();
         }
