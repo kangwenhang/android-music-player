@@ -19,6 +19,8 @@ public class MusicBean {
     private String coverArtId; // Navidrome 封面 art ID(getCoverArt 用)
     private String streamId;   // Navidrome 歌曲 ID(stream 用)
     private String streamUrl;  // 完整流式播放 URL(可选,预先生成)
+    private String localSuffix; // 音频文件后缀(如 mp3, flac),用于下载
+    private int bitRate;        // 比特率(kbps),用于下载时选择质量
 
     public MusicBean() {
     }
@@ -109,6 +111,22 @@ public class MusicBean {
 
     public void setStreamUrl(String streamUrl) {
         this.streamUrl = streamUrl;
+    }
+
+    public String getLocalSuffix() {
+        return localSuffix != null && !localSuffix.isEmpty() ? localSuffix : "mp3";
+    }
+
+    public void setLocalSuffix(String localSuffix) {
+        this.localSuffix = localSuffix;
+    }
+
+    public int getBitRate() {
+        return bitRate;
+    }
+
+    public void setBitRate(int bitRate) {
+        this.bitRate = bitRate;
     }
 
     /**

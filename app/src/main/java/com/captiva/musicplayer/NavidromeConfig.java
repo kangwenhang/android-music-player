@@ -16,6 +16,7 @@ public class NavidromeConfig {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
     private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
+    private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -80,6 +81,26 @@ public class NavidromeConfig {
     /** 设置自定义扫描目录 */
     public void setScanPath(String path) {
         prefs.edit().putString(KEY_SCAN_PATH, path != null ? path.trim() : "").apply();
+    }
+
+    /**
+     * 获取网络音乐同步下载目录
+     * 网络模式会把服务器所有音乐下载到此目录,然后从本地播放
+     * 空表示使用默认路径(外部存储/CaptivaMusic)
+     */
+    public String getSyncPath() {
+        String path = prefs.getString(KEY_SYNC_PATH, "");
+        if (path == null || path.isEmpty()) {
+            // 默认路径
+            path = android.os.Environment.getExternalStorageDirectory()
+                    .getAbsolutePath() + "/CaptivaMusic";
+        }
+        return path;
+    }
+
+    /** 设置网络音乐同步下载目录 */
+    public void setSyncPath(String path) {
+        prefs.edit().putString(KEY_SYNC_PATH, path != null ? path.trim() : "").apply();
     }
 
     /** 判断是否已配置完整的服务器信息 */

@@ -3,6 +3,8 @@
 
     <!-- 读取本地音乐(安卓 4.0 仅需声明,无需运行时申请) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- 写入存储(同步下载音乐需要) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <!-- 后台播放保持 CPU 唤醒 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- 前台服务(通知栏常驻控制) -->
@@ -46,6 +48,12 @@
         <!-- Navidrome 服务器设置界面 -->
         <activity
             android:name=".ServerSettingsActivity"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <!-- 音乐同步界面 -->
+        <activity
+            android:name=".SyncActivity"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 

@@ -1,5 +1,6 @@
 package com.captiva.musicplayer;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
@@ -17,9 +18,9 @@ import androidx.appcompat.app.AppCompatActivity;
  */
 public class ServerSettingsActivity extends AppCompatActivity {
 
-    private EditText etUrl, etUser, etPass;
+    private EditText etUrl, etUser, etPass, etSyncPath;
     private TextView tvResult;
-    private Button btnTest, btnSave, btnBack;
+    private Button btnTest, btnSave, btnBack, btnOpenSync;
     private NavidromeConfig config;
 
     @Override
@@ -34,15 +35,27 @@ public class ServerSettingsActivity extends AppCompatActivity {
         etUrl = findViewById(R.id.et_server_url);
         etUser = findViewById(R.id.et_username);
         etPass = findViewById(R.id.et_password);
+        etSyncPath = findViewById(R.id.et_sync_path);
         tvResult = findViewById(R.id.tv_test_result);
         btnTest = findViewById(R.id.btn_test);
         btnSave = findViewById(R.id.btn_save);
         btnBack = findViewById(R.id.btn_back);
+        btnOpenSync = findViewById(R.id.btn_open_sync);
 
         // 回填已保存的配置
         etUrl.setText(config.getServerUrl());
         etUser.setText(config.getUsername());
         etPass.setText(config.getPassword());
+        // 显示同步路径(如果是默认路径,显示空让用户知道是默认)
+        String syncPath = config.getSyncPath();
+        String defaultPath = android.os.Environment.getExternalStorageDirectory()
+                .getAbsolutePath() + "/CaptivaMusic";
+        if (syncPath.equals(defaultPath)) {
+            etSyncPath.setText("");
+            etSyncPath.setHint("默认: " + defaultPath);
+        } else {
+            etSyncPath.setText(syncPath);
+        }
 
         btnBack.setOnClickListener(v -> {
             finish();
@@ -54,6 +67,12 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
         btnSave.setOnClickListener(v -> {
             saveConfig();
+        });
+
+        btnOpenSync.setOnClickListener(v -> {
+            // 先保存配置,再跳转
+            saveConfigSilently();
+            startActivity(new Intent(ServerSettingsActivity.this, SyncActivity.class));
         });
     }
 
@@ -94,27 +113,37 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
     /** 保存配置 */
     private void saveConfig() {
+        if (!saveConfigSilently()) {
+            return;
+        }
+        Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show();
+        finish();
+    }
+
+    /** 静默保存配置(不弹提示,不关闭页面),返回是否成功 */
+    private boolean saveConfigSilently() {
         String url = etUrl.getText().toString().trim();
         String user = etUser.getText().toString().trim();
         String pass = etPass.getText().toString().trim();
 
         if (url.isEmpty() || user.isEmpty() || pass.isEmpty()) {
             Toast.makeText(this, "请填写完整信息", Toast.LENGTH_SHORT).show();
-            return;
+            return false;
         }
 
         config.setServerUrl(url);
         config.setUsername(user);
         config.setPassword(pass);
         config.setEnabled(true);
+        // 保存同步路径(空=使用默认)
+        config.setSyncPath(etSyncPath.getText().toString().trim());
 
         // 更新全局 NavidromeApi
         NavidromeApi api = new NavidromeApi(url, user, pass);
         MusicDataHolder.getInstance().setNavidromeApi(api);
         MusicDataHolder.getInstance().setNavidromeEnabled(true);
 
-        Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show();
-        finish();
+        return true;
     }
 
     private void showResult(String msg, boolean success) {

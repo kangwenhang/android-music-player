@@ -18,6 +18,10 @@ import java.util.List;
  * 网络歌曲列表缓存
  * 将 Navidrome 歌曲列表序列化为 JSON 存到本地文件
  * 切换到网络模式时先从缓存加载(秒开),再后台从服务器更新
+ *
+ * 线程安全:
+ * - save/saveAsync 内部同步,防止并发写文件
+ * - load 可在任意线程调用(文件读操作自带并发安全)
  */
 public class SongCache {
 
@@ -26,16 +30,53 @@ public class SongCache {
     private static final String CACHE_FILE_TMP = "navidrome_songs.json.tmp";
 
     private final File cacheFile;
+    /** 同步锁,防止并发写缓存 */
+    private final Object writeLock = new Object();
+    /** 上次保存的歌曲数,避免重复保存相同数据 */
+    private volatile int lastSavedCount = 0;
 
     public SongCache(Context context) {
         cacheFile = new File(context.getCacheDir(), CACHE_FILE);
     }
 
-    /** 保存歌曲列表到缓存文件 */
+    /**
+     * 保存歌曲列表到缓存文件(同步)
+     * 如果歌曲数与上次相同,跳过保存(避免重复IO)
+     */
     public void save(List<MusicBean> songs) {
         if (songs == null || songs.isEmpty()) {
             return;
         }
+        synchronized (writeLock) {
+            // 避免重复保存相同数量(增量加载时数量变化才保存)
+            if (songs.size() == lastSavedCount) {
+                return;
+            }
+            doSave(songs);
+            lastSavedCount = songs.size();
+        }
+    }
+
+    /**
+     * 异步保存(在后台线程执行,不阻塞UI)
+     * 适合在 UI 线程调用,避免序列化大列表时卡顿
+     */
+    public void saveAsync(final List<MusicBean> songs) {
+        if (songs == null || songs.isEmpty()) {
+            return;
+        }
+        // 复制一份,防止后台保存时列表被修改
+        final List<MusicBean> copy = new ArrayList<>(songs);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                save(copy);
+            }
+        }, "SongCacheSave").start();
+    }
+
+    /** 实际执行保存逻辑 */
+    private void doSave(List<MusicBean> songs) {
         // 先写临时文件,再重命名,防止写一半中断导致缓存损坏
         File tmpFile = new File(cacheFile.getParent(), CACHE_FILE_TMP);
         OutputStreamWriter writer = null;
@@ -54,6 +95,8 @@ public class SongCache {
                 obj.put("coverArtId", b.getCoverArtId() != null ? b.getCoverArtId() : "");
                 obj.put("streamId", b.getStreamId() != null ? b.getStreamId() : "");
                 obj.put("streamUrl", b.getStreamUrl() != null ? b.getStreamUrl() : "");
+                obj.put("suffix", b.getLocalSuffix());
+                obj.put("bitRate", b.getBitRate());
                 arr.put(obj);
             }
 
@@ -122,8 +165,12 @@ public class SongCache {
                 b.setCoverArtId(obj.optString("coverArtId"));
                 b.setStreamId(obj.optString("streamId"));
                 b.setStreamUrl(obj.optString("streamUrl"));
+                b.setLocalSuffix(obj.optString("suffix"));
+                b.setBitRate(obj.optInt("bitRate", 0));
                 list.add(b);
             }
+            // 记录已加载的缓存数量,避免load后立即save相同数据
+            lastSavedCount = list.size();
             Log.d(TAG, "缓存已加载: " + list.size() + " 首");
             return list;
         } catch (Exception e) {
@@ -166,8 +213,11 @@ public class SongCache {
 
     /** 清除缓存 */
     public void clear() {
-        if (cacheFile.exists()) {
-            cacheFile.delete();
+        synchronized (writeLock) {
+            if (cacheFile.exists()) {
+                cacheFile.delete();
+            }
+            lastSavedCount = 0;
         }
     }
 }

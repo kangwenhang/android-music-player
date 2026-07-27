@@ -6,6 +6,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -557,6 +559,66 @@ public class NavidromeApi {
         return apiUrl("stream", params);
     }
 
+    /**
+     * 下载歌曲文件到本地
+     * @param songId 歌曲 ID
+     * @param destFile 目标文件
+     * @return 下载的字节数,-1表示失败
+     */
+    public long downloadFile(String songId, File destFile) {
+        if (songId == null || songId.isEmpty() || destFile == null) {
+            return -1;
+        }
+        // 确保目标目录存在
+        File parent = destFile.getParentFile();
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs();
+        }
+
+        HttpURLConnection conn = null;
+        InputStream is = null;
+        FileOutputStream fos = null;
+        try {
+            String urlStr = getStreamUrl(songId);
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(CONNECT_TIMEOUT);
+            conn.setReadTimeout(60000); // 下载用更长的超时
+            conn.setDoInput(true);
+
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                Log.e(TAG, "download failed: HTTP " + code + " for " + songId);
+                return -1;
+            }
+
+            is = conn.getInputStream();
+            fos = new FileOutputStream(destFile);
+            byte[] buf = new byte[8192];
+            int len;
+            long total = 0;
+            while ((len = is.read(buf)) != -1) {
+                fos.write(buf, 0, len);
+                total += len;
+            }
+            fos.flush();
+            Log.d(TAG, "下载完成: " + songId + " -> " + destFile.getName() + " (" + total + " bytes)");
+            return total;
+        } catch (Exception e) {
+            Log.e(TAG, "downloadFile failed: " + songId, e);
+            // 下载失败时删除不完整的文件
+            if (destFile.exists()) {
+                destFile.delete();
+            }
+            return -1;
+        } finally {
+            if (fos != null) try { fos.close(); } catch (Exception ignored) {}
+            if (is != null) try { is.close(); } catch (Exception ignored) {}
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     // ==================== 解析辅助 ====================
 
     /** 从 JSONArray 解析歌曲列表 */
@@ -576,6 +638,16 @@ public class NavidromeApi {
                 bean.setAlbum(s.optString("album"));
                 bean.setDuration(s.optLong("duration", 0) * 1000); // Subsonic 返回秒,转毫秒
                 bean.setCoverArtId(s.optString("coverArt"));
+                // 保存后缀信息(用于下载时确定文件格式)
+                String suffix = s.optString("suffix", "mp3");
+                if (suffix != null && !suffix.isEmpty()) {
+                    bean.setLocalSuffix(suffix);
+                }
+                // 保存比特率信息(可选)
+                int bitRate = s.optInt("bitRate", 0);
+                if (bitRate > 0) {
+                    bean.setBitRate(bitRate);
+                }
                 // 预生成流式 URL
                 bean.setStreamUrl(getStreamUrl(s.optString("id")));
                 list.add(bean);

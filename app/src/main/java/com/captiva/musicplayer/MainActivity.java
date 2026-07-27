@@ -3,14 +3,18 @@ package com.captiva.musicplayer;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
@@ -27,6 +31,7 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,8 +48,6 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_STORAGE = 100;
-    /** Navidrome 搜索防抖延迟(ms) */
-    private static final long SEARCH_DEBOUNCE_MS = 600;
 
     // UI - 列表区
     private RecyclerView rvList;
@@ -93,8 +96,6 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    /** Navidrome 搜索防抖 Runnable */
-    private Runnable searchDebounceRunnable;
     /** 当前搜索关键词 */
     private String currentSearchQuery = "";
 
@@ -327,35 +328,20 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 处理搜索栏输入
      * - 本地模式:即时过滤
-     * - Navidrome 模式:防抖延迟搜索(避免频繁网络请求)
+     * - 网络模式(本地同步文件):即时过滤(不走网络)
      */
     private void handleSearchInput(String query) {
         currentSearchQuery = query != null ? query.trim() : "";
-
-        if (sourceMode == SourceMode.LOCAL) {
-            // 本地:即时过滤
-            adapter.filter(currentSearchQuery);
-            updateCount();
-        } else {
-            // Navidrome:防抖搜索
-            if (searchDebounceRunnable != null) {
-                handler.removeCallbacks(searchDebounceRunnable);
-            }
-            searchDebounceRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    doSearch(currentSearchQuery);
-                }
-            };
-            handler.postDelayed(searchDebounceRunnable, SEARCH_DEBOUNCE_MS);
-        }
+        // 两种模式都是本地文件,即时过滤
+        adapter.filter(currentSearchQuery);
+        updateCount();
     }
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 扫描目录 / 清除缓存 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 同步音乐 / 时长过滤 / 扫描目录 / 清除缓存 */
     private void showSettingsMenu() {
-        String[] items = {"均衡器", "服务器设置", "时长过滤设置", "扫描目录设置", "清除网络缓存"};
+        String[] items = {"均衡器", "服务器设置", "同步音乐", "时长过滤设置", "扫描目录设置", "清除网络缓存"};
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("设置");
         builder.setItems(items, new DialogInterface.OnClickListener() {
@@ -369,12 +355,23 @@ public class MainActivity extends AppCompatActivity {
                     needReloadNavidrome = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
                 } else if (which == 2) {
+                    // 同步音乐
+                    if (!navidromeConfig.isConfigured()) {
+                        Toast.makeText(MainActivity.this, "请先配置 Navidrome 服务器",
+                                Toast.LENGTH_LONG).show();
+                        needReloadNavidrome = true;
+                        startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
+                    } else {
+                        needReloadNavidrome = true;
+                        startActivity(new Intent(MainActivity.this, SyncActivity.class));
+                    }
+                } else if (which == 3) {
                     // 时长过滤设置
                     showDurationFilterDialog();
-                } else if (which == 3) {
+                } else if (which == 4) {
                     // 扫描目录设置
                     showScanPathDialog();
-                } else if (which == 4) {
+                } else if (which == 5) {
                     // 清除网络缓存
                     showClearCacheDialog();
                 }
@@ -390,14 +387,14 @@ public class MainActivity extends AppCompatActivity {
                 ? "缓存时间: " + formatCacheTime(songCache.getCachedAt())
                 : "当前无缓存数据";
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("清除网络缓存");
-        builder.setMessage(msg + "\n清除后下次切换到网络模式将直接从服务器加载");
+        builder.setTitle("清除歌曲列表缓存");
+        builder.setMessage(msg + "\n此操作仅清除歌曲列表缓存,不影响已下载的音乐文件");
         if (hasCache) {
             builder.setPositiveButton("清除", new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
                     songCache.clear();
-                    Toast.makeText(MainActivity.this, "网络缓存已清除", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "缓存已清除", Toast.LENGTH_SHORT).show();
                 }
             });
             builder.setNegativeButton("取消", null);
@@ -564,7 +561,7 @@ public class MainActivity extends AppCompatActivity {
             sourceMode = SourceMode.NAVIDROME;
             btnSource.setText("网络");
             btnSource.setBackgroundResource(R.drawable.bg_btn_source_network);
-            etSearch.setHint("搜索网络歌曲、歌手、专辑...");
+            etSearch.setHint("搜索已同步的歌曲、歌手、专辑...");
             etSearch.setText("");
             loadNavidromeMusic();
         } else {
@@ -650,7 +647,7 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ==================== Navidrome 音乐 ====================
+    // ==================== Navidrome 音乐(本地同步模式) ====================
 
     /** 格式化缓存时间为相对时间描述 */
     private String formatCacheTime(long timestamp) {
@@ -665,233 +662,306 @@ public class MainActivity extends AppCompatActivity {
         return days + "天前";
     }
 
-    /** 每批获取的专辑数量(车机性能弱,小批量) */
-    private static final int ALBUM_PAGE_SIZE = 10;
     /** 网络歌曲预估总数(从专辑列表统计,优先显示) */
     private int estimatedNetworkCount = 0;
     /** 本地歌曲预估总数(快速统计,优先显示) */
     private int estimatedLocalCount = 0;
 
+    /**
+     * 加载网络音乐(从同步目录扫描本地文件)
+     *
+     * 新策略:网络模式直接扫描同步下载的本地文件,从本地播放
+     * - 如果同步目录有文件,直接扫描播放(秒开,不卡顿)
+     * - 如果同步目录为空,提示用户去同步
+     * - 如果服务器可用,后台统计总数显示
+     */
     private void loadNavidromeMusic() {
-        final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
-        if (api == null) {
-            Toast.makeText(this, "Navidrome 未配置", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        String syncPath = navidromeConfig.getSyncPath();
 
-        // 1. 先尝试加载缓存(秒开,无网络等待)
-        final List<MusicBean> cached = songCache.load();
-        final boolean hasCache = cached != null && !cached.isEmpty();
+        // 1. 快速统计同步目录文件数
+        estimatedNetworkCount = 0;
+        tvCount.setText("统计中...");
 
-        if (hasCache) {
-            // 立即显示缓存数据,不阻塞UI
-            musicList.clear();
-            musicList.addAll(cached);
-            adapter.setData(musicList);
-            updateCount();
-            tvEmpty.setVisibility(View.GONE);
-            if (service != null && !musicList.isEmpty()) {
-                service.setPlayList(musicList, 0);
-            }
-            // 提示用户正在使用缓存
-            String timeStr = formatCacheTime(songCache.getCachedAt());
-            Toast.makeText(this, "已加载缓存(" + cached.size() + "首," + timeStr + ")\n正在从服务器更新...",
-                    Toast.LENGTH_LONG).show();
-        } else {
-            // 无缓存,显示加载中
-            tvEmpty.setText("正在从 Navidrome 加载...");
-            tvEmpty.setVisibility(View.VISIBLE);
-            // 先显示"统计中..."
-            tvCount.setText("统计中...");
-        }
-
-        // 禁用来源按钮防止重复点击
-        btnSource.setEnabled(false);
-
-        // 2. 后台:先获取专辑列表统计总数,再加载歌曲
+        // 2. 扫描同步目录的本地文件
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 2a. 先获取全部专辑列表,累加 songCount 得到总歌曲数(快速,只需专辑列表请求)
-                final List<AlbumBean> allAlbums = api.getAllAlbums();
-                int totalSongCount = 0;
-                if (allAlbums != null) {
-                    for (AlbumBean album : allAlbums) {
-                        totalSongCount += album.getSongCount();
-                    }
-                }
-                final int estimatedTotal = totalSongCount;
+                // 快速统计
+                final int syncedCount = MusicSyncManager.countSyncedFiles(syncPath);
 
-                // 优先显示总歌曲数
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (estimatedTotal > 0) {
-                            estimatedNetworkCount = estimatedTotal;
-                            tvCount.setText("共 " + estimatedTotal + " 首(加载中...)");
+                        if (syncedCount > 0) {
+                            estimatedNetworkCount = syncedCount;
+                            tvCount.setText("共 " + syncedCount + " 首(扫描中...)");
                         }
                     }
                 });
 
-                // 2b. 获取第一批专辑的歌曲用于快速显示
-                final List<MusicBean> firstBatch = api.getSongsByAlbumPage(0, ALBUM_PAGE_SIZE);
+                // 完整扫描同步目录
+                final List<MusicBean> list = scanSyncDirectory(syncPath);
 
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        btnSource.setEnabled(true);
-
-                        if (firstBatch != null && !firstBatch.isEmpty()) {
-                            // 服务器有数据,替换为最新
+                        if (!list.isEmpty()) {
                             musicList.clear();
-                            musicList.addAll(firstBatch);
+                            musicList.addAll(list);
                             adapter.setData(musicList);
-                            updateCountWithEstimate();
+                            estimatedNetworkCount = 0;
+                            updateCount();
                             tvEmpty.setVisibility(View.GONE);
-                            if (service != null) {
+                            if (service != null && !musicList.isEmpty()) {
                                 service.setPlayList(musicList, 0);
                             }
-
-                            // 后台继续加载剩余专辑的歌曲
-                            loadRemainingNavidromeSongs(api, ALBUM_PAGE_SIZE);
-                        } else if (!hasCache) {
-                            // 服务器无数据且无缓存
-                            tvEmpty.setVisibility(View.VISIBLE);
-                            tvEmpty.setText("Navidrome 上未找到音乐");
-                            tvCount.setText("");
                         } else {
-                            // 服务器连接失败但有缓存,继续使用缓存
-                            Toast.makeText(MainActivity.this,
-                                    "服务器连接失败,使用缓存数据", Toast.LENGTH_SHORT).show();
-                            updateCount();
+                            // 同步目录为空
+                            musicList.clear();
+                            adapter.setData(musicList);
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("未同步任何音乐\n请在设置中点击\"同步音乐\"下载服务器音乐");
+                            tvCount.setText("");
                         }
                     }
                 });
-            }
-        }).start();
-    }
 
-    /** 更新数量显示(带预估总数) */
-    private void updateCountWithEstimate() {
-        int loaded = adapter.getItemCount();
-        if (estimatedNetworkCount > loaded) {
-            tvCount.setText("共 " + estimatedNetworkCount + " 首(已加载 " + loaded + ")");
-        } else {
-            tvCount.setText(loaded == 0 ? "" : "共 " + loaded + " 首");
-        }
-    }
-
-    /** 后台加载剩余的网络歌曲(按专辑分页,不阻塞UI) */
-    private void loadRemainingNavidromeSongs(final NavidromeApi api, final int startAlbumOffset) {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                int albumOffset = startAlbumOffset;
-                while (true) {
-                    try {
-                        final List<MusicBean> batch = api.getSongsByAlbumPage(albumOffset, ALBUM_PAGE_SIZE);
-                        if (batch == null || batch.isEmpty()) {
-                            break;
-                        }
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                // 追加到列表(adapter 内部会去重)
-                                musicList.addAll(batch);
-                                adapter.appendData(batch);
-                                updateCountWithEstimate();
-                                if (service != null && !musicList.isEmpty()) {
-                                    service.setPlayList(musicList, service.getCurrentIndex());
+                // 3. 后台从服务器获取歌曲总数(用于对比显示是否需要更新同步)
+                final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+                if (api != null && MusicDataHolder.getInstance().isNavidromeEnabled()) {
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            final List<AlbumBean> allAlbums = api.getAllAlbums();
+                            int serverTotal = 0;
+                            if (allAlbums != null) {
+                                for (AlbumBean album : allAlbums) {
+                                    serverTotal += album.getSongCount();
                                 }
                             }
-                        });
-                        // 每批之间稍微停顿,避免请求过于密集
-                        try { Thread.sleep(100); } catch (InterruptedException ignored) { break; }
-                        albumOffset += ALBUM_PAGE_SIZE;
-                    } catch (Exception e) {
-                        break;
-                    }
+                            final int serverCount = serverTotal;
+
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (serverCount > syncedCount) {
+                                        // 服务器有更多歌曲,提示需要同步
+                                        Toast.makeText(MainActivity.this,
+                                                "服务器有 " + serverCount + " 首,本地已同步 " + syncedCount + " 首\n"
+                                                        + "差 " + (serverCount - syncedCount) + " 首,建议重新同步",
+                                                Toast.LENGTH_LONG).show();
+                                    }
+                                }
+                            });
+                        }
+                    }).start();
                 }
-                // 所有页面加载完成,在UI线程保存完整缓存并更新最终数量
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        songCache.save(musicList);
-                        // 全部加载完成,显示实际数量
-                        estimatedNetworkCount = 0;
-                        updateCount();
-                    }
-                });
             }
         }).start();
     }
 
-    // ==================== 搜索 ====================
+    /**
+     * 扫描同步目录下的音频文件
+     * 复用 MusicScanner 的目录扫描逻辑,但指定为同步目录
+     */
+    private List<MusicBean> scanSyncDirectory(String syncPath) {
+        List<MusicBean> list = new ArrayList<>();
+        if (syncPath == null || syncPath.isEmpty()) {
+            return list;
+        }
 
-    private void doSearch(String query) {
-        if (query == null || query.trim().isEmpty()) {
-            if (sourceMode == SourceMode.LOCAL) {
-                adapter.filter("");
-                updateCount();
-            } else {
-                // Navidrome 空搜索:重新加载列表
-                loadNavidromeMusic();
+        File rootDir = new File(syncPath);
+        if (!rootDir.exists() || !rootDir.isDirectory()) {
+            return list;
+        }
+
+        // 收集音频文件
+        List<File> audioFiles = new ArrayList<>();
+        collectAudioFiles(rootDir, audioFiles);
+
+        int minDurationSec = navidromeConfig.getMinDuration();
+        long minDurationMs = minDurationSec * 1000L;
+
+        ContentResolver resolver = getContentResolver();
+        for (File file : audioFiles) {
+            try {
+                // 尝试从 MediaStore 查询该文件的元数据
+                MusicBean bean = queryFromMediaStoreByPath(resolver, file.getAbsolutePath(), minDurationMs);
+                if (bean == null) {
+                    // MediaStore 没有记录,手动创建
+                    bean = createBeanFromFile(file, minDurationMs);
+                }
+                if (bean != null) {
+                    list.add(bean);
+                }
+            } catch (Exception e) {
+                // ignore
             }
-            return;
         }
 
-        query = query.trim();
-
-        if (sourceMode == SourceMode.LOCAL) {
-            adapter.filter(query);
-            updateCount();
-        } else {
-            searchNavidrome(query);
-        }
-    }
-
-    private void searchNavidrome(final String query) {
-        NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
-        if (api == null) {
-            Toast.makeText(this, "Navidrome 未配置", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        tvEmpty.setText("正在搜索...");
-        tvEmpty.setVisibility(View.VISIBLE);
-
-        new Thread(new Runnable() {
+        // 按标题排序
+        java.util.Collections.sort(list, new java.util.Comparator<MusicBean>() {
             @Override
-            public void run() {
-                final List<MusicBean> result = api.search(query, 5000);
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        musicList.clear();
-                        if (result != null) {
-                            musicList.addAll(result);
-                        }
-                        adapter.setData(musicList);
-                        updateCount();
-                        if (musicList.isEmpty()) {
-                            tvEmpty.setVisibility(View.VISIBLE);
-                            tvEmpty.setText("未找到匹配的歌曲");
-                        } else {
-                            tvEmpty.setVisibility(View.GONE);
-                        }
-                        if (service != null && !musicList.isEmpty()) {
-                            service.setPlayList(musicList, 0);
-                        }
-                    }
-                });
+            public int compare(MusicBean a, MusicBean b) {
+                return a.getTitle().compareToIgnoreCase(b.getTitle());
             }
-        }).start();
+        });
+
+        return list;
+    }
+
+    /** 递归收集目录下所有音频文件 */
+    private void collectAudioFiles(File dir, List<File> result) {
+        if (dir == null || !dir.exists() || !dir.isDirectory()) {
+            return;
+        }
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File f : files) {
+            if (f.isDirectory()) {
+                if (!f.getName().startsWith(".")) {
+                    collectAudioFiles(f, result);
+                }
+            } else if (isAudioFile(f.getName())) {
+                result.add(f);
+            }
+        }
+    }
+
+    /** 判断文件是否为音频 */
+    private boolean isAudioFile(String name) {
+        if (name == null || !name.contains(".")) {
+            return false;
+        }
+        String ext = name.substring(name.lastIndexOf(".")).toLowerCase();
+        return ext.equals(".mp3") || ext.equals(".flac") || ext.equals(".wav")
+                || ext.equals(".ogg") || ext.equals(".m4a") || ext.equals(".aac")
+                || ext.equals(".wma") || ext.equals(".ape") || ext.equals(".m4b")
+                || ext.equals(".opus");
+    }
+
+    /** 通过文件路径从 MediaStore 查询元数据 */
+    private MusicBean queryFromMediaStoreByPath(ContentResolver resolver, String filePath, long minDurationMs) {
+        try {
+            String selection = MediaStore.Audio.Media.DATA + "=?"
+                    + " AND " + MediaStore.Audio.Media.IS_MUSIC + "=1"
+                    + " AND " + MediaStore.Audio.Media.DURATION + " > " + minDurationMs;
+            String[] selectionArgs = new String[]{filePath};
+
+            String[] projection = new String[]{
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.ALBUM,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.ALBUM_ID
+            };
+
+            Cursor cursor = resolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection, selection, selectionArgs, null);
+
+            if (cursor != null) {
+                try {
+                    if (cursor.moveToFirst()) {
+                        MusicBean bean = new MusicBean();
+                        bean.setId(cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media._ID)));
+                        bean.setTitle(cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.TITLE)));
+                        bean.setArtist(cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST)));
+                        bean.setAlbum(cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM)));
+                        bean.setDuration(cursor.getLong(cursor.getColumnIndex(MediaStore.Audio.Media.DURATION)));
+                        bean.setData(cursor.getString(cursor.getColumnIndex(MediaStore.Audio.Media.DATA)));
+                        bean.setUri(Uri.withAppendedPath(
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                String.valueOf(bean.getId())).toString());
+                        return bean;
+                    }
+                } finally {
+                    cursor.close();
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return null;
+    }
+
+    /** 手动从文件创建 MusicBean(无 MediaStore 记录时) */
+    private MusicBean createBeanFromFile(File file, long minDurationMs) {
+        if (file == null || !file.exists()) {
+            return null;
+        }
+
+        String filePath = file.getAbsolutePath();
+        String fileName = file.getName();
+
+        String title = fileName;
+        int dotIdx = fileName.lastIndexOf(".");
+        if (dotIdx > 0) {
+            title = fileName.substring(0, dotIdx);
+        }
+
+        long duration = 0;
+        android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
+        try {
+            mmr.setDataSource(filePath);
+            String durStr = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION);
+            if (durStr != null && !durStr.isEmpty()) {
+                duration = Long.parseLong(durStr);
+            }
+            String artist = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST);
+            String album = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM);
+
+            if (duration < minDurationMs && minDurationMs > 0) {
+                return null;
+            }
+
+            MusicBean bean = new MusicBean();
+            bean.setTitle(title);
+            bean.setArtist(artist != null ? artist : "未知艺术家");
+            bean.setAlbum(album != null ? album : "未知专辑");
+            bean.setDuration(duration);
+            bean.setData(filePath);
+            bean.setUri(filePath);
+            return bean;
+        } catch (Exception e) {
+            if (file.length() > 1024) {
+                MusicBean bean = new MusicBean();
+                bean.setTitle(title);
+                bean.setArtist("未知艺术家");
+                bean.setAlbum("未知专辑");
+                bean.setDuration(0);
+                bean.setData(filePath);
+                bean.setUri(filePath);
+                return bean;
+            }
+            return null;
+        } finally {
+            try {
+                mmr.release();
+            } catch (Exception e) {
+                // ignore
+            }
+        }
     }
 
     // ==================== UI 更新 ====================
 
     private void updateCount() {
-        int count = adapter.getItemCount();
+        int count = adapter.getTotalFilteredCount();
+        // 本地扫描中:使用预估总数优先显示
+        if (sourceMode == SourceMode.LOCAL && estimatedLocalCount > count) {
+            tvCount.setText("共 " + estimatedLocalCount + " 首(扫描中...)");
+            return;
+        }
+        // 网络加载中:使用预估总数优先显示
+        if (sourceMode == SourceMode.NAVIDROME && estimatedNetworkCount > count) {
+            tvCount.setText("共 " + estimatedNetworkCount + " 首(已加载 " + count + ")");
+            return;
+        }
         tvCount.setText(count == 0 ? "" : "共 " + count + " 首");
     }
 
@@ -1000,10 +1070,6 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         unregisterReceiver(stateReceiver);
         handler.removeCallbacks(progressTask);
-        // 移除搜索防抖
-        if (searchDebounceRunnable != null) {
-            handler.removeCallbacks(searchDebounceRunnable);
-        }
     }
 
     @Override
