@@ -113,21 +113,28 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
     /** 保存配置 */
     private void saveConfig() {
-        if (!saveConfigSilently()) {
+        // 先保存同步路径(与服务器配置无关,独立保存)
+        saveSyncPath();
+        if (!saveServerConfigSilently()) {
             return;
         }
         Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show();
         finish();
     }
 
-    /** 静默保存配置(不弹提示,不关闭页面),返回是否成功 */
-    private boolean saveConfigSilently() {
+    /** 独立保存同步路径 */
+    private void saveSyncPath() {
+        config.setSyncPath(etSyncPath.getText().toString().trim());
+    }
+
+    /** 静默保存服务器配置(不弹提示,不关闭页面),返回是否成功 */
+    private boolean saveServerConfigSilently() {
         String url = etUrl.getText().toString().trim();
         String user = etUser.getText().toString().trim();
         String pass = etPass.getText().toString().trim();
 
         if (url.isEmpty() || user.isEmpty() || pass.isEmpty()) {
-            Toast.makeText(this, "请填写完整信息", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "请填写完整的服务器信息", Toast.LENGTH_SHORT).show();
             return false;
         }
 
@@ -135,10 +142,33 @@ public class ServerSettingsActivity extends AppCompatActivity {
         config.setUsername(user);
         config.setPassword(pass);
         config.setEnabled(true);
-        // 保存同步路径(空=使用默认)
-        config.setSyncPath(etSyncPath.getText().toString().trim());
 
         // 更新全局 NavidromeApi
+        NavidromeApi api = new NavidromeApi(url, user, pass);
+        MusicDataHolder.getInstance().setNavidromeApi(api);
+        MusicDataHolder.getInstance().setNavidromeEnabled(true);
+
+        return true;
+    }
+
+    /** 静默保存全部配置(服务器+同步路径),返回是否成功 */
+    private boolean saveConfigSilently() {
+        // 同步路径始终保存
+        saveSyncPath();
+        // 服务器配置可能为空(如果还没配服务器但想改同步路径)
+        String url = etUrl.getText().toString().trim();
+        String user = etUser.getText().toString().trim();
+        String pass = etPass.getText().toString().trim();
+
+        if (url.isEmpty() || user.isEmpty() || pass.isEmpty()) {
+            return false;
+        }
+
+        config.setServerUrl(url);
+        config.setUsername(user);
+        config.setPassword(pass);
+        config.setEnabled(true);
+
         NavidromeApi api = new NavidromeApi(url, user, pass);
         MusicDataHolder.getInstance().setNavidromeApi(api);
         MusicDataHolder.getInstance().setNavidromeEnabled(true);
