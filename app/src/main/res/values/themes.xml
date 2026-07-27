@@ -9,6 +9,24 @@
         <item name="android:windowBackground">@color/bg_main</item>
         <item name="android:statusBarColor">@color/bg_title_bar</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
+        <!-- 关闭窗口动画(车机性能弱) -->
+        <item name="android:windowAnimationStyle">@style/NoAnimation</item>
+    </style>
+
+    <!-- 无动画窗口样式 -->
+    <style name="NoAnimation" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@null</item>
+        <item name="android:activityOpenExitAnimation">@null</item>
+        <item name="android:activityCloseEnterAnimation">@null</item>
+        <item name="android:activityCloseExitAnimation">@null</item>
+        <item name="android:taskOpenEnterAnimation">@null</item>
+        <item name="android:taskOpenExitAnimation">@null</item>
+        <item name="android:taskCloseEnterAnimation">@null</item>
+        <item name="android:taskCloseExitAnimation">@null</item>
+        <item name="android:taskToFrontEnterAnimation">@null</item>
+        <item name="android:taskToFrontExitAnimation">@null</item>
+        <item name="android:taskToBackEnterAnimation">@null</item>
+        <item name="android:taskToBackExitAnimation">@null</item>
     </style>
 
 </resources>

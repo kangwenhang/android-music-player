@@ -30,6 +30,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.SimpleItemAnimator;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -253,6 +254,15 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         rvList.setLayoutManager(new LinearLayoutManager(this));
+        // 关闭 item 动画(车机性能弱,动画卡顿)
+        RecyclerView.ItemAnimator animator = rvList.getItemAnimator();
+        if (animator instanceof SimpleItemAnimator) {
+            ((SimpleItemAnimator) animator).setSupportsChangeAnimations(false);
+        }
+        // 增大缓存池(减少滑动时重新绑定)
+        rvList.setItemViewCacheSize(20);
+        // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
+        rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
         tvEmpty.setText("正在扫描本地音乐...");
         tvEmpty.setVisibility(View.VISIBLE);

@@ -115,16 +115,15 @@ public class LrcView extends View {
             float scale = Math.max((float) vw / sw, (float) vh / sh);
             int nw = (int) (sw * scale);
             int nh = (int) (sh * scale);
-            // 车机内存有限,限制最大尺寸
-            int maxDim = 800;
+            // 车机内存有限且性能弱,限制最大尺寸并跳过模糊
+            int maxDim = 400;
             if (nw > maxDim || nh > maxDim) {
                 float ratio = (float) maxDim / Math.max(nw, nh);
                 nw = (int) (nw * ratio);
                 nh = (int) (nh * ratio);
             }
-            Bitmap scaled = Bitmap.createScaledBitmap(src, nw, nh, true);
-            // 简单模糊:缩小再放大(兼容低 API)
-            return fastBlur(scaled, 0.4f);
+            // 性能优化:车机性能弱,直接缩放不做模糊
+            return Bitmap.createScaledBitmap(src, nw, nh, true);
         } catch (OutOfMemoryError e) {
             // 内存不足,直接返回原图
             return src;
