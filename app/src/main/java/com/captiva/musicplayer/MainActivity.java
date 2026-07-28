@@ -594,6 +594,8 @@ public class MainActivity extends AppCompatActivity {
      * - sync() 内部从服务器获取最新歌曲列表(确保发现新歌)
      * - 逐首检查文件是否存在,已存在的跳过(增量同步)
      * - 全部已存在才显示"已是最新",否则只下载缺失的文件
+     * 注意:此方法可能从后台线程调用,startAutoSync 内部操作了 UI,
+     *       所以必须切到主线程执行。
      */
     private void startBackgroundSync() {
         final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
@@ -606,8 +608,13 @@ public class MainActivity extends AppCompatActivity {
 
         final String syncPath = navidromeConfig.getSyncPath();
 
-        // 直接启动同步(sync 内部会获取服务器列表并逐首检查文件)
-        startAutoSync(syncPath, 0);
+        // 切到主线程执行(startAutoSync 内部操作了 UI 控件)
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                startAutoSync(syncPath, 0);
+            }
+        });
     }
 
     // ==================== 缓存工具 ====================
