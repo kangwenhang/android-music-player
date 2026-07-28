@@ -12,7 +12,9 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 歌曲列表适配器
@@ -36,6 +38,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private static final int BATCH_SIZE = 50;
 
     private final List<MusicBean> fullData = new ArrayList<>();  // 完整列表
+    private final Set<String> fullDataKeys = new HashSet<>();    // fullData 的 key 集合(O(1)去重)
     private final List<MusicBean> filteredData = new ArrayList<>(); // 过滤后的完整列表
     private final List<MusicBean> data = new ArrayList<>();       // 当前显示列表(分批加载)
     private final Context context;
@@ -50,8 +53,39 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 是否正在加载更多(防止重复触发) */
     private boolean isLoading = false;
 
+    // 缓存颜色和尺寸(避免每次 onBindViewHolder 重复查询 Resources)
+    private final int colorPlayingBg;
+    private final int colorListItemBg;
+    private final int colorPlayingText;
+    private final int colorPlayingTextSub;
+    private final int colorTextPrimary;
+    private final int colorTextSecondary;
+    private final int colorSourceNetwork;
+    private final int colorSourceLocal;
+    private final int coverSizeList;
+
     public MusicAdapter(Context context) {
         this.context = context;
+        // 预加载所有颜色和尺寸(只执行一次)
+        colorPlayingBg = ContextCompat.getColor(context, R.color.playing_highlight);
+        colorListItemBg = ContextCompat.getColor(context, R.color.list_item_bg);
+        colorPlayingText = ContextCompat.getColor(context, R.color.playing_text);
+        colorPlayingTextSub = ContextCompat.getColor(context, R.color.playing_text_sub);
+        colorTextPrimary = ContextCompat.getColor(context, R.color.text_primary);
+        colorTextSecondary = ContextCompat.getColor(context, R.color.text_secondary);
+        colorSourceNetwork = ContextCompat.getColor(context, R.color.source_network);
+        colorSourceLocal = ContextCompat.getColor(context, R.color.source_local);
+        coverSizeList = (int) context.getResources().getDimension(R.dimen.cover_size_list);
+        // 启用稳定 ID 提升 RecyclerView 回收效率
+        setHasStableIds(true);
+    }
+
+    @Override
+    public long getItemId(int position) {
+        if (position < 0 || position >= data.size()) return RecyclerView.NO_ID;
+        MusicBean bean = data.get(position);
+        String key = getSongKey(bean);
+        return key != null ? key.hashCode() : RecyclerView.NO_ID;
     }
 
     /**
@@ -60,8 +94,15 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      */
     public synchronized void setData(List<MusicBean> list) {
         fullData.clear();
+        fullDataKeys.clear();
         if (list != null) {
-            fullData.addAll(list);
+            for (MusicBean b : list) {
+                String key = getSongKey(b);
+                if (key != null && !fullDataKeys.contains(key)) {
+                    fullData.add(b);
+                    fullDataKeys.add(key);
+                }
+            }
         }
         loadedCount = 0;
         data.clear();
@@ -76,16 +117,17 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (more == null || more.isEmpty()) {
             return;
         }
-        // 1. 先加到 fullData(去重,避免网络分页重复)
+        // 1. 用 HashSet O(1) 去重
         int added = 0;
         for (MusicBean b : more) {
-            if (!containsSong(fullData, b)) {
+            String key = getSongKey(b);
+            if (key != null && !fullDataKeys.contains(key)) {
                 fullData.add(b);
+                fullDataKeys.add(key);
                 added++;
             }
         }
         if (added == 0) {
-            // 全部是重复的,不需要更新UI
             return;
         }
 
@@ -124,17 +166,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 如果有搜索过滤,filteredData会在下次filter时重建
     }
 
-    /** 检查列表中是否已包含某首歌(用 streamId 或 data 路径去重) */
+    /** 检查列表中是否已包含某首歌(已弃用,改用HashSet) */
     private boolean containsSong(List<MusicBean> list, MusicBean target) {
-        if (target == null) return true;
-        String targetKey = getSongKey(target);
-        if (targetKey == null || targetKey.isEmpty()) return false;
-        for (MusicBean b : list) {
-            String key = getSongKey(b);
-            if (targetKey.equals(key)) {
-                return true;
-            }
-        }
+        // 保留方法签名以兼容,实际不再使用
         return false;
     }
 
@@ -253,22 +287,15 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         holder.tvArtist.setText(bean.getArtist() + " · " + MusicBean.formatDuration(bean.getDuration()));
         holder.tvIndex.setText(String.valueOf(position + 1));
 
+        // 使用缓存的颜色(避免每次 bind 调用 ContextCompat.getColor)
         boolean playing = position == playingIndex;
-        holder.itemView.setBackgroundColor(playing
-                ? ContextCompat.getColor(context, R.color.playing_highlight)
-                : ContextCompat.getColor(context, R.color.list_item_bg));
-        holder.tvTitle.setTextColor(ContextCompat.getColor(context,
-                playing ? R.color.playing_text : R.color.text_primary));
-        holder.tvArtist.setTextColor(ContextCompat.getColor(context,
-                playing ? R.color.playing_text_sub : R.color.text_secondary));
+        holder.itemView.setBackgroundColor(playing ? colorPlayingBg : colorListItemBg);
+        holder.tvTitle.setTextColor(playing ? colorPlayingText : colorTextPrimary);
+        holder.tvArtist.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
+        holder.vSource.setBackgroundColor(bean.isNetwork() ? colorSourceNetwork : colorSourceLocal);
 
-        int sourceColor = bean.isNetwork()
-                ? ContextCompat.getColor(context, R.color.source_network)
-                : ContextCompat.getColor(context, R.color.source_local);
-        holder.vSource.setBackgroundColor(sourceColor);
-
-        int coverSize = (int) context.getResources().getDimension(R.dimen.cover_size_list);
-        CoverLoader.getInstance().load(bean, holder.ivCover, coverSize);
+        // 使用缓存的封面尺寸
+        CoverLoader.getInstance().load(bean, holder.ivCover, coverSizeList);
 
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {

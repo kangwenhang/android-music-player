@@ -148,30 +148,20 @@ public class CoverLoader {
             callback.onBitmapLoaded(null);
             return;
         }
-        // 1. 先查内存缓存
+        // 1. 先查内存缓存(不阻塞)
         Bitmap cached = cache.get(key);
         if (cached != null) {
             callback.onBitmapLoaded(cached);
             return;
         }
 
-        // 2. 查磁盘缓存(快速,不阻塞)
-        final Bitmap diskCached = loadFromDiskCache(key);
-        if (diskCached != null) {
-            cache.put(key, diskCached);
-            callback.onBitmapLoaded(diskCached);
-            return;
-        }
-
-        // 3. 异步加载(网络/文件)
+        // 2. 异步加载(磁盘缓存+网络/文件,全部在后台线程)
         executor.execute(new Runnable() {
             @Override
             public void run() {
                 final Bitmap bmp = loadBitmap(bean, key, size);
                 if (bmp != null) {
                     cache.put(key, bmp);
-                    // 写入磁盘缓存
-                    saveToDiskCache(key, bmp);
                 }
                 mainHandler.post(new Runnable() {
                     @Override
@@ -210,11 +200,17 @@ public class CoverLoader {
         if (diskCached != null) {
             return diskCached;
         }
+        Bitmap bmp;
         if (bean.isNetwork()) {
-            return loadNetworkCover(bean, size);
+            bmp = loadNetworkCover(bean, size);
         } else {
-            return loadLocalCover(bean, size);
+            bmp = loadLocalCover(bean, size);
         }
+        // 写入磁盘缓存(后台线程,不阻塞UI)
+        if (bmp != null) {
+            saveToDiskCache(key, bmp);
+        }
+        return bmp;
     }
 
     /** 从磁盘缓存加载 */

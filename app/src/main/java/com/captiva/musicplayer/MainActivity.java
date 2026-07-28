@@ -94,14 +94,16 @@ public class MainActivity extends AppCompatActivity {
     private int pendingSyncRefresh = 0;
     private static final int REFRESH_BATCH_SIZE = 5;
 
-    // 进度刷新
+    // 进度刷新(动态频率:播放时500ms,空闲时2000ms)
     private final Handler handler = new Handler();
     private final Runnable progressTask = new Runnable() {
         @Override
         public void run() {
             updateProgress();
             updateLrc();
-            handler.postDelayed(this, 500);
+            // 根据播放状态调整刷新频率
+            boolean playing = service != null && service.isPlaying();
+            handler.postDelayed(this, playing ? 500 : 2000);
         }
     };
 
