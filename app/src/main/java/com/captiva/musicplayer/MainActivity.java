@@ -584,8 +584,7 @@ public class MainActivity extends AppCompatActivity {
             etSearch.setText("");
             loadNavidromeMusic();
         } else {
-            // 切换到本地:取消自动同步
-            cancelAutoSync();
+            // 切换到本地(同步继续在后台运行)
             sourceMode = SourceMode.LOCAL;
             btnSource.setText("本地");
             btnSource.setBackgroundResource(R.drawable.bg_btn_source_local);
@@ -660,6 +659,57 @@ public class MainActivity extends AppCompatActivity {
                         }
                         if (service != null && !musicList.isEmpty()) {
                             service.setPlayList(musicList, 0);
+                        }
+                    }
+                });
+
+                // 本地扫描完后,后台自动同步服务器音乐(不影响本地使用)
+                startBackgroundSync();
+            }
+        }).start();
+    }
+
+    /**
+     * 后台自动同步(本地和网络模式都执行)
+     * - 如果已配置 Navidrome 且服务器有未同步歌曲,自动后台下载
+     * - 已有同步文件会跳过(增量同步)
+     */
+    private void startBackgroundSync() {
+        final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        if (api == null || !MusicDataHolder.getInstance().isNavidromeEnabled()) {
+            return;
+        }
+        if (isAutoSyncing) {
+            return; // 已在同步中
+        }
+
+        final String syncPath = navidromeConfig.getSyncPath();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // 快速统计本地已同步数
+                final int syncedCount = MusicSyncManager.countSyncedFiles(syncPath);
+
+                // 获取服务器歌曲总数
+                final List<AlbumBean> allAlbums = api.getAllAlbums();
+                int serverTotal = 0;
+                if (allAlbums != null) {
+                    for (AlbumBean album : allAlbums) {
+                        serverTotal += album.getSongCount();
+                    }
+                }
+                final int serverCount = serverTotal;
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (serverCount > syncedCount) {
+                            // 有未同步歌曲,启动自动同步
+                            startAutoSync(syncPath, serverCount);
+                        } else if (syncedCount > 0) {
+                            tvSyncStatus.setVisibility(View.VISIBLE);
+                            tvSyncStatus.setText("已是最新");
                         }
                     }
                 });
@@ -748,34 +798,8 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
-                // 后台从服务器获取歌曲总数并自动同步
-                final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
-                if (api == null || !MusicDataHolder.getInstance().isNavidromeEnabled()) {
-                    return;
-                }
-
-                // 获取服务器歌曲总数
-                final List<AlbumBean> allAlbums = api.getAllAlbums();
-                int serverTotal = 0;
-                if (allAlbums != null) {
-                    for (AlbumBean album : allAlbums) {
-                        serverTotal += album.getSongCount();
-                    }
-                }
-                final int serverCount = serverTotal;
-
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (serverCount > syncedCount) {
-                            // 有未同步歌曲,启动自动同步
-                            startAutoSync(syncPath, serverCount);
-                        } else if (syncedCount > 0) {
-                            tvSyncStatus.setVisibility(View.VISIBLE);
-                            tvSyncStatus.setText("已是最新");
-                        }
-                    }
-                });
+                // 后台自动同步(与本地模式共用同一逻辑)
+                startBackgroundSync();
             }
         }).start();
     }
