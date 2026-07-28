@@ -13,9 +13,9 @@ import java.util.Set;
  * 音乐同步管理器
  * 从 Navidrome 服务器下载全部音乐到本地指定目录
  *
- * 同步策略(优化版):
- * 1. 优先从 SongCache 加载歌曲列表(避免每次请求服务器)
- * 2. 缓存不存在时才从服务器获取(通过专辑分页)
+ * 同步策略:
+ * 1. 每次都从服务器获取最新歌曲列表(确保能发现新加的歌)
+ * 2. 服务器获取失败时,回退到 SongCache 缓存(网络容错)
  * 3. 用 HashSet 去重(O(1)复杂度,替代 O(n) 线性扫描)
  * 4. 预扫描已存在文件,跳过已下载的歌曲
  * 5. 只下载不存在的文件(增量同步)
@@ -137,7 +137,7 @@ public class MusicSyncManager {
 
     /**
      * 开始同步(在后台线程调用)
-     * 优化:优先使用缓存歌单,用HashSet去重,跳过已存在文件
+     * 每次从服务器获取最新列表,用HashSet去重,跳过已存在文件
      * @param callback 进度回调
      */
     public void sync(final SyncCallback callback) {
@@ -162,32 +162,39 @@ public class MusicSyncManager {
             return;
         }
 
-        // 1. 优先从缓存加载歌曲列表(避免每次都请求服务器)
-        List<MusicBean> allSongs = null;
         SongCache cache = new SongCache(context);
-        if (cache.exists()) {
-            allSongs = cache.load();
-            Log.d(TAG, "从缓存加载歌曲列表: " + (allSongs != null ? allSongs.size() : 0) + " 首");
-        }
+        List<MusicBean> allSongs = null;
 
-        // 2. 缓存不存在或为空,从服务器获取
-        if (allSongs == null || allSongs.isEmpty()) {
-            allSongs = fetchSongsFromServer(callback);
-        }
+        // 1. 每次都从服务器获取最新歌曲列表(确保能发现新加的歌)
+        callback.onStart(0);
+        callback.onProgress(0, 0, "正在获取服务器歌曲列表...");
+        allSongs = fetchSongsFromServer(callback);
 
         if (cancelled) {
-            callback.onCancelled(0, allSongs.size());
+            callback.onCancelled(0, 0);
             return;
         }
 
-        if (allSongs.isEmpty()) {
-            callback.onError("服务器上未找到音乐");
+        // 2. 服务器获取失败(网络问题等),回退到缓存
+        if (allSongs == null || allSongs.isEmpty()) {
+            Log.w(TAG, "服务器获取失败,尝试从缓存加载");
+            if (cache.exists()) {
+                allSongs = cache.load();
+                Log.d(TAG, "从缓存加载歌曲列表: " + (allSongs != null ? allSongs.size() : 0) + " 首");
+            }
+        }
+
+        if (allSongs == null || allSongs.isEmpty()) {
+            callback.onError("无法获取歌曲列表(服务器无响应且无缓存)");
             return;
         }
+
+        // 3. 用最新服务器列表更新缓存
+        cache.save(allSongs);
 
         Log.d(TAG, "同步开始: 共 " + allSongs.size() + " 首歌曲");
 
-        // 3. 预扫描已存在文件(快速统计,不逐首回调进度)
+        // 4. 预扫描已存在文件(快速统计,不逐首回调进度)
         int existingCount = 0;
         for (MusicBean song : allSongs) {
             if (cancelled) {
@@ -208,7 +215,7 @@ public class MusicSyncManager {
             return;
         }
 
-        // 4. 以已有数量作为初始进度(避免从0开始显示)
+        // 5. 以已有数量作为初始进度(避免从0开始显示)
         callback.onStart(allSongs.size());
         callback.onProgress(existingCount, allSongs.size(),
                 existingCount > 0 ? "继续同步..." : "开始同步...");
@@ -217,7 +224,7 @@ public class MusicSyncManager {
         int skipped = existingCount;
         int failed = 0;
 
-        // 5. 只下载不存在的文件(已存在的静默跳过)
+        // 6. 只下载不存在的文件(已存在的静默跳过)
         for (int i = 0; i < allSongs.size(); i++) {
             if (cancelled) {
                 callback.onCancelled(downloaded + skipped, allSongs.size());
@@ -246,15 +253,13 @@ public class MusicSyncManager {
             }
         }
 
-        // 6. 保存歌曲列表缓存(下次同步可跳过服务器获取)
-        cache.save(allSongs);
-
         callback.onComplete(downloaded, skipped, failed, allSongs.size());
     }
 
     /**
      * 从服务器获取全部歌曲列表(通过专辑分页)
      * 使用 HashSet 去重(O(1)复杂度)
+     * @return 歌曲列表;返回 null 表示获取失败(网络错误等),空列表表示服务器无歌曲
      */
     private List<MusicBean> fetchSongsFromServer(SyncCallback callback) {
         List<MusicBean> allSongs = new ArrayList<>();
@@ -262,11 +267,14 @@ public class MusicSyncManager {
 
         int albumOffset = 0;
         int albumPageSize = 20;
+        boolean gotAnyData = false;
+
         while (!cancelled) {
             List<MusicBean> batch = api.getSongsByAlbumPage(albumOffset, albumPageSize);
             if (batch == null || batch.isEmpty()) {
                 break;
             }
+            gotAnyData = true;
             // 用 HashSet 去重(比线性扫描快得多)
             for (MusicBean b : batch) {
                 String streamId = b.getStreamId();
@@ -280,6 +288,10 @@ public class MusicSyncManager {
                     "正在获取歌曲列表(" + allSongs.size() + ")...");
         }
 
+        // 一页都没获取到,返回 null 表示获取失败(可能网络问题)
+        if (!gotAnyData) {
+            return null;
+        }
         return allSongs;
     }
 }

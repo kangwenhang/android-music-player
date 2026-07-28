@@ -595,31 +595,7 @@ public class MainActivity extends AppCompatActivity {
                 // 快速统计本地已同步数
                 final int syncedCount = MusicSyncManager.countSyncedFiles(syncPath);
 
-                // 优先使用缓存的歌单数量(避免每次都请求服务器)
-                SongCache cache = new SongCache(MainActivity.this);
-                int cachedCount = 0;
-                if (cache.exists()) {
-                    List<MusicBean> cached = cache.load();
-                    if (cached != null) {
-                        cachedCount = cached.size();
-                    }
-                }
-
-                // 如果缓存数量与本地一致,无需同步
-                if (cachedCount > 0 && cachedCount <= syncedCount) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (syncedCount > 0) {
-                                tvSyncStatus.setVisibility(View.VISIBLE);
-                                tvSyncStatus.setText("已是最新");
-                            }
-                        }
-                    });
-                    return;
-                }
-
-                // 获取服务器歌曲总数
+                // 每次都从服务器获取歌曲总数(确保能发现新歌)
                 final List<AlbumBean> allAlbums = api.getAllAlbums();
                 int serverTotal = 0;
                 if (allAlbums != null) {
