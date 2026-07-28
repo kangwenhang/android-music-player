@@ -575,8 +575,10 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 后台自动同步
-     * - 如果已配置 Navidrome 且服务器有未同步歌曲,自动后台下载
-     * - 已有同步文件会跳过(增量同步)
+     * 直接启动 MusicSyncManager.sync()
+     * - sync() 内部从服务器获取最新歌曲列表(确保发现新歌)
+     * - 逐首检查文件是否存在,已存在的跳过(增量同步)
+     * - 全部已存在才显示"已是最新",否则只下载缺失的文件
      */
     private void startBackgroundSync() {
         final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
@@ -589,36 +591,8 @@ public class MainActivity extends AppCompatActivity {
 
         final String syncPath = navidromeConfig.getSyncPath();
 
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                // 快速统计本地已同步数
-                final int syncedCount = MusicSyncManager.countSyncedFiles(syncPath);
-
-                // 每次都从服务器获取歌曲总数(确保能发现新歌)
-                final List<AlbumBean> allAlbums = api.getAllAlbums();
-                int serverTotal = 0;
-                if (allAlbums != null) {
-                    for (AlbumBean album : allAlbums) {
-                        serverTotal += album.getSongCount();
-                    }
-                }
-                final int serverCount = serverTotal;
-
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (serverCount > syncedCount) {
-                            // 有未同步歌曲,启动自动同步
-                            startAutoSync(syncPath, serverCount);
-                        } else if (syncedCount > 0) {
-                            tvSyncStatus.setVisibility(View.VISIBLE);
-                            tvSyncStatus.setText("已是最新");
-                        }
-                    }
-                });
-            }
-        }).start();
+        // 直接启动同步(sync 内部会获取服务器列表并逐首检查文件)
+        startAutoSync(syncPath, 0);
     }
 
     // ==================== 缓存工具 ====================
@@ -707,7 +681,11 @@ public class MainActivity extends AppCompatActivity {
                             public void run() {
                                 isAutoSyncing = false;
                                 refreshSyncList();
-                                tvSyncStatus.setText("已同步");
+                                if (downloaded > 0) {
+                                    tvSyncStatus.setText("已同步 +" + downloaded + " 首");
+                                } else {
+                                    tvSyncStatus.setText("已是最新");
+                                }
                                 updateCount();
                                 if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
                                     tvEmpty.setVisibility(View.GONE);
@@ -833,7 +811,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateNowPlaying(int index) {
-        if (index < 0 || index >= musicList.size()) {
+        // 优先从 service 获取当前歌曲(播放列表可能和 musicList 不同)
+        MusicBean bean = null;
+        if (service != null) {
+            bean = service.getCurrentMusic();
+        }
+        if (bean == null && index >= 0 && index < musicList.size()) {
+            bean = musicList.get(index);
+        }
+        if (bean == null) {
             tvNowTitle.setText("未在播放");
             tvNowArtist.setText("");
             sbProgress.setMax(0);
@@ -844,7 +830,6 @@ public class MainActivity extends AppCompatActivity {
             lrcView.setCoverBitmap(null);
             return;
         }
-        MusicBean bean = musicList.get(index);
         tvNowTitle.setText(bean.getTitle());
         tvNowArtist.setText(bean.getArtist());
         sbProgress.setMax((int) bean.getDuration());
