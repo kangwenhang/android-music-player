@@ -2,7 +2,6 @@ package com.captiva.musicplayer;
 
 import android.app.AlertDialog;
 import android.content.DialogInterface;
-import android.content.Intent;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.View;
@@ -30,7 +29,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private EditText etUrl, etUser, etPass;
     private TextView etSyncPath;
     private TextView tvResult;
-    private Button btnTest, btnSave, btnBack, btnOpenSync, btnSelectSyncPath;
+    private Button btnTest, btnSave, btnBack, btnSelectSyncPath;
     private NavidromeConfig config;
 
     @Override
@@ -50,7 +49,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         btnTest = findViewById(R.id.btn_test);
         btnSave = findViewById(R.id.btn_save);
         btnBack = findViewById(R.id.btn_back);
-        btnOpenSync = findViewById(R.id.btn_open_sync);
         btnSelectSyncPath = findViewById(R.id.btn_select_sync_path);
 
         // 回填已保存的配置
@@ -77,12 +75,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
         btnSave.setOnClickListener(v -> {
             saveConfig();
-        });
-
-        btnOpenSync.setOnClickListener(v -> {
-            // 先保存配置,再跳转
-            saveConfigSilently();
-            startActivity(new Intent(ServerSettingsActivity.this, SyncActivity.class));
         });
 
         // 选择同步目录:弹出自定义目录浏览器
@@ -328,11 +320,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         }
         Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show();
         finish();
-    }
-
-    /** 静默保存全部配置(服务器+同步路径),不弹提示不关闭页面 */
-    private void saveConfigSilently() {
-        saveServerConfigSilently();
     }
 
     /** 静默保存服务器配置(不弹提示,不关闭页面),返回是否成功 */

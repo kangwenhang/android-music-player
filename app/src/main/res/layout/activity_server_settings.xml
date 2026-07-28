@@ -162,16 +162,6 @@
                 android:textColor="@color/btn_text"
                 android:textSize="@dimen/btn_text_size" />
 
-            <Button
-                android:id="@+id/btn_open_sync"
-                android:layout_width="match_parent"
-                android:layout_height="@dimen/btn_size"
-                android:layout_marginTop="8dp"
-                android:background="@drawable/bg_btn"
-                android:text="打开同步页面"
-                android:textColor="@color/btn_text"
-                android:textSize="@dimen/btn_text_size" />
-
             <!-- 按钮区 -->
             <LinearLayout
                 android:layout_width="match_parent"
