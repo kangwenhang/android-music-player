@@ -740,12 +740,13 @@ public class MainActivity extends AppCompatActivity {
     private void loadNavidromeMusic() {
         final String syncPath = navidromeConfig.getSyncPath();
 
-        // 取消之前的同步
-        cancelAutoSync();
-
+        // 不取消已有同步(切换模式时同步继续在后台运行)
         estimatedNetworkCount = 0;
         tvCount.setText("统计中...");
-        tvSyncStatus.setVisibility(View.GONE);
+        // 同步状态保持显示(如果正在同步)
+        if (!isAutoSyncing) {
+            tvSyncStatus.setVisibility(View.GONE);
+        }
 
         new Thread(new Runnable() {
             @Override
@@ -817,7 +818,7 @@ public class MainActivity extends AppCompatActivity {
                             @Override
                             public void run() {
                                 tvSyncStatus.setVisibility(View.VISIBLE);
-                                tvSyncStatus.setText("同步 0/" + totalSongs);
+                                tvSyncStatus.setText("同步 准备中.../" + totalSongs);
                             }
                         });
                     }

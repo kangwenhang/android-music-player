@@ -137,18 +137,30 @@
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="6dp" />
 
-            <EditText
+            <!-- 显示当前同步路径(不可编辑) -->
+            <TextView
                 android:id="@+id/et_sync_path"
                 android:layout_width="match_parent"
                 android:layout_height="@dimen/search_height"
                 android:background="@drawable/bg_search"
-                android:hint="留空=默认路径"
-                android:textColorHint="@color/search_hint"
                 android:textColor="@color/text_primary"
                 android:textSize="@dimen/search_text_size"
                 android:paddingLeft="@dimen/search_padding"
                 android:paddingRight="@dimen/search_padding"
-                android:singleLine="true" />
+                android:gravity="center_vertical"
+                android:singleLine="true"
+                android:ellipsize="middle" />
+
+            <!-- 快捷选择目录按钮 -->
+            <Button
+                android:id="@+id/btn_select_sync_path"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/btn_size"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_btn"
+                android:text="选择同步目录"
+                android:textColor="@color/btn_text"
+                android:textSize="@dimen/btn_text_size" />
 
             <Button
                 android:id="@+id/btn_open_sync"

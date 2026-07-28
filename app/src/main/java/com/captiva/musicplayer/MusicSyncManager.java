@@ -191,13 +191,29 @@ public class MusicSyncManager {
 
         Log.d(TAG, "同步开始: 共 " + allSongs.size() + " 首歌曲");
 
-        // 2. 逐首下载
+        // 2. 预扫描已存在文件(快速统计,不逐首回调进度)
+        int existingCount = 0;
+        for (MusicBean song : allSongs) {
+            if (cancelled) {
+                callback.onCancelled(0, allSongs.size());
+                return;
+            }
+            File localFile = buildLocalFile(song);
+            if (localFile.exists() && localFile.length() > 1024) {
+                existingCount++;
+            }
+        }
+
+        // 3. 以已有数量作为初始进度(避免从0开始显示)
         callback.onStart(allSongs.size());
+        callback.onProgress(existingCount, allSongs.size(),
+                existingCount > 0 ? "继续同步..." : "开始同步...");
 
         int downloaded = 0;
-        int skipped = 0;
+        int skipped = existingCount;
         int failed = 0;
 
+        // 4. 只下载不存在的文件(已存在的静默跳过)
         for (int i = 0; i < allSongs.size(); i++) {
             if (cancelled) {
                 callback.onCancelled(downloaded + skipped, allSongs.size());
@@ -207,10 +223,8 @@ public class MusicSyncManager {
             MusicBean song = allSongs.get(i);
             File localFile = buildLocalFile(song);
 
-            // 增量同步:已存在则跳过
+            // 增量同步:已存在则静默跳过(已在预扫描中统计)
             if (localFile.exists() && localFile.length() > 1024) {
-                skipped++;
-                callback.onProgress(downloaded + skipped, allSongs.size(), song.getTitle());
                 continue;
             }
 
