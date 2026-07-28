@@ -32,6 +32,9 @@ public class VerticalSeekBar extends SeekBar {
 
     private float density;
 
+    /** 保存 listener 引用(getOnSeekBarChangeListener 是隐藏 API) */
+    private OnSeekBarChangeListener listener;
+
     public VerticalSeekBar(Context context) {
         super(context);
         init(context);
@@ -73,18 +76,20 @@ public class VerticalSeekBar extends SeekBar {
     }
 
     @Override
+    public void setOnSeekBarChangeListener(OnSeekBarChangeListener l) {
+        super.setOnSeekBarChangeListener(l);
+        this.listener = l;
+    }
+
+    @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
     }
 
     @Override
     protected synchronized void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        // 交换宽高:让 SeekBar 在视觉上是垂直的
-        int w = MeasureSpec.getSize(widthMeasureSpec);
-        int h = MeasureSpec.getSize(heightMeasureSpec);
-        // 设定最小宽度
         int desiredW = (int) (40 * density);
-        int desiredH = h;
+        int desiredH = MeasureSpec.getSize(heightMeasureSpec);
         setMeasuredDimension(
                 Math.max(desiredW, resolveSize(desiredW, widthMeasureSpec)),
                 resolveSize(desiredH, heightMeasureSpec));
@@ -156,42 +161,25 @@ public class VerticalSeekBar extends SeekBar {
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 setProgress(progress);
-                notifyProgressChanged(true);
-                notifyStartTracking();
+                if (listener != null) {
+                    listener.onProgressChanged(this, getProgress(), true);
+                    listener.onStartTrackingTouch(this);
+                }
                 break;
             case MotionEvent.ACTION_MOVE:
                 setProgress(progress);
-                notifyProgressChanged(true);
+                if (listener != null) {
+                    listener.onProgressChanged(this, getProgress(), true);
+                }
                 break;
             case MotionEvent.ACTION_UP:
                 setProgress(progress);
-                notifyProgressChanged(false);
-                notifyStopTracking();
+                if (listener != null) {
+                    listener.onProgressChanged(this, getProgress(), false);
+                    listener.onStopTrackingTouch(this);
+                }
                 break;
         }
         return true;
-    }
-
-    private void notifyProgressChanged(boolean fromUser) {
-        OnSeekBarChangeListener listener = getOnSeekBarChangeListener();
-        if (listener != null) {
-            listener.onProgressChanged(this, getProgress(), fromUser);
-        }
-    }
-
-    /** 在 ACTION_DOWN 时调用 */
-    private void notifyStartTracking() {
-        OnSeekBarChangeListener listener = getOnSeekBarChangeListener();
-        if (listener != null) {
-            listener.onStartTrackingTouch(this);
-        }
-    }
-
-    /** 在 ACTION_UP 时调用 */
-    private void notifyStopTracking() {
-        OnSeekBarChangeListener listener = getOnSeekBarChangeListener();
-        if (listener != null) {
-            listener.onStopTrackingTouch(this);
-        }
     }
 }
