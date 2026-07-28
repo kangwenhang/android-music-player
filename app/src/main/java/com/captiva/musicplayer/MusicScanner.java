@@ -182,6 +182,23 @@ public class MusicScanner {
     }
 
     /**
+     * 规范化文件路径,消除符号链接差异
+     * 例如 /sdcard/Music/a.mp3 和 /storage/emulated/0/Music/a.mp3
+     * 通过 File.getCanonicalPath() 解析为同一路径
+     */
+    public static String normalizePath(String path) {
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+        try {
+            return new File(path).getCanonicalPath();
+        } catch (Exception e) {
+            // getCanonicalPath 失败,退而求其次只做简单替换
+            return path.replace("/sdcard/", "/storage/emulated/0/");
+        }
+    }
+
+    /**
      * 快速统计本地音乐总数(不加载完整元数据)
      * - MediaStore 模式:用 COUNT 查询
      * - 自定义目录模式:统计音频文件数

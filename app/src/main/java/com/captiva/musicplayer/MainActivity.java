@@ -546,15 +546,18 @@ public class MainActivity extends AppCompatActivity {
                 final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
 
                 // 合并新发现的文件(MediaStore 没有的)
+                // 用规范化路径去重(消除 /sdcard vs /storage/emulated/0 差异)
                 final List<MusicBean> toAdd = new ArrayList<>();
                 java.util.Set<String> existingPaths = new java.util.HashSet<>();
                 for (MusicBean b : quickList) {
-                    if (b.getData() != null) {
-                        existingPaths.add(b.getData());
+                    String p = MusicScanner.normalizePath(b.getData());
+                    if (!p.isEmpty()) {
+                        existingPaths.add(p);
                     }
                 }
                 for (MusicBean b : fullList) {
-                    if (b.getData() != null && !existingPaths.contains(b.getData())) {
+                    String p = MusicScanner.normalizePath(b.getData());
+                    if (!p.isEmpty() && !existingPaths.contains(p)) {
                         toAdd.add(b);
                     }
                 }
@@ -768,17 +771,18 @@ public class MainActivity extends AppCompatActivity {
                 navidromeConfig.setScanPath(syncPath);
                 final List<MusicBean> newList = MusicScanner.scan(MainActivity.this);
 
-                // 计算新增的歌曲(通过 data 路径去重)
+                // 计算新增的歌曲(用规范化路径去重,消除符号链接差异)
                 final List<MusicBean> toAdd = new ArrayList<>();
-                for (MusicBean bean : newList) {
-                    boolean exists = false;
-                    for (MusicBean existing : musicList) {
-                        if (bean.getData() != null && bean.getData().equals(existing.getData())) {
-                            exists = true;
-                            break;
-                        }
+                final java.util.Set<String> existingPaths = new java.util.HashSet<>();
+                for (MusicBean b : musicList) {
+                    String p = MusicScanner.normalizePath(b.getData());
+                    if (!p.isEmpty()) {
+                        existingPaths.add(p);
                     }
-                    if (!exists) {
+                }
+                for (MusicBean bean : newList) {
+                    String p = MusicScanner.normalizePath(bean.getData());
+                    if (!p.isEmpty() && !existingPaths.contains(p)) {
                         toAdd.add(bean);
                     }
                 }

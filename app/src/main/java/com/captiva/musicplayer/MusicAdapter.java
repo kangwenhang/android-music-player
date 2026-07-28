@@ -172,13 +172,16 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return false;
     }
 
-    /** 生成歌曲唯一标识(网络用 streamId,本地用文件路径) */
+    /** 生成歌曲唯一标识(网络用 streamId,本地用规范化文件路径) */
     private String getSongKey(MusicBean b) {
         if (b.isNetwork()) {
             return "net_" + b.getStreamId();
         } else {
             String data = b.getData();
-            return data != null ? "local_" + data : "local_" + b.getId();
+            if (data != null && !data.isEmpty()) {
+                return "local_" + MusicScanner.normalizePath(data);
+            }
+            return "local_" + b.getId();
         }
     }
 
