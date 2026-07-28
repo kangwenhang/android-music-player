@@ -897,13 +897,27 @@ public class MainActivity extends AppCompatActivity {
     // ==================== UI 更新 ====================
 
     private void updateCount() {
-        int count = adapter.getTotalFilteredCount();
+        int totalCount = adapter.getTotalCount();
+        int filteredCount = adapter.getTotalFilteredCount();
+
         // 扫描中:使用预估总数优先显示
-        if (estimatedCount > count) {
+        if (estimatedCount > totalCount) {
             tvCount.setText("共 " + estimatedCount + " 首(扫描中...)");
             return;
         }
-        tvCount.setText(count == 0 ? "" : "共 " + count + " 首");
+
+        if (totalCount == 0) {
+            tvCount.setText("");
+            return;
+        }
+
+        // 有搜索或收藏过滤时,显示 "匹配数/总数"
+        boolean isFiltering = !currentSearchQuery.isEmpty() || favoritesOnly;
+        if (isFiltering && filteredCount != totalCount) {
+            tvCount.setText(filteredCount + "/" + totalCount + " 首");
+        } else {
+            tvCount.setText("共 " + totalCount + " 首");
+        }
     }
 
     private void updateNowPlaying(int index) {

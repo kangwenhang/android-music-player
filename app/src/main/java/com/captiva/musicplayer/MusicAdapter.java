@@ -291,6 +291,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return filteredData.size();
     }
 
+    /** 获取全量歌曲总数(不受搜索/收藏过滤影响) */
+    public int getTotalCount() {
+        return fullData.size();
+    }
+
     public void setPlayingIndex(int index) {
         int old = playingIndex;
         playingIndex = index;
