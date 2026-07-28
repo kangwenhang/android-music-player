@@ -49,6 +49,139 @@ public class MusicScanner {
     }
 
     /**
+     * 快速扫描:仅用 MediaStore 查询(秒开,不遍历文件系统)
+     * 用于先快速显示已有音乐,不阻塞 UI
+     * @param context 上下文
+     * @param scanPath 扫描目录(MediaStore 查询时按 DATA LIKE 'scanPath%' 过滤)
+     */
+    public static List<MusicBean> scanMediaStoreOnly(Context context, String scanPath) {
+        List<MusicBean> list = new ArrayList<>();
+        if (context == null) return list;
+
+        NavidromeConfig config = new NavidromeConfig(context);
+        int minDurationSec = config.getMinDuration();
+        long minDurationMs = minDurationSec * 1000L;
+
+        ContentResolver resolver = context.getContentResolver();
+        Uri uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+
+        String[] projection = new String[]{
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DATA
+        };
+
+        // 按目录前缀过滤(只查同步目录下的文件)
+        String selection = MediaStore.Audio.Media.IS_MUSIC + " = 1"
+                + " AND " + MediaStore.Audio.Media.DURATION + " > " + minDurationMs;
+        String[] selectionArgs = null;
+        if (scanPath != null && !scanPath.isEmpty()) {
+            selection += " AND " + MediaStore.Audio.Media.DATA + " LIKE ?";
+            selectionArgs = new String[]{ syncPathToLikePattern(scanPath) };
+        }
+
+        String sortOrder = MediaStore.Audio.Media.TITLE + " ASC";
+
+        Cursor cursor = null;
+        try {
+            cursor = resolver.query(uri, projection, selection, selectionArgs, sortOrder);
+            if (cursor != null) {
+                int idIdx = cursor.getColumnIndex(MediaStore.Audio.Media._ID);
+                int titleIdx = cursor.getColumnIndex(MediaStore.Audio.Media.TITLE);
+                int artistIdx = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST);
+                int albumIdx = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM);
+                int durationIdx = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION);
+                int dataIdx = cursor.getColumnIndex(MediaStore.Audio.Media.DATA);
+
+                while (cursor.moveToNext()) {
+                    try {
+                        MusicBean bean = new MusicBean();
+                        bean.setId(cursor.getLong(idIdx));
+                        bean.setTitle(cursor.getString(titleIdx));
+                        bean.setArtist(cursor.getString(artistIdx));
+                        bean.setAlbum(cursor.getString(albumIdx));
+                        bean.setDuration(cursor.getLong(durationIdx));
+                        bean.setData(cursor.getString(dataIdx));
+                        bean.setUri(Uri.withAppendedPath(
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                String.valueOf(bean.getId())).toString());
+                        list.add(bean);
+                    } catch (Exception e) {
+                        // 跳过单首解析失败的
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "scanMediaStoreOnly failed", e);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        Log.d(TAG, "MediaStore 快速扫描: " + list.size() + " 首");
+        return list;
+    }
+
+    /**
+     * 目录扫描:递归遍历指定目录,补充 MediaStore 未收录的文件
+     * 用于后台补全,不阻塞 UI
+     */
+    public static List<MusicBean> scanDirectoryOnly(Context context, String scanPath) {
+        List<MusicBean> list = new ArrayList<>();
+        if (context == null || scanPath == null || scanPath.isEmpty()) {
+            return list;
+        }
+
+        NavidromeConfig config = new NavidromeConfig(context);
+        int minDurationSec = config.getMinDuration();
+        long minDurationMs = minDurationSec * 1000L;
+
+        File rootDir = new File(scanPath);
+        if (!rootDir.exists() || !rootDir.isDirectory()) {
+            return list;
+        }
+
+        List<File> audioFiles = new ArrayList<>();
+        collectAudioFiles(rootDir, audioFiles);
+
+        Log.d(TAG, "目录扫描找到 " + audioFiles.size() + " 个音频文件");
+
+        for (File file : audioFiles) {
+            try {
+                MusicBean bean = createBeanFromFile(file, minDurationMs);
+                if (bean != null) {
+                    list.add(bean);
+                }
+            } catch (Exception e) {
+                // 跳过单首失败的,不影响整体扫描
+            }
+        }
+
+        java.util.Collections.sort(list, new java.util.Comparator<MusicBean>() {
+            @Override
+            public int compare(MusicBean a, MusicBean b) {
+                return a.getTitle().compareToIgnoreCase(b.getTitle());
+            }
+        });
+
+        return list;
+    }
+
+    /** 将文件路径转为 SQL LIKE 模式(用于 MediaStore 查询) */
+    private static String syncPathToLikePattern(String path) {
+        if (path == null) return "%";
+        // 去掉末尾的斜杠
+        if (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        // 转义 SQL LIKE 特殊字符
+        return path.replace("\\", "/").replace("%", "\\%").replace("_", "\\_") + "/%";
+    }
+
+    /**
      * 快速统计本地音乐总数(不加载完整元数据)
      * - MediaStore 模式:用 COUNT 查询
      * - 自定义目录模式:统计音频文件数
@@ -225,7 +358,9 @@ public class MusicScanner {
         return null;
     }
 
-    /** 手动从文件创建 MusicBean(无 MediaStore 记录时) */
+    /** 手动从文件创建 MusicBean(无 MediaStore 记录时)
+     *  安全保护:OOM 时跳过当前文件,不崩溃
+     */
     private static MusicBean createBeanFromFile(File file, long minDurationMs) {
         if (file == null || !file.exists()) {
             return null;
@@ -242,11 +377,12 @@ public class MusicScanner {
         }
 
         // 尝试用 MediaMetadataRetriever 获取时长
-        long duration = 0;
-        android.media.MediaMetadataRetriever mmr = new android.media.MediaMetadataRetriever();
+        android.media.MediaMetadataRetriever mmr = null;
         try {
+            mmr = new android.media.MediaMetadataRetriever();
             mmr.setDataSource(filePath);
             String durStr = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long duration = 0;
             if (durStr != null && !durStr.isEmpty()) {
                 duration = Long.parseLong(durStr);
             }
@@ -267,6 +403,21 @@ public class MusicScanner {
             // 没有 content uri,用文件路径作为 uri
             bean.setUri(filePath);
             return bean;
+        } catch (OutOfMemoryError e) {
+            // 车机内存不足,跳过此文件,不崩溃
+            Log.w(TAG, "OOM 读取元数据,跳过: " + fileName);
+            // 用文件名创建,不读取元数据
+            if (file.length() > 1024) {
+                MusicBean bean = new MusicBean();
+                bean.setTitle(title);
+                bean.setArtist("未知艺术家");
+                bean.setAlbum("未知专辑");
+                bean.setDuration(0);
+                bean.setData(filePath);
+                bean.setUri(filePath);
+                return bean;
+            }
+            return null;
         } catch (Exception e) {
             Log.w(TAG, "无法读取元数据: " + fileName, e);
             // 即使无法读取元数据,也尝试加入(用文件名)
@@ -282,10 +433,12 @@ public class MusicScanner {
             }
             return null;
         } finally {
-            try {
-                mmr.release();
-            } catch (Exception e) {
-                // ignore
+            if (mmr != null) {
+                try {
+                    mmr.release();
+                } catch (Exception e) {
+                    // ignore
+                }
             }
         }
     }

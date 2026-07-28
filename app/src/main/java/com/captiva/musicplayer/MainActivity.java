@@ -509,63 +509,78 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 加载音乐(扫描同步目录)
-     * 统一入口:本地和服务器音乐都在同一个目录
-     * 1. 快速统计文件数,优先显示
-     * 2. 完整扫描加载元数据
-     * 3. 后台自动同步服务器新歌
+     * 1. 先用 MediaStore 快速加载(秒开,本地音乐立即可见可播)
+     * 2. 后台递归扫描补全(MediaStore 未收录的文件)
+     * 3. 后台自动同步服务器新歌(不阻塞 UI)
      */
     private void loadMusic() {
-        tvEmpty.setText("正在扫描音乐...");
-        tvEmpty.setVisibility(View.VISIBLE);
-        tvCount.setText("统计中...");
-        estimatedCount = 0;
-
-        // 同步状态保持显示(如果正在同步)
-        if (!isAutoSyncing) {
-            tvSyncStatus.setVisibility(View.GONE);
-        }
-
         final String syncPath = navidromeConfig.getSyncPath();
 
+        // 设置扫描路径为同步目录
+        navidromeConfig.setScanPath(syncPath);
+
+        // 1. 先用 MediaStore 快速加载(秒开)
+        final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(this, syncPath);
+
+        musicList.clear();
+        musicList.addAll(quickList);
+        adapter.setData(musicList);
+        updateCount();
+
+        if (musicList.isEmpty()) {
+            tvEmpty.setVisibility(View.VISIBLE);
+            tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
+        } else {
+            tvEmpty.setVisibility(View.GONE);
+            // 立即设置播放列表,本地音乐可播
+            if (service != null) {
+                service.setPlayList(musicList, 0);
+            }
+        }
+
+        // 2. 后台递归扫描补全 + 同步(不阻塞 UI)
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 1. 快速统计文件数
-                final int fastCount = MusicSyncManager.countSyncedFiles(syncPath);
+                // 后台完整扫描(递归遍历目录,含 MediaStore 未收录的文件)
+                final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
 
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (fastCount > 0) {
-                            estimatedCount = fastCount;
-                            tvCount.setText("共 " + fastCount + " 首(扫描中...)");
-                        }
+                // 合并新发现的文件(MediaStore 没有的)
+                final List<MusicBean> toAdd = new ArrayList<>();
+                java.util.Set<String> existingPaths = new java.util.HashSet<>();
+                for (MusicBean b : quickList) {
+                    if (b.getData() != null) {
+                        existingPaths.add(b.getData());
                     }
-                });
-
-                // 2. 设置扫描路径为同步目录,完整扫描
-                navidromeConfig.setScanPath(syncPath);
-                final List<MusicBean> list = MusicScanner.scan(MainActivity.this);
-
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        musicList.clear();
-                        musicList.addAll(list);
-                        adapter.setData(musicList);
-                        estimatedCount = 0;
-                        updateCount();
-                        if (musicList.isEmpty()) {
-                            tvEmpty.setVisibility(View.VISIBLE);
-                            tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
-                        } else {
-                            tvEmpty.setVisibility(View.GONE);
-                        }
-                        if (service != null && !musicList.isEmpty()) {
-                            service.setPlayList(musicList, 0);
-                        }
+                }
+                for (MusicBean b : fullList) {
+                    if (b.getData() != null && !existingPaths.contains(b.getData())) {
+                        toAdd.add(b);
                     }
-                });
+                }
+
+                if (!toAdd.isEmpty()) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            musicList.addAll(toAdd);
+                            java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
+                                @Override
+                                public int compare(MusicBean a, MusicBean b) {
+                                    return a.getTitle().compareToIgnoreCase(b.getTitle());
+                                }
+                            });
+                            adapter.setData(musicList);
+                            updateCount();
+                            if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
+                                tvEmpty.setVisibility(View.GONE);
+                            }
+                            if (service != null && !musicList.isEmpty()) {
+                                service.setPlayList(musicList, 0);
+                            }
+                        }
+                    });
+                }
 
                 // 3. 后台自动同步服务器新歌
                 startBackgroundSync();
