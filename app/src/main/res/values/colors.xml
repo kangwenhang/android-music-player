@@ -47,4 +47,8 @@
     <color name="server_status_connecting">#FFA726</color>
     <color name="server_status_retrying">#FF7043</color>
     <color name="server_status_offline">#78909C</color>
+
+    <!-- 收藏爱心 -->
+    <color name="favorite_active">#FF5252</color>
+    <color name="favorite_inactive">#6A6A70</color>
 </resources>

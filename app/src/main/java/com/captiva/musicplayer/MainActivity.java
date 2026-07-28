@@ -50,7 +50,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvEmpty, tvCount, tvSyncStatus;
     // UI - 顶栏
     private EditText etSearch;
-    private Button btnSettings;
+    private Button btnSettings, btnFavorites;
     private TextView tvServerStatus;
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
@@ -69,6 +69,10 @@ public class MainActivity extends AppCompatActivity {
     private NavidromeConfig navidromeConfig;
     /** 网络歌曲列表缓存(同步后保存,下次秒开) */
     private SongCache songCache;
+    /** 收藏管理器 */
+    private FavoriteManager favoriteManager;
+    /** 是否正在只显示收藏(收藏夹模式) */
+    private boolean favoritesOnly = false;
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
 
@@ -155,6 +159,7 @@ public class MainActivity extends AppCompatActivity {
 
         navidromeConfig = new NavidromeConfig(this);
         songCache = new SongCache(this);
+        favoriteManager = new FavoriteManager(this);
 
         // 初始化 NavidromeApi(如果已配置)
         if (navidromeConfig.isConfigured()) {
@@ -231,6 +236,7 @@ public class MainActivity extends AppCompatActivity {
         tvSyncStatus = findViewById(R.id.tv_sync_status);
         etSearch = findViewById(R.id.et_search);
         btnSettings = findViewById(R.id.btn_settings);
+        btnFavorites = findViewById(R.id.btn_favorites);
         tvServerStatus = findViewById(R.id.tv_server_status);
         tvNowTitle = findViewById(R.id.tv_now_title);
         tvNowArtist = findViewById(R.id.tv_now_artist);
@@ -244,6 +250,7 @@ public class MainActivity extends AppCompatActivity {
         lrcView = findViewById(R.id.lrc_view);
 
         adapter = new MusicAdapter(this);
+        adapter.setFavoriteManager(favoriteManager);
         adapter.setOnItemClickListener((position, bean) -> {
             if (service != null) {
                 // 用当前显示的列表作为播放列表
@@ -251,6 +258,13 @@ public class MainActivity extends AppCompatActivity {
                 service.setPlayList(displayList, position);
                 service.playIndex(position);
             }
+        });
+        adapter.setOnFavoriteClickListener((bean, isNowFavorite) -> {
+            // 收藏状态变化时,如果在收藏夹模式,刷新列表
+            if (favoritesOnly) {
+                applyFavoritesFilter();
+            }
+            Toast.makeText(this, isNowFavorite ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
         });
         rvList.setLayoutManager(new LinearLayoutManager(this));
         // 关闭 item 动画(车机性能弱,动画卡顿)
@@ -285,6 +299,20 @@ public class MainActivity extends AppCompatActivity {
         // 设置(均衡器 + 服务器统一入口)
         btnSettings.setOnClickListener(v -> {
             showSettingsMenu();
+        });
+
+        // 收藏夹:切换只看收藏
+        btnFavorites.setOnClickListener(v -> {
+            favoritesOnly = !favoritesOnly;
+            if (favoritesOnly) {
+                btnFavorites.setBackgroundResource(R.drawable.bg_btn_play);
+                applyFavoritesFilter();
+            } else {
+                btnFavorites.setBackgroundResource(R.drawable.bg_btn);
+                // 恢复搜索或全部
+                adapter.filter(currentSearchQuery);
+                updateCount();
+            }
         });
 
         // 点击服务器状态可手动刷新
@@ -334,8 +362,30 @@ public class MainActivity extends AppCompatActivity {
      */
     private void handleSearchInput(String query) {
         currentSearchQuery = query != null ? query.trim() : "";
-        adapter.filter(currentSearchQuery);
+        if (favoritesOnly) {
+            applyFavoritesFilter();
+        } else {
+            adapter.filter(currentSearchQuery);
+        }
         updateCount();
+    }
+
+    // ==================== 收藏夹 ====================
+
+    /** 应用收藏过滤:只显示已收藏的歌曲 */
+    private void applyFavoritesFilter() {
+        int count = favoriteManager.size();
+        if (count == 0) {
+            Toast.makeText(this, "还没有收藏的歌曲", Toast.LENGTH_SHORT).show();
+        }
+        adapter.filterFavorites(favoriteManager);
+        updateCount();
+        if (count == 0) {
+            tvEmpty.setVisibility(View.VISIBLE);
+            tvEmpty.setText("还没有收藏的歌曲\n点击歌曲右侧爱心收藏");
+        } else {
+            tvEmpty.setVisibility(View.GONE);
+        }
     }
 
     // ==================== 设置菜单 ====================
@@ -790,7 +840,23 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
-                        if (currentSearchQuery.isEmpty()) {
+                        if (favoritesOnly) {
+                            // 收藏夹模式:重新设置数据后重新过滤收藏
+                            if (!toAdd.isEmpty()) {
+                                musicList.addAll(toAdd);
+                                java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
+                                    @Override
+                                    public int compare(MusicBean a, MusicBean b) {
+                                        return a.getTitle().compareToIgnoreCase(b.getTitle());
+                                    }
+                                });
+                            }
+                            adapter.setData(musicList);
+                            applyFavoritesFilter();
+                            if (service != null && !musicList.isEmpty()) {
+                                service.setPlayList(musicList, 0);
+                            }
+                        } else if (currentSearchQuery.isEmpty()) {
                             if (!toAdd.isEmpty()) {
                                 musicList.addAll(toAdd);
                                 java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {

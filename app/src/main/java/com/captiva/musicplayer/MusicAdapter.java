@@ -34,6 +34,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         void onItemClick(int position, MusicBean bean);
     }
 
+    /** 收藏按钮点击回调 */
+    public interface OnFavoriteClickListener {
+        void onFavoriteClick(MusicBean bean, boolean isNowFavorite);
+    }
+
     /** 滚动加载每批数量(车机性能弱,小批量) */
     private static final int BATCH_SIZE = 50;
 
@@ -43,6 +48,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private final List<MusicBean> data = new ArrayList<>();       // 当前显示列表(分批加载)
     private final Context context;
     private OnItemClickListener listener;
+    private OnFavoriteClickListener favoriteListener;
+    private FavoriteManager favoriteManager;
     private int playingIndex = -1;
     private String filterKeyword = "";
 
@@ -63,6 +70,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private final int colorSourceNetwork;
     private final int colorSourceLocal;
     private final int coverSizeList;
+    private final int colorFavoriteActive;
+    private final int colorFavoriteInactive;
 
     public MusicAdapter(Context context) {
         this.context = context;
@@ -76,6 +85,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         colorSourceNetwork = ContextCompat.getColor(context, R.color.source_network);
         colorSourceLocal = ContextCompat.getColor(context, R.color.source_local);
         coverSizeList = (int) context.getResources().getDimension(R.dimen.cover_size_list);
+        colorFavoriteActive = ContextCompat.getColor(context, R.color.favorite_active);
+        colorFavoriteInactive = ContextCompat.getColor(context, R.color.favorite_inactive);
         // 启用稳定 ID 提升 RecyclerView 回收效率
         setHasStableIds(true);
     }
@@ -193,6 +204,28 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         applyFilterAndLoadFirstBatch();
     }
 
+    /** 只显示收藏的歌曲(主线程) */
+    public synchronized void filterFavorites(FavoriteManager fm) {
+        loadedCount = 0;
+        data.clear();
+        filteredData.clear();
+        if (fm != null) {
+            for (MusicBean b : fullData) {
+                if (fm.isFavorite(b)) {
+                    filteredData.add(b);
+                }
+            }
+        }
+        // 加载第一批
+        int loadCount = Math.min(BATCH_SIZE, filteredData.size());
+        for (int i = 0; i < loadCount; i++) {
+            data.add(filteredData.get(i));
+        }
+        loadedCount = loadCount;
+        hasMore = loadedCount < filteredData.size();
+        notifyDataSetChanged();
+    }
+
     /** 过滤并加载第一批(主线程) */
     private void applyFilterAndLoadFirstBatch() {
         filteredData.clear();
@@ -271,6 +304,19 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         this.listener = l;
     }
 
+    public void setOnFavoriteClickListener(OnFavoriteClickListener l) {
+        this.favoriteListener = l;
+    }
+
+    public void setFavoriteManager(FavoriteManager fm) {
+        this.favoriteManager = fm;
+    }
+
+    /** 收藏状态变化后刷新列表显示 */
+    public void notifyFavoriteChanged() {
+        notifyDataSetChanged();
+    }
+
     @NonNull
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -297,6 +343,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         holder.tvArtist.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
         holder.vSource.setBackgroundColor(bean.isNetwork() ? colorSourceNetwork : colorSourceLocal);
 
+        // 收藏爱心:已收藏红色实心♡,未收藏灰色空心♡
+        boolean isFav = favoriteManager != null && favoriteManager.isFavorite(bean);
+        holder.btnFavorite.setText(isFav ? "\u2665" : "\u2661");
+        holder.btnFavorite.setTextColor(isFav ? colorFavoriteActive : colorFavoriteInactive);
+
         // 使用缓存的封面尺寸
         CoverLoader.getInstance().load(bean, holder.ivCover, coverSizeList);
 
@@ -306,6 +357,18 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 if (pos >= 0 && pos < data.size()) {
                     listener.onItemClick(pos, data.get(pos));
                 }
+            }
+        });
+
+        // 收藏按钮点击
+        holder.btnFavorite.setOnClickListener(v -> {
+            if (favoriteManager == null) return;
+            boolean nowFav = favoriteManager.toggleFavorite(bean);
+            // 更新爱心显示
+            holder.btnFavorite.setText(nowFav ? "\u2665" : "\u2661");
+            holder.btnFavorite.setTextColor(nowFav ? colorFavoriteActive : colorFavoriteInactive);
+            if (favoriteListener != null) {
+                favoriteListener.onFavoriteClick(bean, nowFav);
             }
         });
 
@@ -324,6 +387,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         TextView tvTitle;
         TextView tvArtist;
         View vSource;
+        TextView btnFavorite;
 
         VH(@NonNull View itemView) {
             super(itemView);
@@ -332,6 +396,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             tvTitle = itemView.findViewById(R.id.tv_title);
             tvArtist = itemView.findViewById(R.id.tv_artist);
             vSource = itemView.findViewById(R.id.v_source);
+            btnFavorite = itemView.findViewById(R.id.btn_favorite);
         }
     }
 }

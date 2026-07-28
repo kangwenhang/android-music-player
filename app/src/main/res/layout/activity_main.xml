@@ -70,6 +70,19 @@
             android:imeOptions="actionSearch"
             android:inputType="text" />
 
+        <!-- 收藏夹按钮 -->
+        <Button
+            android:id="@+id/btn_favorites"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/top_btn_height"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
+            android:minWidth="@dimen/top_btn_min_width"
+            android:background="@drawable/bg_btn"
+            android:text="\u2665 收藏"
+            android:textColor="@color/btn_text"
+            android:textSize="@dimen/sub_text_size" />
+
         <!-- 设置(均衡器+服务器统一入口,电阻屏加大) -->
         <Button
             android:id="@+id/btn_settings"
