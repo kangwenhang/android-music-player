@@ -98,7 +98,10 @@ public class MusicService extends Service {
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         registerMediaButton();
         // 初始化均衡器并注册到全局,供 EqualizerActivity 使用
+        // 设置 Context 用于持久化,并在启动时静默初始化(允许未播放时调节)
         equalizerManager = new EqualizerManager();
+        equalizerManager.setContext(this);
+        equalizerManager.initSilent();
         MusicDataHolder.getInstance().setEqualizerManager(equalizerManager);
     }
 

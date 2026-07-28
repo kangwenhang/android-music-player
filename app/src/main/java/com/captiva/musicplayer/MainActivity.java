@@ -312,6 +312,10 @@ public class MainActivity extends AppCompatActivity {
                 // 恢复搜索或全部
                 adapter.filter(currentSearchQuery);
                 updateCount();
+                // 隐藏"还没有收藏"的空提示
+                if (!musicList.isEmpty()) {
+                    tvEmpty.setVisibility(View.GONE);
+                }
             }
         });
 

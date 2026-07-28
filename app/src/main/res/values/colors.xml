@@ -51,4 +51,15 @@
     <!-- 收藏爱心 -->
     <color name="favorite_active">#FF5252</color>
     <color name="favorite_inactive">#6A6A70</color>
+
+    <!-- 均衡器 -->
+    <color name="eq_card_bg">#232328</color>
+    <color name="eq_preset_bg">#2E2E34</color>
+    <color name="eq_preset_selected_bg">#4FC3F7</color>
+    <color name="eq_preset_text">#C0C0C5</color>
+    <color name="eq_preset_selected_text">#0A1A2A</color>
+    <color name="eq_band_panel_bg">#1E1E24</color>
+    <color name="eq_freq_label">#9A9AA0</color>
+    <color name="eq_value_label">#4FC3F7</color>
+    <color name="eq_hint_text">#6A6A70</color>
 </resources>
