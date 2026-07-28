@@ -52,7 +52,7 @@ public class MainActivity extends AppCompatActivity {
 
     // UI - 列表区
     private RecyclerView rvList;
-    private TextView tvEmpty, tvCount;
+    private TextView tvEmpty, tvCount, tvSyncStatus;
     // UI - 顶栏
     private EditText etSearch;
     private Button btnSource, btnSettings;
@@ -85,6 +85,14 @@ public class MainActivity extends AppCompatActivity {
 
     /** 服务器状态监控器 */
     private ServerStatusMonitor statusMonitor;
+
+    /** 自动同步管理器(网络模式后台自动下载) */
+    private MusicSyncManager syncManager;
+    /** 是否正在自动同步 */
+    private boolean isAutoSyncing = false;
+    /** 待刷新计数器(累积N首后刷新一次列表) */
+    private int pendingSyncRefresh = 0;
+    private static final int REFRESH_BATCH_SIZE = 5;
 
     // 进度刷新
     private final Handler handler = new Handler();
@@ -229,6 +237,7 @@ public class MainActivity extends AppCompatActivity {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
         tvCount = findViewById(R.id.tv_count);
+        tvSyncStatus = findViewById(R.id.tv_sync_status);
         etSearch = findViewById(R.id.et_search);
         btnSource = findViewById(R.id.btn_source);
         btnSettings = findViewById(R.id.btn_settings);
@@ -575,7 +584,8 @@ public class MainActivity extends AppCompatActivity {
             etSearch.setText("");
             loadNavidromeMusic();
         } else {
-            // 切换到本地
+            // 切换到本地:取消自动同步
+            cancelAutoSync();
             sourceMode = SourceMode.LOCAL;
             btnSource.setText("本地");
             btnSource.setBackgroundResource(R.drawable.bg_btn_source_local);
@@ -680,23 +690,26 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 加载网络音乐(从同步目录扫描本地文件)
      *
-     * 新策略:网络模式直接扫描同步下载的本地文件,从本地播放
-     * - 如果同步目录有文件,直接扫描播放(秒开,不卡顿)
-     * - 如果同步目录为空,提示用户去同步
-     * - 如果服务器可用,后台统计总数显示
+     * 策略:
+     * 1. 扫描同步目录已有文件,立即显示(秒开)
+     * 2. 后台自动同步服务器新歌曲
+     * 3. 每下载一首实时更新列表
+     * 4. 只显示已同步完成(下载完毕)的歌曲
      */
     private void loadNavidromeMusic() {
-        String syncPath = navidromeConfig.getSyncPath();
+        final String syncPath = navidromeConfig.getSyncPath();
 
-        // 1. 快速统计同步目录文件数
+        // 取消之前的同步
+        cancelAutoSync();
+
         estimatedNetworkCount = 0;
         tvCount.setText("统计中...");
+        tvSyncStatus.setVisibility(View.GONE);
 
-        // 2. 扫描同步目录的本地文件
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 快速统计
+                // 快速统计现有文件
                 final int syncedCount = MusicSyncManager.countSyncedFiles(syncPath);
 
                 runOnUiThread(new Runnable() {
@@ -709,63 +722,247 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
-                // 完整扫描同步目录
-                final List<MusicBean> list = scanSyncDirectory(syncPath);
+                // 扫描同步目录已有文件
+                final List<MusicBean> existingList = scanSyncDirectory(syncPath);
 
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (!list.isEmpty()) {
+                        if (!existingList.isEmpty()) {
                             musicList.clear();
-                            musicList.addAll(list);
+                            musicList.addAll(existingList);
                             adapter.setData(musicList);
                             estimatedNetworkCount = 0;
                             updateCount();
                             tvEmpty.setVisibility(View.GONE);
-                            if (service != null && !musicList.isEmpty()) {
+                            if (service != null) {
                                 service.setPlayList(musicList, 0);
                             }
                         } else {
-                            // 同步目录为空
                             musicList.clear();
                             adapter.setData(musicList);
                             tvEmpty.setVisibility(View.VISIBLE);
-                            tvEmpty.setText("未同步任何音乐\n请在设置中点击\"同步音乐\"下载服务器音乐");
+                            tvEmpty.setText("暂无同步歌曲\n正在从服务器获取列表...");
                             tvCount.setText("");
                         }
                     }
                 });
 
-                // 3. 后台从服务器获取歌曲总数(用于对比显示是否需要更新同步)
+                // 后台从服务器获取歌曲总数并自动同步
                 final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
-                if (api != null && MusicDataHolder.getInstance().isNavidromeEnabled()) {
-                    new Thread(new Runnable() {
-                        @Override
-                        public void run() {
-                            final List<AlbumBean> allAlbums = api.getAllAlbums();
-                            int serverTotal = 0;
-                            if (allAlbums != null) {
-                                for (AlbumBean album : allAlbums) {
-                                    serverTotal += album.getSongCount();
-                                }
-                            }
-                            final int serverCount = serverTotal;
+                if (api == null || !MusicDataHolder.getInstance().isNavidromeEnabled()) {
+                    return;
+                }
 
-                            runOnUiThread(new Runnable() {
+                // 获取服务器歌曲总数
+                final List<AlbumBean> allAlbums = api.getAllAlbums();
+                int serverTotal = 0;
+                if (allAlbums != null) {
+                    for (AlbumBean album : allAlbums) {
+                        serverTotal += album.getSongCount();
+                    }
+                }
+                final int serverCount = serverTotal;
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (serverCount > syncedCount) {
+                            // 有未同步歌曲,启动自动同步
+                            startAutoSync(syncPath, serverCount);
+                        } else if (syncedCount > 0) {
+                            tvSyncStatus.setVisibility(View.VISIBLE);
+                            tvSyncStatus.setText("已是最新");
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 启动自动同步 */
+    private void startAutoSync(String syncPath, int serverCount) {
+        final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        if (api == null) return;
+
+        isAutoSyncing = true;
+        pendingSyncRefresh = 0;
+        syncManager = new MusicSyncManager(this, api, syncPath);
+
+        tvSyncStatus.setVisibility(View.VISIBLE);
+        tvSyncStatus.setText("同步中...");
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                syncManager.sync(new MusicSyncManager.SyncCallback() {
+                    @Override
+                    public void onStart(final int totalSongs) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                tvSyncStatus.setVisibility(View.VISIBLE);
+                                tvSyncStatus.setText("同步 0/" + totalSongs);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onProgress(final int downloaded, final int total, final String currentSong) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                tvSyncStatus.setText("同步 " + downloaded + "/" + total);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onSongDownloaded(final int downloaded, final int total) {
+                        // 累积 N 首后刷新一次列表(避免频繁刷新)
+                        pendingSyncRefresh++;
+                        if (pendingSyncRefresh >= REFRESH_BATCH_SIZE) {
+                            pendingSyncRefresh = 0;
+                            handler.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    if (serverCount > syncedCount) {
-                                        // 服务器有更多歌曲,提示需要同步
-                                        Toast.makeText(MainActivity.this,
-                                                "服务器有 " + serverCount + " 首,本地已同步 " + syncedCount + " 首\n"
-                                                        + "差 " + (serverCount - syncedCount) + " 首,建议重新同步",
-                                                Toast.LENGTH_LONG).show();
-                                    }
+                                    tvSyncStatus.setText("同步 " + downloaded + "/" + total);
+                                    refreshSyncList(syncPath);
+                                }
+                            });
+                        } else {
+                            handler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    tvSyncStatus.setText("同步 " + downloaded + "/" + total);
                                 }
                             });
                         }
-                    }).start();
+                    }
+
+                    @Override
+                    public void onSongFailed(final String songTitle, final String reason) {
+                        // 静默忽略
+                    }
+
+                    @Override
+                    public void onComplete(final int downloaded, final int skipped, final int failed, final int total) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                isAutoSyncing = false;
+                                // 最终刷新列表
+                                refreshSyncList(syncPath);
+                                tvSyncStatus.setText("已同步");
+                                updateCount();
+                                if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
+                                    tvEmpty.setVisibility(View.GONE);
+                                }
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onCancelled(final int downloaded, final int total) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                isAutoSyncing = false;
+                                tvSyncStatus.setVisibility(View.GONE);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onError(final String message) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                isAutoSyncing = false;
+                                tvSyncStatus.setVisibility(View.VISIBLE);
+                                tvSyncStatus.setText(message);
+                            }
+                        });
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 取消自动同步 */
+    private void cancelAutoSync() {
+        if (syncManager != null) {
+            syncManager.cancel();
+            syncManager = null;
+        }
+        isAutoSyncing = false;
+        pendingSyncRefresh = 0;
+        tvSyncStatus.setVisibility(View.GONE);
+    }
+
+    /**
+     * 增量刷新同步列表
+     * 扫描同步目录,将新下载的文件加入列表(不重复添加已有)
+     */
+    private void refreshSyncList(String syncPath) {
+        if (syncPath == null || syncPath.isEmpty()) return;
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<MusicBean> newList = scanSyncDirectory(syncPath);
+
+                // 计算新增的歌曲(通过 data 路径去重)
+                final List<MusicBean> toAdd = new ArrayList<>();
+                for (MusicBean bean : newList) {
+                    boolean exists = false;
+                    for (MusicBean existing : musicList) {
+                        if (bean.getData() != null && bean.getData().equals(existing.getData())) {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists) {
+                        toAdd.add(bean);
+                    }
                 }
+
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        // 如果有搜索过滤,刷新整个列表;否则增量添加
+                        if (currentSearchQuery.isEmpty()) {
+                            if (!toAdd.isEmpty()) {
+                                musicList.addAll(toAdd);
+                                // 按标题排序
+                                java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
+                                    @Override
+                                    public int compare(MusicBean a, MusicBean b) {
+                                        return a.getTitle().compareToIgnoreCase(b.getTitle());
+                                    }
+                                });
+                                adapter.setData(musicList);
+                                if (service != null && !musicList.isEmpty()) {
+                                    service.setPlayList(musicList, 0);
+                                }
+                            }
+                        } else {
+                            // 有搜索过滤:重新设置全部数据
+                            musicList.clear();
+                            musicList.addAll(newList);
+                            adapter.setData(musicList);
+                            adapter.filter(currentSearchQuery);
+                            if (service != null) {
+                                service.setPlayList(musicList, 0);
+                            }
+                        }
+
+                        if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+                        updateCount();
+                    }
+                });
             }
         }).start();
     }
@@ -1084,6 +1281,8 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // 取消自动同步
+        cancelAutoSync();
         // 停止服务器状态监控
         if (statusMonitor != null) {
             statusMonitor.stop();

@@ -34,6 +34,8 @@ public class MusicSyncManager {
         void onStart(int totalSongs);
         /** 进度更新 */
         void onProgress(int downloaded, int total, String currentSong);
+        /** 单首下载完成(实时回调,用于主动刷新列表) */
+        void onSongDownloaded(int downloaded, int total);
         /** 单首下载失败 */
         void onSongFailed(String songTitle, String reason);
         /** 同步完成 */
@@ -219,6 +221,8 @@ public class MusicSyncManager {
             long bytes = api.downloadFile(song.getStreamId(), localFile);
             if (bytes > 0) {
                 downloaded++;
+                // 实时通知:每下载一首就回调
+                callback.onSongDownloaded(downloaded + skipped, allSongs.size());
             } else {
                 failed++;
                 callback.onSongFailed(song.getTitle(), "下载失败");

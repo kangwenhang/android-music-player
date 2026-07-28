@@ -40,6 +40,17 @@
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/sub_text_size" />
 
+        <!-- 同步进度(网络模式自动同步时显示) -->
+        <TextView
+            android:id="@+id/tv_sync_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:layout_marginLeft="6dp"
+            android:textColor="@color/source_network"
+            android:textSize="@dimen/time_text_size"
+            android:visibility="gone" />
+
         <!-- 搜索栏(实时搜索,系统输入法) -->
         <EditText
             android:id="@+id/et_search"

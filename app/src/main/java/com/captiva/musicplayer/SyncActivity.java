@@ -136,6 +136,19 @@ public class SyncActivity extends AppCompatActivity {
                     }
 
                     @Override
+                    public void onSongDownloaded(final int downloaded, final int total) {
+                        handler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                pbSync.setProgress(downloaded);
+                                int percent = total > 0 ? (downloaded * 100 / total) : 0;
+                                tvProgressText.setText("下载中...");
+                                tvProgressDetail.setText(downloaded + " / " + total + " (" + percent + "%)");
+                            }
+                        });
+                    }
+
+                    @Override
                     public void onSongFailed(final String songTitle, final String reason) {
                         handler.post(new Runnable() {
                             @Override
