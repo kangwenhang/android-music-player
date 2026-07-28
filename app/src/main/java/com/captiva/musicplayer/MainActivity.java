@@ -360,9 +360,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 同步音乐 / 时长过滤 / 扫描目录 / 清除缓存 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 扫描目录 / 清除缓存 */
     private void showSettingsMenu() {
-        String[] items = {"均衡器", "服务器设置", "同步音乐", "时长过滤设置", "扫描目录设置", "清除网络缓存"};
+        String[] items = {"均衡器", "服务器设置", "时长过滤设置", "扫描目录设置", "清除网络缓存"};
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("设置");
         builder.setItems(items, new DialogInterface.OnClickListener() {
@@ -376,23 +376,12 @@ public class MainActivity extends AppCompatActivity {
                     needReloadNavidrome = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
                 } else if (which == 2) {
-                    // 同步音乐
-                    if (!navidromeConfig.isConfigured()) {
-                        Toast.makeText(MainActivity.this, "请先配置 Navidrome 服务器",
-                                Toast.LENGTH_LONG).show();
-                        needReloadNavidrome = true;
-                        startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
-                    } else {
-                        needReloadNavidrome = true;
-                        startActivity(new Intent(MainActivity.this, SyncActivity.class));
-                    }
-                } else if (which == 3) {
                     // 时长过滤设置
                     showDurationFilterDialog();
-                } else if (which == 4) {
+                } else if (which == 3) {
                     // 扫描目录设置
                     showScanPathDialog();
-                } else if (which == 5) {
+                } else if (which == 4) {
                     // 清除网络缓存
                     showClearCacheDialog();
                 }
