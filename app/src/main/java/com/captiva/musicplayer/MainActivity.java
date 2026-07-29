@@ -1020,14 +1020,22 @@ public class MainActivity extends AppCompatActivity {
         // 更新高亮索引
         adapter.setPlayingIndex(pos);
 
-        // 滚动到该位置(使用 scrollToPosition,车机性能弱,不用平滑滚动)
+        // 滚动到该位置并定位到列表中间(车机性能弱,不用平滑滚动)
         LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
         if (lm != null) {
             // 检查当前是否可见,不可见才滚动(避免不必要的跳动)
             int firstVisible = lm.findFirstVisibleItemPosition();
             int lastVisible = lm.findLastVisibleItemPosition();
             if (pos < firstVisible || pos > lastVisible) {
-                rvList.scrollToPosition(pos);
+                int rvHeight = rvList.getHeight();
+                // 用已有子项高度估算 item 高度,计算居中偏移
+                int itemHeight = 80;
+                View firstChild = lm.getChildAt(0);
+                if (firstChild != null && firstChild.getHeight() > 0) {
+                    itemHeight = firstChild.getHeight();
+                }
+                int offset = Math.max(0, (rvHeight - itemHeight) / 2);
+                lm.scrollToPositionWithOffset(pos, offset);
             }
         }
     }
