@@ -3,14 +3,23 @@
 
 buildscript {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
-        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
-        // 备用镜像:阿里云故障时自动回退
-        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
-        maven { url 'https://maven.huaweicloud.com/repository/maven-public/' }
-        google()
-        mavenCentral()
+        // CI 环境(GitHub Actions)用官方仓库优先,避免镜像 502
+        if (System.getenv('CI') != null || System.getenv('GITHUB_ACTIONS') != null) {
+            google()
+            mavenCentral()
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+            maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+        } else {
+            // 本地构建:国内镜像优先
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+            maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+            maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+            maven { url 'https://maven.huaweicloud.com/repository/maven-public/' }
+            google()
+            mavenCentral()
+        }
     }
     dependencies {
         // AGP 7.4.x 对老版本 minSdk 兼容性较好
@@ -20,14 +29,21 @@ buildscript {
 
 allprojects {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/google' }
-        maven { url 'https://maven.aliyun.com/repository/public' }
-        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
-        // 备用镜像:阿里云故障时自动回退
-        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
-        maven { url 'https://maven.huaweicloud.com/repository/maven-public/' }
-        google()
-        mavenCentral()
+        if (System.getenv('CI') != null || System.getenv('GITHUB_ACTIONS') != null) {
+            google()
+            mavenCentral()
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+            maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+        } else {
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+            maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+            maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+            maven { url 'https://maven.huaweicloud.com/repository/maven-public/' }
+            google()
+            mavenCentral()
+        }
     }
 }
 
