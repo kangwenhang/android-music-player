@@ -275,8 +275,9 @@ public class ServerSettingsActivity extends AppCompatActivity {
         builder.show();
     }
 
-    /** 设置同步路径并更新UI */
+    /** 设置同步路径:立即持久化 + 更新UI */
     private void setSyncPath(String path) {
+        config.setSyncPath(path);  // 立即保存到 SharedPreferences
         etSyncPath.setText(path);
         File dir = new File(path);
         if (!dir.exists()) {
