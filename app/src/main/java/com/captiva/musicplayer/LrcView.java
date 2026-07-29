@@ -5,10 +5,10 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
-import android.graphics.RectF;
+import android.text.Layout;
+import android.text.StaticLayout;
+import android.text.TextPaint;
 import android.util.AttributeSet;
 import android.view.View;
 
@@ -20,6 +20,7 @@ import java.util.List;
  * - 封面作为底色背景(放大+模糊+暗化)
  * - 歌词叠加在封面之上
  * - 当前行高亮居中,上下行渐淡
+ * - 支持自动换行(长歌词不截断)
  */
 public class LrcView extends View {
 
@@ -30,16 +31,21 @@ public class LrcView extends View {
     private Bitmap coverBitmap;
     private Bitmap blurredBitmap;
 
-    private final Paint currentPaint = new Paint();
-    private final Paint normalPaint = new Paint();
+    private final TextPaint currentPaint = new TextPaint();
+    private final TextPaint normalPaint = new TextPaint();
     private final Paint coverPaint = new Paint();
     private final Paint scrimPaint = new Paint();
 
-    private float lineHeight = 80f;
-    private float currentTextSize = 42f;
-    private float normalTextSize = 32f;
+    /** 行间距(每行歌词之间的间距,px) */
+    private float lineSpacing = 16f;
+    /** 当前行字体大小 */
+    private float currentTextSize = 30f;
+    /** 其他行字体大小 */
+    private float normalTextSize = 24f;
     /** 最多显示行数(含当前行,上下各2行) */
     private static final int MAX_VISIBLE_LINES = 5;
+    /** 歌词左右边距 */
+    private float lrcPadding = 24f;
 
     public LrcView(Context context) {
         super(context);
@@ -132,25 +138,6 @@ public class LrcView extends View {
         }
     }
 
-    /** 快速模糊:先缩小再放大,产生模糊效果(兼容 API 14) */
-    private Bitmap fastBlur(Bitmap src, float sampleSize) {
-        if (src == null) return null;
-        try {
-            int w = Math.max(1, (int) (src.getWidth() * sampleSize));
-            int h = Math.max(1, (int) (src.getHeight() * sampleSize));
-            Bitmap small = Bitmap.createScaledBitmap(src, w, h, true);
-            Bitmap blurred = Bitmap.createScaledBitmap(small, src.getWidth(), src.getHeight(), true);
-            if (small != blurred && small != src) {
-                small.recycle();
-            }
-            return blurred;
-        } catch (OutOfMemoryError e) {
-            return src;
-        } catch (Exception e) {
-            return src;
-        }
-    }
-
     public void setLrcList(List<LrcEntry> list) {
         if (list == null) {
             lrcList = new ArrayList<>();
@@ -184,6 +171,32 @@ public class LrcView extends View {
             blurredBitmap = createScaledBitmap(coverBitmap);
             invalidate();
         }
+    }
+
+    /**
+     * 为指定文本创建 StaticLayout(支持自动换行)
+     * @param text   歌词文本
+     * @param paint  画笔(决定字体大小和颜色)
+     * @param width  可用宽度
+     * @return StaticLayout
+     */
+    private StaticLayout createTextLayout(String text, TextPaint paint, int width) {
+        if (width <= 0) {
+            width = getWidth();
+        }
+        if (width <= 0) {
+            width = 400;
+        }
+        return new StaticLayout(
+                text,
+                0,
+                text.length(),
+                paint,
+                width,
+                Layout.Alignment.ALIGN_CENTER,
+                1.0f,
+                0f,
+                false);
     }
 
     @Override
@@ -226,26 +239,75 @@ public class LrcView extends View {
             currentIndex = 0;
         }
 
-        // 绘制上方行(最多显示2行)
+        // 可用宽度(减去左右边距)
+        int textWidth = vw - (int)(lrcPadding * 2);
+        if (textWidth <= 0) textWidth = vw;
+
+        // 计算当前行的高度(可能换行)
+        String currentText = lrcList.get(currentIndex).getText();
+        currentPaint.setTextSize(currentTextSize);
+        StaticLayout currentLayout = createTextLayout(currentText, currentPaint, textWidth);
+        float currentHeight = currentLayout.getHeight();
+
+        // 当前行垂直居中:当前行的中心在 cy
+        // 当前行顶部在 cy - currentHeight/2
+        float currentTop = cy - currentHeight / 2f;
+
+        // 收集上方行(最多2行)
+        List<StaticLayout> upLayouts = new ArrayList<>();
+        List<Float> upHeights = new ArrayList<>();
+        normalPaint.setTextSize(normalTextSize);
+        int upCount = 0;
         int upLimit = MAX_VISIBLE_LINES / 2;
-        for (int i = currentIndex; i >= 0 && upLimit >= 0; i--) {
-            float y = cy - (currentIndex - i) * lineHeight;
-            if (y < -lineHeight) break;
-            if (i == currentIndex) {
-                canvas.drawText(lrcList.get(i).getText(), cx, y, currentPaint);
-            } else {
-                canvas.drawText(lrcList.get(i).getText(), cx, y, normalPaint);
-                upLimit--;
-            }
+        for (int i = currentIndex - 1; i >= 0 && upCount < upLimit; i--) {
+            StaticLayout layout = createTextLayout(lrcList.get(i).getText(), normalPaint, textWidth);
+            upLayouts.add(layout);
+            upHeights.add((float) layout.getHeight());
+            upCount++;
         }
 
-        // 绘制下方行(最多显示2行)
+        // 收集下方行(最多2行)
+        List<StaticLayout> downLayouts = new ArrayList<>();
+        List<Float> downHeights = new ArrayList<>();
+        int downCount = 0;
         int downLimit = MAX_VISIBLE_LINES / 2;
-        for (int i = currentIndex + 1; i < lrcList.size() && downLimit > 0; i++) {
-            float y = cy + (i - currentIndex) * lineHeight;
-            if (y > vh + lineHeight) break;
-            canvas.drawText(lrcList.get(i).getText(), cx, y, normalPaint);
-            downLimit--;
+        for (int i = currentIndex + 1; i < lrcList.size() && downCount < downLimit; i++) {
+            StaticLayout layout = createTextLayout(lrcList.get(i).getText(), normalPaint, textWidth);
+            downLayouts.add(layout);
+            downHeights.add((float) layout.getHeight());
+            downCount++;
+        }
+
+        // 从下往上绘制上方行(离当前行最近的先算位置)
+        float drawY = currentTop;
+        for (int i = upLayouts.size() - 1; i >= 0; i--) {
+            float h = upHeights.get(i);
+            drawY -= h + lineSpacing;
+            if (drawY < -h) break; // 超出屏幕顶部
+            StaticLayout layout = upLayouts.get(i);
+            canvas.save();
+            canvas.translate(cx, drawY);
+            layout.draw(canvas);
+            canvas.restore();
+        }
+
+        // 绘制当前行
+        canvas.save();
+        canvas.translate(cx, currentTop);
+        currentLayout.draw(canvas);
+        canvas.restore();
+
+        // 绘制下方行
+        drawY = currentTop + currentHeight + lineSpacing;
+        for (int i = 0; i < downLayouts.size(); i++) {
+            float h = downHeights.get(i);
+            if (drawY > vh) break; // 超出屏幕底部
+            StaticLayout layout = downLayouts.get(i);
+            canvas.save();
+            canvas.translate(cx, drawY);
+            layout.draw(canvas);
+            canvas.restore();
+            drawY += h + lineSpacing;
         }
     }
 }

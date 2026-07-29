@@ -15,6 +15,7 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.SeekBar;
@@ -419,10 +420,13 @@ public class MainActivity extends AppCompatActivity {
 
     /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 清除缓存 */
     private void showSettingsMenu() {
-        String[] items = {"均衡器", "服务器设置", "时长过滤设置", "清除网络缓存"};
+        final String[] items = {"均衡器", "服务器设置", "时长过滤设置", "清除网络缓存"};
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                this, R.layout.dialog_settings_item, items);
+
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("设置");
-        builder.setItems(items, new DialogInterface.OnClickListener() {
+        builder.setAdapter(adapter, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 if (which == 0) {

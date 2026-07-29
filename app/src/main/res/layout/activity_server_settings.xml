@@ -158,7 +158,7 @@
                 android:layout_height="@dimen/btn_size"
                 android:layout_marginTop="8dp"
                 android:background="@drawable/bg_btn"
-                android:text="选择同步目录"
+                android:text="选择/输入同步目录"
                 android:textColor="@color/btn_text"
                 android:textSize="@dimen/btn_text_size" />
 

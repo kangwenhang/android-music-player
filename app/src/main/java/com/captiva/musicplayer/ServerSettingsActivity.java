@@ -161,6 +161,9 @@ public class ServerSettingsActivity extends AppCompatActivity {
             }
         }
 
+        // 添加"手动输入路径"选项
+        quickLabels.add("手动输入路径...");
+
         // 添加"浏览更多目录"选项
         quickLabels.add("浏览更多目录...");
 
@@ -174,10 +177,58 @@ public class ServerSettingsActivity extends AppCompatActivity {
                 if (which == quickLabels.size() - 1) {
                     // 最后一个:浏览更多目录
                     showDirectoryBrowser(Environment.getExternalStorageDirectory());
+                } else if (which == quickLabels.size() - 2) {
+                    // 倒数第二个:手动输入路径
+                    showManualPathInput();
                 } else {
                     String selected = quickPaths.get(which);
                     setSyncPath(selected);
                 }
+            }
+        });
+        builder.setNegativeButton("取消", null);
+        builder.show();
+    }
+
+    /**
+     * 手动输入同步路径对话框
+     */
+    private void showManualPathInput() {
+        final EditText etInput = new EditText(this);
+        etInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        // 预填当前路径
+        String currentPath = etSyncPath.getText().toString().trim();
+        if (currentPath.isEmpty()) {
+            currentPath = Environment.getExternalStorageDirectory()
+                    .getAbsolutePath() + "/CaptivaMusic";
+        }
+        etInput.setText(currentPath);
+        etInput.setSelection(currentPath.length());
+        etInput.setTextColor(getResources().getColor(R.color.text_primary));
+        etInput.setHint("输入完整路径,如 /storage/emulated/0/Music");
+        etInput.setHintTextColor(getResources().getColor(R.color.search_hint));
+        etInput.setPadding(24, 16, 24, 16);
+        etInput.setBackgroundResource(R.drawable.bg_search);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("手动输入同步目录");
+        builder.setMessage("请输入完整的目录路径\n路径必须以 / 开头");
+        builder.setView(etInput);
+        builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                String path = etInput.getText().toString().trim();
+                if (path.isEmpty()) {
+                    Toast.makeText(ServerSettingsActivity.this,
+                            "路径不能为空", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (!path.startsWith("/")) {
+                    Toast.makeText(ServerSettingsActivity.this,
+                            "路径必须以 / 开头", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                setSyncPath(path);
             }
         });
         builder.setNegativeButton("取消", null);
