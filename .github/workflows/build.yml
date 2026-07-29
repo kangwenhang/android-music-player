@@ -54,18 +54,21 @@ jobs:
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           TAG="v$(date +'%Y%m%d-%H%M%S')"
 
-          # 确保 tags 已同步到本地(checkout 不一定带 tags)
-          git fetch --tags --force 2>/dev/null || true
+          # 通过 GitHub API 获取上一个 Release 的 tag(比本地 tag 排序更可靠)
+          PREV_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
 
-          # 获取上一个 Release 的 tag(按版本号降序)
-          PREV_TAG=$(git tag -l --sort=-v:refname | grep '^v[0-9]' | head -1)
+          # 如果 API 失败,回退到本地 tag(按创建时间排序)
+          if [ -z "$PREV_TAG" ]; then
+            git fetch --tags --force 2>/dev/null || true
+            PREV_TAG=$(git tag -l --sort=-creatordate | grep '^v[0-9]' | head -1)
+          fi
 
           # 只显示自上次 Release 以来的新 commit
           if [ -n "$PREV_TAG" ]; then
             CHANGELOG=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" 2>/dev/null | grep -v "^- Merge" || true)
           else
-            # 没有上一个 Release,只取最近 5 条
-            CHANGELOG=$(git log --pretty=format:"- %s" -5 | grep -v "^- Merge" || true)
+            # 没有上一个 Release,只取最近 3 条
+            CHANGELOG=$(git log --pretty=format:"- %s" -3 | grep -v "^- Merge" || true)
           fi
 
           if [ -z "$CHANGELOG" ]; then
