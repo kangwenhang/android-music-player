@@ -310,19 +310,27 @@ public class MusicService extends Service {
 
     /**
      * 加载歌词
-     * - 本地歌曲:先从内嵌ID3标签提取,再回退同名 .lrc 文件,最后从Navidrome获取(异步)
-     * - 网络歌曲:异步从 Navidrome API 获取
+     * 优先策略:
+     * 1. 如果歌曲有本地文件,优先从内嵌ID3标签提取,再回退同名 .lrc 文件
+     * 2. 本地没有歌词时,再尝试从 Navidrome 获取(网络歌曲或配置了服务器的本地歌曲)
+     * 3. 纯网络歌曲(无本地文件)直接走 Navidrome API
+     *
+     * 关键点:同步下载到本地的歌曲 originally 是网络歌曲(network=true),
+     * 但只要本地有文件,就应该优先用本地歌词,断网也能正常显示。
      */
     private void loadLyrics(final MusicBean bean) {
         // 先清空当前歌词
         currentLrc = new ArrayList<>();
 
-        if (bean.isNetwork()) {
-            // 网络歌曲:异步从 Navidrome 获取歌词
-            loadNetworkLyrics(bean);
-        } else {
-            // 本地歌曲:异步加载(内嵌歌词 + lrc文件 + Navidrome回退)
+        String filePath = bean.getData();
+        boolean hasLocalFile = filePath != null && !filePath.isEmpty() && new File(filePath).exists();
+
+        if (hasLocalFile) {
+            // 本地有文件:优先加载本地歌词(内嵌 + .lrc),本地没有才回退网络
             loadLocalLyrics(bean);
+        } else {
+            // 纯网络歌曲:从 Navidrome 获取
+            loadNetworkLyrics(bean);
         }
     }
 
