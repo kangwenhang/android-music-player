@@ -65,14 +65,19 @@ jobs:
             git fetch origin "refs/tags/${PREV_TAG}:refs/tags/${PREV_TAG}" 2>/dev/null || true
           fi
 
-          # 只显示自上次 Release 以来的新 commit
+          # 只显示自上次 Release 以来的新 commit(最多 15 条,避免过长)
+          MAX_COMMITS=15
           if [ -n "$PREV_TAG" ] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
-            CHANGELOG=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" 2>/dev/null | grep -v "^- Merge" || true)
-            echo "找到 ${PREV_TAG}, 提取新 commit..."
+            TOTAL_COUNT=$(git rev-list --count "${PREV_TAG}..HEAD" 2>/dev/null || echo "0")
+            CHANGELOG=$(git log --pretty=format:"- %s" --max-count=${MAX_COMMITS} "${PREV_TAG}..HEAD" 2>/dev/null | grep -v "^- Merge" || true)
+            echo "找到 ${PREV_TAG}, 共 ${TOTAL_COUNT} 条新 commit, 显示最近 ${MAX_COMMITS} 条"
+            if [ "$TOTAL_COUNT" -gt "$MAX_COMMITS" ]; then
+              CHANGELOG="${CHANGELOG}"$'\n'"- ...还有 $((TOTAL_COUNT - MAX_COMMITS)) 条更早的更新"
+            fi
           else
-            # 没有上一个 Release,只取最近 3 条
-            CHANGELOG=$(git log --pretty=format:"- %s" -3 | grep -v "^- Merge" || true)
-            echo "未找到上一个 Release, 只显示最近 3 条"
+            # 没有上一个 Release,只取最近 10 条
+            CHANGELOG=$(git log --pretty=format:"- %s" -10 | grep -v "^- Merge" || true)
+            echo "未找到上一个 Release, 只显示最近 10 条"
           fi
 
           if [ -z "$CHANGELOG" ]; then
