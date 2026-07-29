@@ -108,6 +108,7 @@ public class LrcParser {
     /**
      * 解析单行,一行可能带多个时间标签
      * @param offset 全局偏移(毫秒,正值提前显示,负值延后)
+     *               LRC标准:正值表示歌词需要提前显示,因此从时间戳中减去 offset
      */
     private static void parseLine(String line, List<LrcEntry> list, long offset) {
         if (line == null || line.trim().isEmpty()) {
@@ -121,7 +122,8 @@ public class LrcParser {
         List<Long> times = new ArrayList<>();
         int lastEnd = 0;
         while (matcher.find()) {
-            times.add(parseTime(matcher) + offset);
+            // LRC offset: 正值=提前显示,所以减去 offset
+            times.add(parseTime(matcher) - offset);
             lastEnd = matcher.end();
         }
         if (times.isEmpty()) {
@@ -234,17 +236,16 @@ public class LrcParser {
 
     /**
      * 根据当前播放位置查找歌词索引
-     * 提前 200ms 匹配下一行,补偿音频输出延迟
+     * 严格按照歌词时间标签匹配,不添加额外偏移
+     * 返回时间戳 <= position 的最后一行索引
      */
     public static int findLrcIndex(List<LrcEntry> list, long position) {
         if (list == null || list.isEmpty()) {
             return -1;
         }
-        // 补偿音频输出延迟:提前 200ms 切到下一行
-        long adjustedPos = position + 200;
         int idx = -1;
         for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).getTime() <= adjustedPos) {
+            if (list.get(i).getTime() <= position) {
                 idx = i;
             } else {
                 break;
