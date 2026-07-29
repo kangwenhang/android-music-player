@@ -13,12 +13,19 @@ import java.util.regex.Pattern;
 /**
  * LRC 歌词解析器
  * 解析 [mm:ss.xx]格式的时间标签
+ * 支持 [offset:xxx] 全局偏移校正(毫秒,正值提前,负值延后)
  */
 public class LrcParser {
+
+    private static final String TAG = "LrcParser";
 
     // 匹配 [01:23.45] 或 [01:23] 格式
     private static final Pattern TIME_PATTERN =
             Pattern.compile("\\[(\\d{1,2}):(\\d{1,2})(?:\\.(\\d{1,3}))?]");
+
+    // 匹配 [offset:250] 或 [offset:-250] 格式(毫秒)
+    private static final Pattern OFFSET_PATTERN =
+            Pattern.compile("\\[offset:\\s*([+-]?\\d+)\\s*]", Pattern.CASE_INSENSITIVE);
 
     /**
      * 根据音乐文件路径查找同名 .lrc 歌词文件并解析
@@ -49,22 +56,24 @@ public class LrcParser {
      */
     public static List<LrcEntry> parse(File file) {
         List<LrcEntry> list = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
         BufferedReader reader = null;
         try {
             // 尝试 UTF-8,失败回退 GBK(国内歌词常见编码)
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"));
             String line;
             while ((line = reader.readLine()) != null) {
-                parseLine(line, list);
+                lines.add(line);
             }
         } catch (Exception e) {
             // UTF-8 失败,尝试 GBK
             try {
                 if (reader != null) reader.close();
+                lines.clear();
                 reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "GBK"));
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    parseLine(line, list);
+                    lines.add(line);
                 }
             } catch (Exception ex) {
                 // 放弃
@@ -74,22 +83,45 @@ public class LrcParser {
                 try { reader.close(); } catch (Exception e) {}
             }
         }
+
+        // 先提取全局 offset
+        long offset = 0;
+        for (String line : lines) {
+            Matcher om = OFFSET_PATTERN.matcher(line);
+            if (om.find()) {
+                try {
+                    offset += Long.parseLong(om.group(1));
+                } catch (NumberFormatException e) {
+                    // 忽略
+                }
+            }
+        }
+
+        // 解析歌词行
+        for (String line : lines) {
+            parseLine(line, list, offset);
+        }
         Collections.sort(list);
         return list;
     }
 
     /**
      * 解析单行,一行可能带多个时间标签
+     * @param offset 全局偏移(毫秒,正值提前显示,负值延后)
      */
-    private static void parseLine(String line, List<LrcEntry> list) {
+    private static void parseLine(String line, List<LrcEntry> list, long offset) {
         if (line == null || line.trim().isEmpty()) {
+            return;
+        }
+        // 跳过 offset 标签行(已单独处理)
+        if (OFFSET_PATTERN.matcher(line).find()) {
             return;
         }
         Matcher matcher = TIME_PATTERN.matcher(line);
         List<Long> times = new ArrayList<>();
         int lastEnd = 0;
         while (matcher.find()) {
-            times.add(parseTime(matcher));
+            times.add(parseTime(matcher) + offset);
             lastEnd = matcher.end();
         }
         if (times.isEmpty()) {
@@ -131,9 +163,25 @@ public class LrcParser {
         if (lrcText == null || lrcText.isEmpty()) {
             return list;
         }
+
         String[] lines = lrcText.split("\n");
+
+        // 先提取全局 offset
+        long offset = 0;
         for (String line : lines) {
-            parseLine(line, list);
+            Matcher om = OFFSET_PATTERN.matcher(line);
+            if (om.find()) {
+                try {
+                    offset += Long.parseLong(om.group(1));
+                } catch (NumberFormatException e) {
+                    // 忽略
+                }
+            }
+        }
+
+        // 解析歌词行
+        for (String line : lines) {
+            parseLine(line, list, offset);
         }
         Collections.sort(list);
         return list;
@@ -163,14 +211,17 @@ public class LrcParser {
 
     /**
      * 根据当前播放位置查找歌词索引
+     * 提前 200ms 匹配下一行,补偿音频输出延迟
      */
     public static int findLrcIndex(List<LrcEntry> list, long position) {
         if (list == null || list.isEmpty()) {
             return -1;
         }
+        // 补偿音频输出延迟:提前 200ms 切到下一行
+        long adjustedPos = position + 200;
         int idx = -1;
         for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).getTime() <= position) {
+            if (list.get(i).getTime() <= adjustedPos) {
                 idx = i;
             } else {
                 break;

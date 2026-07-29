@@ -461,13 +461,15 @@ public class NavidromeApi {
                             if (sl != null && sl.optBoolean("synced", false)) {
                                 JSONArray lines = sl.optJSONArray("line");
                                 if (lines != null) {
+                                    // 提取该 structuredLyrics 的 offset(毫秒)
+                                    long offset = sl.optLong("offset", 0);
                                     for (int j = 0; j < lines.length(); j++) {
                                         JSONObject line = lines.optJSONObject(j);
                                         if (line != null) {
                                             String text = line.optString("value", "");
                                             long start = line.optLong("start", -1);
                                             if (start >= 0) {
-                                                list.add(new LrcEntry(start, text));
+                                                list.add(new LrcEntry(start + offset, text));
                                             }
                                         }
                                     }
