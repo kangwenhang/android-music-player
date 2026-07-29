@@ -1,7 +1,5 @@
 package com.captiva.musicplayer;
 
-import android.app.AlertDialog;
-import android.content.DialogInterface;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.View;
@@ -14,10 +12,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
 
 /**
  * Navidrome 服务器设置界面
@@ -26,10 +20,9 @@ import java.util.List;
  */
 public class ServerSettingsActivity extends AppCompatActivity {
 
-    private EditText etUrl, etUser, etPass;
-    private TextView etSyncPath;
+    private EditText etUrl, etUser, etPass, etSyncPath;
     private TextView tvResult;
-    private Button btnTest, btnSave, btnBack, btnSelectSyncPath;
+    private Button btnTest, btnSave, btnBack;
     private NavidromeConfig config;
 
     @Override
@@ -49,7 +42,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         btnTest = findViewById(R.id.btn_test);
         btnSave = findViewById(R.id.btn_save);
         btnBack = findViewById(R.id.btn_back);
-        btnSelectSyncPath = findViewById(R.id.btn_select_sync_path);
 
         // 回填已保存的配置
         etUrl.setText(config.getServerUrl());
@@ -76,252 +68,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         btnSave.setOnClickListener(v -> {
             saveConfig();
         });
-
-        // 选择同步目录:弹出自定义目录浏览器
-        btnSelectSyncPath.setOnClickListener(v -> {
-            showDirectoryPicker();
-        });
-
-        // 点击路径文本也可选择
-        etSyncPath.setOnClickListener(v -> {
-            showDirectoryPicker();
-        });
-    }
-
-    // ==================== 目录选择器 ====================
-
-    /**
-     * 弹出目录选择对话框
-     * 先显示快捷选项,再可选进入文件浏览器
-     */
-    private void showDirectoryPicker() {
-        // 快捷目录列表
-        final List<String> quickPaths = new ArrayList<>();
-        final List<String> quickLabels = new ArrayList<>();
-
-        // 默认路径
-        String defaultPath = Environment.getExternalStorageDirectory()
-                .getAbsolutePath() + "/CaptivaMusic";
-        quickPaths.add(defaultPath);
-        quickLabels.add("默认目录: " + defaultPath);
-
-        // 外部存储根目录
-        String sdRoot = Environment.getExternalStorageDirectory().getAbsolutePath();
-        quickPaths.add(sdRoot);
-        quickLabels.add("外部存储: " + sdRoot);
-
-        // 常见音乐目录
-        File musicDir = new File(sdRoot, "Music");
-        if (musicDir.exists()) {
-            quickPaths.add(musicDir.getAbsolutePath());
-            quickLabels.add("Music: " + musicDir.getAbsolutePath());
-        }
-
-        // 检测是否有额外SD卡(API 19+ 可用 getExternalMediaDirs,低版本跳过)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
-            File[] extDirs = getExternalMediaDirs();
-            if (extDirs != null) {
-                for (File dir : extDirs) {
-                    if (dir != null && dir.exists() && !dir.getAbsolutePath().startsWith(sdRoot)) {
-                        String p = dir.getAbsolutePath();
-                        // 取到存储根目录
-                        File parent = dir;
-                        while (parent.getParentFile() != null
-                                && parent.getParentFile().getParentFile() != null
-                                && parent.getParentFile().getParentFile().canRead()) {
-                            parent = parent.getParentFile();
-                            if (parent.getAbsolutePath().equals("/") || parent.getAbsolutePath().length() < 5) {
-                                break;
-                            }
-                        }
-                        String parentPath = parent.getAbsolutePath();
-                        if (!quickPaths.contains(parentPath)) {
-                            quickPaths.add(parentPath);
-                            quickLabels.add("SD卡: " + parentPath);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 检查 /storage 下的其他挂载点(兼容低版本)
-        File storageDir = new File("/storage");
-        if (storageDir.exists() && storageDir.isDirectory()) {
-            File[] mounts = storageDir.listFiles();
-            if (mounts != null) {
-                for (File m : mounts) {
-                    if (m.isDirectory() && m.canRead() && !m.getAbsolutePath().startsWith(sdRoot)) {
-                        String p = m.getAbsolutePath();
-                        if (!quickPaths.contains(p)) {
-                            quickPaths.add(p);
-                            quickLabels.add("存储: " + p);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 添加"手动输入路径"选项
-        quickLabels.add("手动输入路径...");
-
-        // 添加"浏览更多目录"选项
-        quickLabels.add("浏览更多目录...");
-
-        String[] labels = quickLabels.toArray(new String[0]);
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("选择同步目录");
-        builder.setItems(labels, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                if (which == quickLabels.size() - 1) {
-                    // 最后一个:浏览更多目录
-                    showDirectoryBrowser(Environment.getExternalStorageDirectory());
-                } else if (which == quickLabels.size() - 2) {
-                    // 倒数第二个:手动输入路径
-                    showManualPathInput();
-                } else {
-                    String selected = quickPaths.get(which);
-                    setSyncPath(selected);
-                }
-            }
-        });
-        builder.setNegativeButton("取消", null);
-        builder.show();
-    }
-
-    /**
-     * 手动输入同步路径对话框
-     */
-    private void showManualPathInput() {
-        final EditText etInput = new EditText(this);
-        etInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
-        // 预填当前路径
-        String currentPath = etSyncPath.getText().toString().trim();
-        if (currentPath.isEmpty()) {
-            currentPath = Environment.getExternalStorageDirectory()
-                    .getAbsolutePath() + "/CaptivaMusic";
-        }
-        etInput.setText(currentPath);
-        etInput.setSelection(currentPath.length());
-        etInput.setTextColor(getResources().getColor(R.color.text_primary));
-        etInput.setHint("输入完整路径,如 /storage/emulated/0/Music");
-        etInput.setHintTextColor(getResources().getColor(R.color.search_hint));
-        etInput.setPadding(24, 16, 24, 16);
-        etInput.setBackgroundResource(R.drawable.bg_search);
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("手动输入同步目录");
-        builder.setMessage("请输入完整的目录路径\n路径必须以 / 开头");
-        builder.setView(etInput);
-        builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                String path = etInput.getText().toString().trim();
-                if (path.isEmpty()) {
-                    Toast.makeText(ServerSettingsActivity.this,
-                            "路径不能为空", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                if (!path.startsWith("/")) {
-                    Toast.makeText(ServerSettingsActivity.this,
-                            "路径必须以 / 开头", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                setSyncPath(path);
-            }
-        });
-        builder.setNegativeButton("取消", null);
-        builder.show();
-    }
-
-    /**
-     * 目录浏览器对话框(可逐级浏览文件系统)
-     * @param startDir 起始目录
-     */
-    private void showDirectoryBrowser(final File startDir) {
-        if (startDir == null || !startDir.exists() || !startDir.isDirectory()) {
-            Toast.makeText(this, "无法访问该目录", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // 列出子目录
-        File[] children = startDir.listFiles();
-        if (children == null) {
-            Toast.makeText(this, "无法读取目录内容", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // 筛选子目录
-        List<File> subDirs = new ArrayList<>();
-        for (File f : children) {
-            if (f.isDirectory() && !f.getName().startsWith(".") && f.canRead()) {
-                subDirs.add(f);
-            }
-        }
-
-        // 按名称排序
-        Collections.sort(subDirs, new Comparator<File>() {
-            @Override
-            public int compare(File a, File b) {
-                return a.getName().compareToIgnoreCase(b.getName());
-            }
-        });
-
-        // 构建列表项
-        List<String> items = new ArrayList<>();
-        // 第一项:选择当前目录
-        items.add("✓ 选定此目录");
-        // 第二项:返回上级
-        File parent = startDir.getParentFile();
-        if (parent != null && parent.canRead()) {
-            items.add("📁 返回上级");
-        }
-        // 子目录列表
-        for (File d : subDirs) {
-            items.add("📁 " + d.getName());
-        }
-
-        String[] arr = items.toArray(new String[0]);
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle(startDir.getAbsolutePath());
-        builder.setItems(arr, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(DialogInterface dialog, int which) {
-                if (which == 0) {
-                    // 选定当前目录
-                    setSyncPath(startDir.getAbsolutePath());
-                } else if (which == 1 && parent != null && parent.canRead()) {
-                    // 返回上级
-                    showDirectoryBrowser(parent);
-                } else {
-                    // 进入子目录
-                    int index = which;
-                    if (parent != null && parent.canRead()) {
-                        index--; // 跳过"返回上级"
-                    }
-                    index--; // 跳过"选定此目录"
-                    if (index >= 0 && index < subDirs.size()) {
-                        showDirectoryBrowser(subDirs.get(index));
-                    }
-                }
-            }
-        });
-        builder.setNegativeButton("取消", null);
-        builder.show();
-    }
-
-    /** 设置同步路径并更新UI */
-    private void setSyncPath(String path) {
-        config.setSyncPath(path);
-        etSyncPath.setText(path);
-        // 确保目录存在
-        File dir = new File(path);
-        if (!dir.exists()) {
-            dir.mkdirs();
-        }
-        Toast.makeText(this, "已设置同步目录: " + path, Toast.LENGTH_LONG).show();
     }
 
     // ==================== 测试连接 ====================
@@ -365,7 +111,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
     /** 保存配置 */
     private void saveConfig() {
-        // 同步路径已经在选择时保存了,这里只需保存服务器配置
         if (!saveServerConfigSilently()) {
             return;
         }
@@ -378,16 +123,33 @@ public class ServerSettingsActivity extends AppCompatActivity {
         String url = etUrl.getText().toString().trim();
         String user = etUser.getText().toString().trim();
         String pass = etPass.getText().toString().trim();
+        String syncPath = etSyncPath.getText().toString().trim();
 
         if (url.isEmpty() || user.isEmpty() || pass.isEmpty()) {
             Toast.makeText(this, "请填写完整的服务器信息", Toast.LENGTH_SHORT).show();
             return false;
         }
 
+        if (syncPath.isEmpty()) {
+            Toast.makeText(this, "同步目录不能为空", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        if (!syncPath.startsWith("/")) {
+            Toast.makeText(this, "同步目录路径必须以 / 开头", Toast.LENGTH_SHORT).show();
+            return false;
+        }
+
         config.setServerUrl(url);
         config.setUsername(user);
         config.setPassword(pass);
+        config.setSyncPath(syncPath);
         config.setEnabled(true);
+
+        // 确保目录存在
+        File dir = new File(syncPath);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
 
         // 更新全局 NavidromeApi
         NavidromeApi api = new NavidromeApi(url, user, pass);
