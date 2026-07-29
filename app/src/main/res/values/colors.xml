@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主背景 -->
-    <color name="bg_main">#1A1A1E</color>
-    <color name="bg_title_bar">#232328</color>
-    <color name="bg_control_bar">#232328</color>
+    <!-- 主背景(深色基底,略带蓝调更现代) -->
+    <color name="bg_main">#16161C</color>
+    <color name="bg_title_bar">#1E1E26</color>
+    <color name="bg_control_bar">#1E1E26</color>
 
-    <!-- 列表 -->
-    <color name="list_item_bg">#1A1A1E</color>
-    <color name="playing_highlight">#2C3E50</color>
+    <!-- 列表(与主背景接近,消除色块感) -->
+    <color name="list_item_bg">#16161C</color>
+    <color name="playing_highlight">#1E2D3D</color>
 
     <!-- 文本 -->
     <color name="text_primary">#F0F0F0</color>
@@ -20,7 +20,7 @@
     <color name="accent">#4FC3F7</color>
 
     <!-- 按钮 -->
-    <color name="btn_bg">#3A3A42</color>
+    <color name="btn_bg">#2A2A34</color>
     <color name="btn_text">#FFFFFF</color>
     <color name="btn_play_bg">#4FC3F7</color>
     <color name="btn_play_text">#0A1A2A</color>
@@ -31,11 +31,11 @@
     <color name="btn_paused_text">#FFFFFF</color>
 
     <!-- 搜索栏 -->
-    <color name="search_bg">#2A2A30</color>
+    <color name="search_bg">#22222A</color>
     <color name="search_hint">#6A6A70</color>
 
     <!-- 封面占位 -->
-    <color name="cover_placeholder">#333338</color>
+    <color name="cover_placeholder">#2A2A34</color>
 
     <!-- Navidrome 来源标识 -->
     <color name="source_network">#66BB6A</color>
@@ -53,12 +53,12 @@
     <color name="favorite_inactive">#6A6A70</color>
 
     <!-- 均衡器 -->
-    <color name="eq_card_bg">#232328</color>
-    <color name="eq_preset_bg">#2E2E34</color>
+    <color name="eq_card_bg">#1E1E26</color>
+    <color name="eq_preset_bg">#2A2A34</color>
     <color name="eq_preset_selected_bg">#4FC3F7</color>
     <color name="eq_preset_text">#C0C0C5</color>
     <color name="eq_preset_selected_text">#0A1A2A</color>
-    <color name="eq_band_panel_bg">#1E1E24</color>
+    <color name="eq_band_panel_bg">#1A1A20</color>
     <color name="eq_freq_label">#9A9AA0</color>
     <color name="eq_value_label">#4FC3F7</color>
     <color name="eq_hint_text">#6A6A70</color>

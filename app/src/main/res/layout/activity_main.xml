@@ -13,7 +13,7 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:padding="@dimen/title_bar_padding"
-        android:background="@color/bg_title_bar">
+        android:background="@drawable/bg_title_bar">
 
         <ImageView
             android:layout_width="24dp"

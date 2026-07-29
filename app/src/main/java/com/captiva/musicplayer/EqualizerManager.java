@@ -54,7 +54,8 @@ public class EqualizerManager {
     public void init(int audioSessionId) {
         release();
         try {
-            equalizer = new Equalizer(0, audioSessionId);
+            // 使用高优先级(1)确保均衡器效果不被其他音频效果覆盖
+            equalizer = new Equalizer(1, audioSessionId);
             bandCount = equalizer.getNumberOfBands();
 
             // 从持久化恢复设置(可能 bandCount 与保存的不同,需要适配)
@@ -87,8 +88,8 @@ public class EqualizerManager {
     public void initSilent() {
         release();
         try {
-            // sessionId=0 表示全局音频输出,部分设备支持
-            equalizer = new Equalizer(0, 0);
+            // sessionId=0 表示全局音频输出,使用高优先级
+            equalizer = new Equalizer(1, 0);
             bandCount = equalizer.getNumberOfBands();
 
             loadSettings();
@@ -117,17 +118,20 @@ public class EqualizerManager {
     private void applyStoredSettings() {
         if (equalizer == null) return;
         try {
-            if (enabled) {
-                equalizer.setEnabled(true);
-            }
-            // 应用预设或自定义频段
-            if (!"关闭".equals(currentPreset)) {
+            // 先应用频段设置,再开启均衡器(确保开启时参数已就位)
+            if (!"关闭".equals(currentPreset) && !"自定义".equals(currentPreset)) {
                 applyPresetInternal(currentPreset);
             } else if (bandLevels != null) {
                 for (short i = 0; i < bandCount && i < bandLevels.length; i++) {
-                    equalizer.setBandLevel(i, bandLevels[i]);
+                    try {
+                        equalizer.setBandLevel(i, bandLevels[i]);
+                    } catch (Exception ignored) {}
                 }
             }
+            // 最后设置开关状态
+            equalizer.setEnabled(enabled);
+            Log.d(TAG, "applyStoredSettings: enabled=" + enabled
+                    + " preset=" + currentPreset + " bands=" + bandCount);
         } catch (Exception e) {
             Log.w(TAG, "applyStoredSettings failed", e);
         }

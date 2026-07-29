@@ -945,8 +945,8 @@ public class MainActivity extends AppCompatActivity {
         sbProgress.setMax((int) bean.getDuration());
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
 
-        // 加载封面到歌词区作为背景(车机内存有限,控制在300px)
-        int coverSize = 300; // 背景封面尺寸
+        // 加载封面到歌词区作为背景(增大尺寸以填满歌词区)
+        int coverSize = 600; // 背景封面尺寸
         CoverLoader.getInstance().loadBitmap(bean, coverSize,
                 new CoverLoader.BitmapCallback() {
                     @Override

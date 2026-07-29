@@ -115,8 +115,8 @@ public class LrcView extends View {
             float scale = Math.max((float) vw / sw, (float) vh / sh);
             int nw = (int) (sw * scale);
             int nh = (int) (sh * scale);
-            // 车机内存有限且性能弱,限制最大尺寸并跳过模糊
-            int maxDim = 400;
+            // 限制最大尺寸,但保持足够大以填满歌词区
+            int maxDim = 800;
             if (nw > maxDim || nh > maxDim) {
                 float ratio = (float) maxDim / Math.max(nw, nh);
                 nw = (int) (nw * ratio);

@@ -574,14 +574,15 @@ public class MusicService extends Service {
                     }
                     try {
                         isPrepared = true;
-                        mp.start();
-                        // 初始化均衡器(绑定当前 audioSession)
+                        // 初始化均衡器(绑定当前 audioSession,必须在 start() 之前)
+                        // 这样均衡器才能从第一帧开始生效
                         try {
                             int sessionId = mp.getAudioSessionId();
                             equalizerManager.init(sessionId);
                         } catch (Exception e) {
                             Log.w(TAG, "equalizer init failed", e);
                         }
+                        mp.start();
                         // 加载歌词
                         loadLyrics(currentBean);
                         updateRemoteControlMetadata(currentBean);

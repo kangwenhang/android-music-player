@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 底部控制栏背景:顶部圆角 -->
+<!-- 底部控制栏背景:顶部圆角+渐变,与主背景平滑过渡 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/bg_control_bar" />
+    <gradient
+        android:startColor="#1E1E24"
+        android:endColor="#252530"
+        android:angle="270" />
     <corners
         android:topLeftRadius="16dp"
         android:topRightRadius="16dp"
