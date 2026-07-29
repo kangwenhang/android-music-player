@@ -137,7 +137,7 @@
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="6dp" />
 
-            <!-- 直接输入同步路径 -->
+            <!-- 同步路径(点击可选择目录,也可手动输入) -->
             <EditText
                 android:id="@+id/et_sync_path"
                 android:layout_width="match_parent"
@@ -151,7 +151,8 @@
                 android:paddingRight="@dimen/search_padding"
                 android:gravity="center_vertical"
                 android:singleLine="true"
-                android:inputType="textUri" />
+                android:focusable="false"
+                android:clickable="true" />
 
             <!-- 按钮区 -->
             <LinearLayout
