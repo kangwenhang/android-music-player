@@ -107,31 +107,38 @@ public class LrcView extends View {
         invalidate();
     }
 
-    /** 将封面放大到填满视图,并做简单模糊 */
+    /** 将封面放大到填满视图(高清,不过度放大) */
     private Bitmap createScaledBitmap(Bitmap src) {
         if (src == null || getWidth() <= 0 || getHeight() <= 0) {
             return null;
         }
         try {
-            // 放大到填满(居中裁剪)
             int vw = getWidth();
             int vh = getHeight();
             int sw = src.getWidth();
             int sh = src.getHeight();
+
+            // 计算填满视图所需的缩放比例(center-crop)
             float scale = Math.max((float) vw / sw, (float) vh / sh);
-            int nw = (int) (sw * scale);
-            int nh = (int) (sh * scale);
-            // 限制最大尺寸,但保持足够大以填满歌词区
-            int maxDim = 800;
-            if (nw > maxDim || nh > maxDim) {
-                float ratio = (float) maxDim / Math.max(nw, nh);
-                nw = (int) (nw * ratio);
-                nh = (int) (nh * ratio);
+
+            // 如果原图已经大于视图,不放大(避免不必要的内存消耗)
+            if (scale > 1.0f) {
+                // 原图小于视图,需要放大
+                int nw = (int) (sw * scale);
+                int nh = (int) (sh * scale);
+                // 限制最大尺寸为视图尺寸的1.2倍(刚好填满即可,不过度放大)
+                int maxDim = (int) (Math.max(vw, vh) * 1.2f);
+                if (nw > maxDim || nh > maxDim) {
+                    float ratio = (float) maxDim / Math.max(nw, nh);
+                    nw = (int) (nw * ratio);
+                    nh = (int) (nh * ratio);
+                }
+                return Bitmap.createScaledBitmap(src, nw, nh, true);
+            } else {
+                // 原图已够大,直接裁剪使用(不缩小,保持清晰度)
+                return src;
             }
-            // 性能优化:车机性能弱,直接缩放不做模糊
-            return Bitmap.createScaledBitmap(src, nw, nh, true);
         } catch (OutOfMemoryError e) {
-            // 内存不足,直接返回原图
             return src;
         } catch (Exception e) {
             return src;

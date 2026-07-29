@@ -978,8 +978,8 @@ public class MainActivity extends AppCompatActivity {
         // 更新底栏收藏按钮状态
         updateFavoriteButton(bean);
 
-        // 加载封面到歌词区作为背景(增大尺寸以填满歌词区)
-        int coverSize = 600; // 背景封面尺寸
+        // 加载封面到歌词区作为背景(高清大图)
+        int coverSize = 1024; // 背景封面尺寸
         CoverLoader.getInstance().loadBitmap(bean, coverSize,
                 new CoverLoader.BitmapCallback() {
                     @Override
