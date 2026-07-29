@@ -440,9 +440,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 清除缓存 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 屏幕信息 / 清除缓存 */
     private void showSettingsMenu() {
-        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "清除网络缓存"};
+        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存"};
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this, R.layout.dialog_settings_item, items);
 
@@ -465,6 +465,9 @@ public class MainActivity extends AppCompatActivity {
                     // 时长过滤设置
                     showDurationFilterDialog();
                 } else if (which == 4) {
+                    // 屏幕分辨率与DPI
+                    showScreenInfoDialog();
+                } else if (which == 5) {
                     // 清除网络缓存
                     showClearCacheDialog();
                 }
@@ -515,6 +518,75 @@ public class MainActivity extends AppCompatActivity {
         } else {
             builder.setPositiveButton("确定", null);
         }
+        builder.show();
+    }
+
+    /** 屏幕分辨率与DPI信息对话框 */
+    private void showScreenInfoDialog() {
+        // 获取屏幕分辨率和DPI
+        android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(dm);
+
+        int widthPx = dm.widthPixels;
+        int heightPx = dm.heightPixels;
+        int densityDpi = dm.densityDpi;
+        float density = dm.density;
+        float xdpi = dm.xdpi;
+        float ydpi = dm.ydpi;
+        float scaledDensity = dm.scaledDensity;
+
+        // 计算物理尺寸(英寸)
+        double physicalInch = 0;
+        try {
+            double widthInch = widthPx / (double) xdpi;
+            double heightInch = heightPx / (double) ydpi;
+            physicalInch = Math.sqrt(widthInch * widthInch + heightInch * heightInch);
+        } catch (Exception e) {
+            // ignore
+        }
+
+        // dp 尺寸
+        float widthDp = widthPx / density;
+        float heightDp = heightPx / density;
+
+        // 判断 DPI 等级
+        String dpiLevel;
+        if (densityDpi <= 120) {
+            dpiLevel = "ldpi (低)";
+        } else if (densityDpi <= 160) {
+            dpiLevel = "mdpi (中)";
+        } else if (densityDpi <= 240) {
+            dpiLevel = "hdpi (高)";
+        } else if (densityDpi <= 320) {
+            dpiLevel = "xhdpi (超高)";
+        } else if (densityDpi <= 480) {
+            dpiLevel = "xxhdpi (超超高)";
+        } else if (densityDpi <= 640) {
+            dpiLevel = "xxxhdpi (超超超高)";
+        } else {
+            dpiLevel = "未知";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("屏幕分辨率: ").append(widthPx).append(" × ").append(heightPx).append(" px\n");
+        sb.append("DP 尺寸: ").append(String.format("%.1f", widthDp))
+                .append(" × ").append(String.format("%.1f", heightDp)).append(" dp\n\n");
+        sb.append("屏幕密度(DPI): ").append(densityDpi).append("\n");
+        sb.append("密度等级: ").append(dpiLevel).append("\n");
+        sb.append("密度因子: ").append(String.format("%.2f", density)).append("\n\n");
+        sb.append("X轴 DPI: ").append(String.format("%.1f", xdpi)).append("\n");
+        sb.append("Y轴 DPI: ").append(String.format("%.1f", ydpi)).append("\n");
+        sb.append("字体缩放: ").append(String.format("%.2f", scaledDensity)).append("\n\n");
+        if (physicalInch > 0) {
+            sb.append("物理尺寸: ").append(String.format("%.1f", physicalInch)).append(" 英寸\n");
+        }
+        sb.append("总像素: ").append(widthPx * heightPx).append("\n");
+        sb.append("宽高比: ").append(String.format("%.2f", (double) widthPx / heightPx));
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("屏幕分辨率与DPI");
+        builder.setMessage(sb.toString());
+        builder.setPositiveButton("确定", null);
         builder.show();
     }
 
