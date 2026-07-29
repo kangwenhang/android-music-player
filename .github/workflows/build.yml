@@ -85,18 +85,24 @@ jobs:
           # 获取构建时间
           BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')
 
+          # 从 APK 提取版本信息(versionCode 递增,支持覆盖安装)
+          APK_INFO=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep -E "versionCode|versionName" | head -1 || echo "")
+          echo "APK 版本信息: ${APK_INFO:-未知}"
+
           # 生成 Release 说明
           cat > /tmp/release_notes.md << EOF
           ## 构建信息
           - 构建时间: ${BUILD_TIME}
           - 版本标签: ${TAG}
           - 构建类型: Debug
+          - 版本信息: ${APK_INFO}
 
           ## 本次更新
           ${CHANGELOG}
 
           ## 安装说明
           下载 APK 后传输到车机安装即可。
+          每次构建 versionCode 自动递增,可直接覆盖安装。
           EOF
 
           gh release create "$TAG" "$APK_PATH" \

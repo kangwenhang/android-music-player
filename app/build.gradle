@@ -5,6 +5,44 @@ plugins {
     id 'com.android.application'
 }
 
+/**
+ * 获取 git commit 数量作为 versionCode
+ * 每次提交自动 +1,保证单调递增,可覆盖安装
+ * 无 git 环境时回退到 1
+ */
+static int getGitVersionCode() {
+    try {
+        def process = "git rev-list --count HEAD".execute()
+        process.waitFor()
+        if (process.exitValue() == 0) {
+            return process.text.trim().toInteger()
+        }
+    } catch (Exception ignored) {
+    }
+    return 1
+}
+
+/**
+ * 版本名:1.0.<commit数>(<短hash>)
+ * 方便用户识别具体版本
+ */
+static String getGitVersionName() {
+    String base = "1.0"
+    try {
+        def countProc = "git rev-list --count HEAD".execute()
+        countProc.waitFor()
+        def hashProc = "git rev-parse --short HEAD".execute()
+        hashProc.waitFor()
+        if (countProc.exitValue() == 0 && hashProc.exitValue() == 0) {
+            String count = countProc.text.trim()
+            String hash = hashProc.text.trim()
+            return "${base}.${count}(${hash})"
+        }
+    } catch (Exception ignored) {
+    }
+    return base
+}
+
 android {
     namespace 'com.captiva.musicplayer'
     compileSdk 30
@@ -15,8 +53,9 @@ android {
         minSdk 17
         // target 不宜过高,避免触发新权限模型带来的兼容问题
         targetSdk 28
-        versionCode 1
-        versionName "1.0"
+        // 自动递增:每次 git 提交 versionCode +1,支持覆盖安装
+        versionCode getGitVersionCode()
+        versionName getGitVersionName()
 
         // 老系统 multidex 支持
         multiDexEnabled true
