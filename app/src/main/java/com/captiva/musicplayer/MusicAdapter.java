@@ -128,36 +128,28 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (more == null || more.isEmpty()) {
             return;
         }
-        // 1. 用 HashSet O(1) 去重
-        int added = 0;
+        // 1. 用 HashSet O(1) 去重,只收集真正新增的歌曲
+        List<MusicBean> newlyAdded = new ArrayList<>();
         for (MusicBean b : more) {
             String key = getSongKey(b);
             if (key != null && !fullDataKeys.contains(key)) {
                 fullData.add(b);
                 fullDataKeys.add(key);
-                added++;
+                newlyAdded.add(b);
             }
         }
-        if (added == 0) {
+        if (newlyAdded.isEmpty()) {
             return;
         }
 
         // 2. 如果没有搜索过滤,把新增的加入 filteredData
         if (filterKeyword.isEmpty()) {
-            for (MusicBean b : more) {
-                if (!containsSong(filteredData, b)) {
-                    filteredData.add(b);
-                }
+            for (MusicBean b : newlyAdded) {
+                filteredData.add(b);
             }
             // 3. 检查是否需要把部分新数据加载到 data(显示列表)
-            // 只有当 data 还没满(loadedCount < filteredData.size)时才需要
-            // 但如果用户已经滚动到底部加载了所有,那 data 可能已经包含了所有 filteredData
-            // 此时只需更新 hasMore 标志
             int oldDataSize = data.size();
-            // 如果当前显示数量小于 filteredData 总数,且没有正在加载更多
-            // 说明可以补充显示
             if (loadedCount < filteredData.size()) {
-                // 补充一批到显示列表
                 int canAdd = Math.min(BATCH_SIZE, filteredData.size() - loadedCount);
                 for (int i = 0; i < canAdd; i++) {
                     if (loadedCount < filteredData.size()) {
@@ -166,21 +158,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                     }
                 }
                 int newAdded = data.size() - oldDataSize;
-                hasMore = loadedCount < filteredData.size();
                 if (newAdded > 0) {
                     notifyItemRangeInserted(oldDataSize, newAdded);
                 }
             }
-            // 更新 hasMore
             hasMore = loadedCount < filteredData.size();
         }
         // 如果有搜索过滤,filteredData会在下次filter时重建
-    }
-
-    /** 检查列表中是否已包含某首歌(已弃用,改用HashSet) */
-    private boolean containsSong(List<MusicBean> list, MusicBean target) {
-        // 保留方法签名以兼容,实际不再使用
-        return false;
     }
 
     /** 生成歌曲唯一标识(网络用 streamId,本地用规范化文件路径) */
@@ -204,14 +188,38 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         applyFilterAndLoadFirstBatch();
     }
 
-    /** 只显示收藏的歌曲(主线程) */
+    /**
+     * 设置搜索关键词(不立即过滤)
+     * 用于 filterFavorites 前设置关键词,使收藏过滤也应用搜索
+     */
+    public void setSearchKeyword(String keyword) {
+        filterKeyword = keyword == null ? "" : keyword.trim().toLowerCase();
+    }
+
+    /**
+     * 判断歌曲是否匹配当前搜索关键词
+     * 只按歌名和歌手匹配,不搜专辑名(避免误匹配)
+     */
+    private boolean matchesFilter(MusicBean b) {
+        if (filterKeyword.isEmpty()) {
+            return true;
+        }
+        String title = b.getTitle().toLowerCase();
+        String artist = b.getArtist() != null ? b.getArtist().toLowerCase() : "";
+        return title.contains(filterKeyword) || artist.contains(filterKeyword);
+    }
+
+    /**
+     * 只显示收藏的歌曲(主线程)
+     * 同时应用当前搜索关键词过滤(如果有的话)
+     */
     public synchronized void filterFavorites(FavoriteManager fm) {
         loadedCount = 0;
         data.clear();
         filteredData.clear();
         if (fm != null) {
             for (MusicBean b : fullData) {
-                if (fm.isFavorite(b)) {
+                if (fm.isFavorite(b) && matchesFilter(b)) {
                     filteredData.add(b);
                 }
             }
@@ -229,18 +237,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 过滤并加载第一批(主线程) */
     private void applyFilterAndLoadFirstBatch() {
         filteredData.clear();
-        if (filterKeyword.isEmpty()) {
-            filteredData.addAll(fullData);
-        } else {
-            for (MusicBean b : fullData) {
-                String title = b.getTitle().toLowerCase();
-                String artist = b.getArtist() != null ? b.getArtist().toLowerCase() : "";
-                String album = b.getAlbum() != null ? b.getAlbum().toLowerCase() : "";
-                if (title.contains(filterKeyword)
-                        || artist.contains(filterKeyword)
-                        || album.contains(filterKeyword)) {
-                    filteredData.add(b);
-                }
+        for (MusicBean b : fullData) {
+            if (matchesFilter(b)) {
+                filteredData.add(b);
             }
         }
 

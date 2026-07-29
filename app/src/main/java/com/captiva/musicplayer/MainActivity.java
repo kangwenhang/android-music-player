@@ -420,12 +420,14 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 收藏夹 ====================
 
-    /** 应用收藏过滤:只显示已收藏的歌曲 */
+    /** 应用收藏过滤:只显示已收藏的歌曲(同时应用搜索关键词) */
     private void applyFavoritesFilter() {
         int count = favoriteManager.size();
         if (count == 0) {
             Toast.makeText(this, "还没有收藏的歌曲", Toast.LENGTH_SHORT).show();
         }
+        // 设置搜索关键词,使 filterFavorites 也按搜索过滤
+        adapter.setSearchKeyword(currentSearchQuery);
         adapter.filterFavorites(favoriteManager);
         updateCount();
         if (count == 0) {
