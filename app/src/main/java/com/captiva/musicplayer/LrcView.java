@@ -42,8 +42,8 @@ public class LrcView extends View {
     private float currentTextSize = 20f;
     /** 其他行字体大小 */
     private float normalTextSize = 15f;
-    /** 最多显示行数(含当前行,上下各2行) */
-    private static final int MAX_VISIBLE_LINES = 5;
+    /** 最多显示行数(含当前行,上下各3行) */
+    private static final int MAX_VISIBLE_LINES = 7;
     /** 歌词左右边距 */
     private float lrcPadding = 24f;
 
