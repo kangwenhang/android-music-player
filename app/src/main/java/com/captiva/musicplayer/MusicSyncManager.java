@@ -223,6 +223,7 @@ public class MusicSyncManager {
         int downloaded = 0;
         int skipped = existingCount;
         int failed = 0;
+        LyricCache lyricCache = new LyricCache(context);
 
         // 6. 只下载不存在的文件(已存在的静默跳过)
         for (int i = 0; i < allSongs.size(); i++) {
@@ -247,13 +248,66 @@ public class MusicSyncManager {
             if (bytes > 0) {
                 downloaded++;
                 callback.onSongDownloaded(downloaded + skipped, allSongs.size());
+                // 下载成功后,顺便获取歌词并缓存
+                downloadLyricsForSong(song, localFile, lyricCache);
             } else {
                 failed++;
                 callback.onSongFailed(song.getTitle(), "下载失败");
             }
         }
 
+        // 7. 为已跳过的歌曲补充歌词缓存(断网可用)
+        int lyricsCached = 0;
+        for (MusicBean song : allSongs) {
+            if (cancelled) break;
+            String sid = song.getStreamId();
+            if (sid == null || sid.isEmpty()) continue;
+            // 已有缓存则跳过
+            if (lyricCache.exists(sid)) continue;
+            File localFile = buildLocalFile(song);
+            if (downloadLyricsForSong(song, localFile, lyricCache)) {
+                lyricsCached++;
+            }
+        }
+        if (lyricsCached > 0) {
+            Log.d(TAG, "补充缓存歌词: " + lyricsCached + " 首");
+        }
+
         callback.onComplete(downloaded, skipped, failed, allSongs.size());
+    }
+
+    /**
+     * 获取单首歌曲歌词并缓存到本地
+     * @param song 歌曲信息
+     * @param localFile 本地文件路径(用于写同名 .lrc)
+     * @param lyricCache 歌词缓存管理器
+     * @return true 如果成功获取并缓存了歌词
+     */
+    private boolean downloadLyricsForSong(MusicBean song, File localFile, LyricCache lyricCache) {
+        String sid = song.getStreamId();
+        if (sid == null || sid.isEmpty()) return false;
+
+        try {
+            List<LrcEntry> lyrics = api.getLyricsBySongId(sid);
+            if (lyrics == null || lyrics.isEmpty()) {
+                // 回退到 getLyrics
+                String plainText = api.getLyrics(song.getArtist(), song.getTitle());
+                if (plainText != null && !plainText.isEmpty()) {
+                    if (plainText.contains("[") && plainText.contains(":") && plainText.contains("]")) {
+                        lyrics = LrcParser.parseLrcText(plainText);
+                    } else {
+                        lyrics = LrcParser.parsePlainTextLyrics(plainText, 5000);
+                    }
+                }
+            }
+            if (lyrics != null && !lyrics.isEmpty()) {
+                lyricCache.saveBoth(localFile.getAbsolutePath(), sid, lyrics);
+                return true;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "获取歌词失败: " + song.getTitle(), e);
+        }
+        return false;
     }
 
     /**

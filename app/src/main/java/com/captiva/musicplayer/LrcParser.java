@@ -210,6 +210,29 @@ public class LrcParser {
     }
 
     /**
+     * 将歌词列表转换为 LRC 格式文本
+     * 用于缓存歌词到本地文件
+     * @param list 歌词列表
+     * @return LRC 格式文本,如 "[00:01.23]歌词内容\n..."
+     */
+    public static String toLrcText(List<LrcEntry> list) {
+        if (list == null || list.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (LrcEntry e : list) {
+            long ms = e.getTime();
+            long min = ms / 60000;
+            long sec = (ms % 60000) / 1000;
+            long millis = ms % 1000;
+            sb.append(String.format("[%02d:%02d.%03d]", min, sec, millis));
+            sb.append(e.getText());
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
      * 根据当前播放位置查找歌词索引
      * 提前 200ms 匹配下一行,补偿音频输出延迟
      */

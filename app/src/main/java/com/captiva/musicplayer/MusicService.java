@@ -376,19 +376,44 @@ public class MusicService extends Service {
                     }
                 }
 
-                // 3. 本地歌词都没有,尝试从 Navidrome 按歌手+歌名获取歌词
+                // 3. 本地歌词都没有,先查歌词缓存(断网时可用)
+                if (lyrics == null || lyrics.isEmpty()) {
+                    LyricCache lyricCache = new LyricCache(MusicService.this);
+                    String sid = bean.getStreamId();
+                    if (sid != null && !sid.isEmpty()) {
+                        lyrics = lyricCache.load(sid);
+                        if (lyrics != null && !lyrics.isEmpty()) {
+                            Log.d(TAG, "从歌词缓存加载(本地歌曲): " + lyrics.size() + " 行");
+                        }
+                    }
+                }
+
+                // 4. 缓存也没有,尝试从 Navidrome 按歌手+歌名获取歌词(需联网)
                 if (lyrics == null || lyrics.isEmpty()) {
                     NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
                     if (api != null && MusicDataHolder.getInstance().isNavidromeEnabled()) {
                         try {
-                            String plainText = api.getLyrics(bean.getArtist(), bean.getTitle());
-                            if (plainText != null && !plainText.isEmpty()) {
-                                if (plainText.contains("[") && plainText.contains(":") && plainText.contains("]")) {
-                                    lyrics = LrcParser.parseLrcText(plainText);
-                                } else {
-                                    lyrics = LrcParser.parsePlainTextLyrics(plainText, 5000);
+                            // 优先尝试 getLyricsBySongId(结构化同步歌词)
+                            String sid = bean.getStreamId();
+                            if (sid != null && !sid.isEmpty()) {
+                                lyrics = api.getLyricsBySongId(sid);
+                            }
+                            // 回退到 getLyrics(纯文本)
+                            if (lyrics == null || lyrics.isEmpty()) {
+                                String plainText = api.getLyrics(bean.getArtist(), bean.getTitle());
+                                if (plainText != null && !plainText.isEmpty()) {
+                                    if (plainText.contains("[") && plainText.contains(":") && plainText.contains("]")) {
+                                        lyrics = LrcParser.parseLrcText(plainText);
+                                    } else {
+                                        lyrics = LrcParser.parsePlainTextLyrics(plainText, 5000);
+                                    }
                                 }
-                                Log.d(TAG, "本地歌曲从Navidrome获取歌词: " + lyrics.size() + " 行");
+                            }
+                            // 获取成功,缓存到本地(断网下次可用)
+                            if (lyrics != null && !lyrics.isEmpty()) {
+                                Log.d(TAG, "本地歌曲从Navidrome获取歌词: " + lyrics.size() + " 行,缓存到本地");
+                                LyricCache lyricCache = new LyricCache(MusicService.this);
+                                lyricCache.saveBoth(filePath, bean.getStreamId(), lyrics);
                             }
                         } catch (Exception e) {
                             Log.w(TAG, "从Navidrome获取本地歌曲歌词失败", e);
@@ -438,6 +463,27 @@ public class MusicService extends Service {
             @Override
             public void run() {
                 List<LrcEntry> lyrics = null;
+
+                // 0. 先查歌词缓存(断网时可用)
+                LyricCache lyricCache = new LyricCache(MusicService.this);
+                lyrics = lyricCache.load(songId);
+                if (lyrics != null && !lyrics.isEmpty()) {
+                    Log.d(TAG, "从歌词缓存加载(网络歌曲): " + lyrics.size() + " 行");
+                    final List<LrcEntry> cachedResult = lyrics;
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            MusicBean current = getCurrentMusic();
+                            if (current != null && songId.equals(current.getStreamId())) {
+                                currentLrc = cachedResult;
+                                notifyState();
+                            }
+                        }
+                    });
+                    return;
+                }
+
+                // 缓存没有,从 Navidrome 获取
                 NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
 
                 if (api != null) {
@@ -464,6 +510,12 @@ public class MusicService extends Service {
                         } catch (Exception e) {
                             Log.w(TAG, "getLyrics fallback failed", e);
                         }
+                    }
+
+                    // 获取成功,缓存到本地(断网下次可用)
+                    if (lyrics != null && !lyrics.isEmpty()) {
+                        Log.d(TAG, "网络歌词获取成功: " + lyrics.size() + " 行,缓存到本地");
+                        lyricCache.save(songId, lyrics);
                     }
                 }
 
