@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -54,26 +55,32 @@ jobs:
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           TAG="v$(date +'%Y%m%d-%H%M%S')"
 
-          # 通过 GitHub API 获取上一个 Release 的 tag(比本地 tag 排序更可靠)
-          PREV_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+          # 通过 GitHub API 获取上一个 Release 的 tag(最可靠)
+          # gh api 返回所有 release(含 prerelease),按创建时间降序
+          PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name' 2>/dev/null || echo "")
+          echo "上一个 Release tag: ${PREV_TAG:-无}"
 
-          # 如果 API 失败,回退到本地 tag(按创建时间排序)
-          if [ -z "$PREV_TAG" ]; then
-            git fetch --tags --force 2>/dev/null || true
-            PREV_TAG=$(git tag -l --sort=-creatordate | grep '^v[0-9]' | head -1)
+          # 确保上一个 tag 在本地存在(用于 git log 范围查询)
+          if [ -n "$PREV_TAG" ]; then
+            git fetch origin "refs/tags/${PREV_TAG}:refs/tags/${PREV_TAG}" 2>/dev/null || true
           fi
 
           # 只显示自上次 Release 以来的新 commit
-          if [ -n "$PREV_TAG" ]; then
+          if [ -n "$PREV_TAG" ] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
             CHANGELOG=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" 2>/dev/null | grep -v "^- Merge" || true)
+            echo "找到 ${PREV_TAG}, 提取新 commit..."
           else
             # 没有上一个 Release,只取最近 3 条
             CHANGELOG=$(git log --pretty=format:"- %s" -3 | grep -v "^- Merge" || true)
+            echo "未找到上一个 Release, 只显示最近 3 条"
           fi
 
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="- 无代码变更(重新构建)"
           fi
+
+          echo "本次更新内容:"
+          echo "$CHANGELOG"
 
           # 获取构建时间
           BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')
