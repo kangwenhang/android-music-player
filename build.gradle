@@ -6,6 +6,9 @@ buildscript {
         maven { url 'https://maven.aliyun.com/repository/google' }
         maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        // 备用镜像:阿里云故障时自动回退
+        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+        maven { url 'https://maven.huaweicloud.com/repository/maven-public/' }
         google()
         mavenCentral()
     }
@@ -20,6 +23,9 @@ allprojects {
         maven { url 'https://maven.aliyun.com/repository/google' }
         maven { url 'https://maven.aliyun.com/repository/public' }
         maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
+        // 备用镜像:阿里云故障时自动回退
+        maven { url 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+        maven { url 'https://maven.huaweicloud.com/repository/maven-public/' }
         google()
         mavenCentral()
     }
