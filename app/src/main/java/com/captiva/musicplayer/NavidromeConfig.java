@@ -17,6 +17,7 @@ public class NavidromeConfig {
     private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
     private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
     private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录
+    private static final String KEY_AUTO_PLAY = "auto_play"; // 打开软件自动播放
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -111,5 +112,15 @@ public class NavidromeConfig {
         return url != null && !url.isEmpty()
                 && user != null && !user.isEmpty()
                 && pass != null && !pass.isEmpty();
+    }
+
+    /** 打开软件是否自动播放音乐(默认关闭) */
+    public boolean isAutoPlay() {
+        return prefs.getBoolean(KEY_AUTO_PLAY, false);
+    }
+
+    /** 设置打开软件自动播放 */
+    public void setAutoPlay(boolean autoPlay) {
+        prefs.edit().putBoolean(KEY_AUTO_PLAY, autoPlay).apply();
     }
 }

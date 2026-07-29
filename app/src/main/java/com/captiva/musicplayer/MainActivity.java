@@ -66,6 +66,8 @@ public class MainActivity extends AppCompatActivity {
     private MusicAdapter adapter;
     private MusicService service;
     private boolean bound = false;
+    /** 标记是否需要自动播放(仅首次加载时触发) */
+    private boolean autoPlayPending = false;
 
     /** 当前音乐列表(扫描同步目录) */
     private final List<MusicBean> musicList = new ArrayList<>();
@@ -199,6 +201,8 @@ public class MainActivity extends AppCompatActivity {
 
         // 默认加载音乐(扫描同步目录)
         if (hasStoragePermission()) {
+            // 标记是否需要自动播放
+            autoPlayPending = navidromeConfig.isAutoPlay();
             loadMusic();
         } else {
             ActivityCompat.requestPermissions(this,
@@ -418,9 +422,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 时长过滤 / 清除缓存 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 清除缓存 */
     private void showSettingsMenu() {
-        final String[] items = {"均衡器", "服务器设置", "时长过滤设置", "清除网络缓存"};
+        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "清除网络缓存"};
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this, R.layout.dialog_settings_item, items);
 
@@ -437,14 +441,38 @@ public class MainActivity extends AppCompatActivity {
                     needReload = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
                 } else if (which == 2) {
+                    // 自动播放开关
+                    showAutoPlayDialog();
+                } else if (which == 3) {
                     // 时长过滤设置
                     showDurationFilterDialog();
-                } else if (which == 3) {
+                } else if (which == 4) {
                     // 清除网络缓存
                     showClearCacheDialog();
                 }
             }
         });
+        builder.show();
+    }
+
+    /** 自动播放设置对话框 */
+    private void showAutoPlayDialog() {
+        boolean current = navidromeConfig.isAutoPlay();
+        final String[] items = {"开启", "关闭"};
+        int checked = current ? 0 : 1;
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("打开软件自动播放");
+        builder.setSingleChoiceItems(items, checked, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                navidromeConfig.setAutoPlay(which == 0);
+                Toast.makeText(MainActivity.this,
+                        "自动播放已" + (which == 0 ? "开启" : "关闭"),
+                        Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+            }
+        });
+        builder.setNegativeButton("取消", null);
         builder.show();
     }
 
@@ -578,6 +606,7 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_STORAGE) {
             if (grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                autoPlayPending = navidromeConfig.isAutoPlay();
                 loadMusic();
             } else {
                 Toast.makeText(this, "需要存储权限才能读取音乐", Toast.LENGTH_LONG).show();
@@ -616,6 +645,11 @@ public class MainActivity extends AppCompatActivity {
             // 立即设置播放列表,本地音乐可播
             if (service != null) {
                 service.setPlayList(musicList, 0);
+                // 自动播放(仅首次加载时触发)
+                if (autoPlayPending && !service.isPlaying()) {
+                    autoPlayPending = false;
+                    service.playIndex(0);
+                }
             }
         }
 
