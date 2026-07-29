@@ -113,7 +113,7 @@ public class CoverLoader {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final Bitmap bmp = loadBitmap(bean, key, size);
+                final Bitmap bmp = loadBitmap(bean, key, size, false);
                 if (bmp != null) {
                     cache.put(key, bmp);
                     mainHandler.post(new Runnable() {
@@ -140,10 +140,24 @@ public class CoverLoader {
      * @param callback 回调
      */
     public void loadBitmap(MusicBean bean, final int size, final BitmapCallback callback) {
+        loadBitmapInternal(bean, size, callback, false);
+    }
+
+    /**
+     * 异步加载封面 Bitmap(全分辨率,不限制200px,用于歌词背景)
+     * @param bean     歌曲信息
+     * @param size     期望尺寸
+     * @param callback 回调
+     */
+    public void loadBitmapFull(MusicBean bean, final int size, final BitmapCallback callback) {
+        loadBitmapInternal(bean, size, callback, true);
+    }
+
+    private void loadBitmapInternal(MusicBean bean, final int size, final BitmapCallback callback, final boolean fullRes) {
         if (bean == null || callback == null) {
             return;
         }
-        final String key = getCacheKey(bean);
+        final String key = getCacheKey(bean) + (fullRes ? "_full" : "");
         if (key == null) {
             callback.onBitmapLoaded(null);
             return;
@@ -159,7 +173,7 @@ public class CoverLoader {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                final Bitmap bmp = loadBitmap(bean, key, size);
+                final Bitmap bmp = loadBitmap(bean, key, size, fullRes);
                 if (bmp != null) {
                     cache.put(key, bmp);
                 }
@@ -194,7 +208,7 @@ public class CoverLoader {
     }
 
     /** 实际加载 Bitmap */
-    private Bitmap loadBitmap(MusicBean bean, String key, int size) {
+    private Bitmap loadBitmap(MusicBean bean, String key, int size, boolean fullRes) {
         // 先查磁盘缓存
         Bitmap diskCached = loadFromDiskCache(key);
         if (diskCached != null) {
@@ -202,9 +216,9 @@ public class CoverLoader {
         }
         Bitmap bmp;
         if (bean.isNetwork()) {
-            bmp = loadNetworkCover(bean, size);
+            bmp = loadNetworkCover(bean, size, fullRes);
         } else {
-            bmp = loadLocalCover(bean, size);
+            bmp = loadLocalCover(bean, size, fullRes);
         }
         // 写入磁盘缓存(后台线程,不阻塞UI)
         if (bmp != null) {
@@ -297,7 +311,7 @@ public class CoverLoader {
     }
 
     /** 从本地音乐文件提取嵌入式封面 */
-    private Bitmap loadLocalCover(MusicBean bean, int size) {
+    private Bitmap loadLocalCover(MusicBean bean, int size, boolean fullRes) {
         MediaMetadataRetriever mmr = null;
         try {
             String path = bean.getData();
@@ -310,12 +324,11 @@ public class CoverLoader {
             if (art == null || art.length == 0) {
                 return null;
             }
-            // 车机内存有限,限制解码尺寸
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(art, 0, art.length, opts);
-            // 车机封面尺寸不要太大,最大200px
-            int targetSize = Math.min(size, 200);
+            // 全分辨率模式不限制尺寸;列表缩略图限制200px
+            int targetSize = fullRes ? size : Math.min(size, 200);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
@@ -340,7 +353,7 @@ public class CoverLoader {
     }
 
     /** 从 Navidrome getCoverArt 下载封面 */
-    private Bitmap loadNetworkCover(MusicBean bean, int size) {
+    private Bitmap loadNetworkCover(MusicBean bean, int size, boolean fullRes) {
         String coverArtId = bean.getCoverArtId();
         if (coverArtId == null || coverArtId.isEmpty()) {
             return null;
@@ -373,8 +386,8 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
-            // 车机封面尺寸限制
-            int targetSize = Math.min(size, 200);
+            // 全分辨率模式不限制尺寸;列表缩略图限制200px
+            int targetSize = fullRes ? size : Math.min(size, 200);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565;

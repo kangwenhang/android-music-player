@@ -978,9 +978,9 @@ public class MainActivity extends AppCompatActivity {
         // 更新底栏收藏按钮状态
         updateFavoriteButton(bean);
 
-        // 加载封面到歌词区作为背景(高清大图)
+        // 加载封面到歌词区作为背景(高清大图,全分辨率)
         int coverSize = 1024; // 背景封面尺寸
-        CoverLoader.getInstance().loadBitmap(bean, coverSize,
+        CoverLoader.getInstance().loadBitmapFull(bean, coverSize,
                 new CoverLoader.BitmapCallback() {
                     @Override
                     public void onBitmapLoaded(android.graphics.Bitmap bitmap) {

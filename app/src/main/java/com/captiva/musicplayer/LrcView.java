@@ -250,6 +250,11 @@ public class LrcView extends View {
         int textWidth = vw - (int)(lrcPadding * 2);
         if (textWidth <= 0) textWidth = vw;
 
+        // StaticLayout 从 x=0 开始绘制, ALIGN_CENTER 使文字在 [0, textWidth] 内居中
+        // 所以文字中心在 textWidth/2 处, 要让文字中心对齐屏幕中心 cx,
+        // 需 translate 到 cx - textWidth/2
+        float layoutX = cx - textWidth / 2f;
+
         // 计算当前行的高度(可能换行)
         String currentText = lrcList.get(currentIndex).getText();
         currentPaint.setTextSize(currentTextSize);
@@ -293,14 +298,14 @@ public class LrcView extends View {
             if (drawY < -h) break; // 超出屏幕顶部
             StaticLayout layout = upLayouts.get(i);
             canvas.save();
-            canvas.translate(cx, drawY);
+            canvas.translate(layoutX, drawY);
             layout.draw(canvas);
             canvas.restore();
         }
 
         // 绘制当前行
         canvas.save();
-        canvas.translate(cx, currentTop);
+        canvas.translate(layoutX, currentTop);
         currentLayout.draw(canvas);
         canvas.restore();
 
@@ -311,7 +316,7 @@ public class LrcView extends View {
             if (drawY > vh) break; // 超出屏幕底部
             StaticLayout layout = downLayouts.get(i);
             canvas.save();
-            canvas.translate(cx, drawY);
+            canvas.translate(layoutX, drawY);
             layout.draw(canvas);
             canvas.restore();
             drawY += h + lineSpacing;
