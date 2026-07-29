@@ -1113,6 +1113,31 @@ public class MainActivity extends AppCompatActivity {
         handler.removeCallbacks(progressTask);
     }
 
+    /** 上次按返回键的时间戳,用于双击退出判断 */
+    private long lastBackPressTime = 0;
+
+    @Override
+    public void onBackPressed() {
+        long now = System.currentTimeMillis();
+        if (now - lastBackPressTime < 2000) {
+            // 2秒内再按一次 → 真正退出,停止后台服务
+            if (service != null) {
+                service.stopSelf();
+            }
+            if (bound) {
+                unbindService(connection);
+                bound = false;
+            }
+            Intent stopIntent = new Intent(this, MusicService.class);
+            stopService(stopIntent);
+            finish();
+        } else {
+            // 第一次按 → 提示再按一次退出
+            lastBackPressTime = now;
+            Toast.makeText(this, "再按一次返回键退出", Toast.LENGTH_SHORT).show();
+        }
+    }
+
     @Override
     protected void onDestroy() {
         // 取消自动同步
