@@ -55,9 +55,12 @@ public class MainActivity extends AppCompatActivity {
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
-    private Button btnPrev, btnPlay, btnNext, btnMode;
+    private Button btnPrev, btnPlay, btnNext, btnMode, btnFav;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
+
+    // 收藏颜色缓存
+    private int colorFavActive, colorFavInactive;
 
     private MusicAdapter adapter;
     private MusicService service;
@@ -113,13 +116,14 @@ public class MainActivity extends AppCompatActivity {
                 int modeValue = intent.getIntExtra("playMode", 0);
                 PlayMode mode = PlayMode.fromValue(modeValue);
 
-                adapter.setPlayingIndex(index);
                 updateNowPlaying(index);
                 updatePlayButton(playing);
                 btnMode.setText(mode.getShortLabel());
                 if (service != null) {
                     lrcView.setLrcList(service.getCurrentLrc());
                 }
+                // 滚动列表到当前播放歌曲(含高亮+确保数据加载)
+                scrollToCurrentSong();
             }
         }
     };
@@ -134,11 +138,12 @@ public class MainActivity extends AppCompatActivity {
                 service.setPlayList(musicList, 0);
             }
             int idx = service.getCurrentIndex();
-            adapter.setPlayingIndex(idx);
             updateNowPlaying(idx);
             updatePlayButton(service.isPlaying());
             btnMode.setText(service.getPlayMode().getShortLabel());
             lrcView.setLrcList(service.getCurrentLrc());
+            // 滚动列表到当前播放歌曲
+            scrollToCurrentSong();
         }
 
         @Override
@@ -247,7 +252,12 @@ public class MainActivity extends AppCompatActivity {
         btnPlay = findViewById(R.id.btn_play);
         btnNext = findViewById(R.id.btn_next);
         btnMode = findViewById(R.id.btn_mode);
+        btnFav = findViewById(R.id.btn_fav);
         lrcView = findViewById(R.id.lrc_view);
+
+        // 缓存收藏颜色
+        colorFavActive = ContextCompat.getColor(this, R.color.favorite_active);
+        colorFavInactive = ContextCompat.getColor(this, R.color.favorite_inactive);
 
         adapter = new MusicAdapter(this);
         adapter.setFavoriteManager(favoriteManager);
@@ -258,13 +268,6 @@ public class MainActivity extends AppCompatActivity {
                 service.setPlayList(displayList, position);
                 service.playIndex(position);
             }
-        });
-        adapter.setOnFavoriteClickListener((bean, isNowFavorite) -> {
-            // 收藏状态变化时,如果在收藏夹模式,刷新列表
-            if (favoritesOnly) {
-                applyFavoritesFilter();
-            }
-            Toast.makeText(this, isNowFavorite ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
         });
         rvList.setLayoutManager(new LinearLayoutManager(this));
         // 关闭 item 动画(车机性能弱,动画卡顿)
@@ -357,6 +360,26 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
             }
         });
+
+        // 收藏当前播放歌曲(底栏收藏按钮)
+        btnFav.setOnClickListener(v -> {
+            if (service == null) {
+                Toast.makeText(this, "未在播放", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            MusicBean current = service.getCurrentMusic();
+            if (current == null) {
+                Toast.makeText(this, "未在播放", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            boolean nowFav = favoriteManager.toggleFavorite(current);
+            updateFavoriteButton(current);
+            // 收藏状态变化时,如果在收藏夹模式,刷新列表
+            if (favoritesOnly) {
+                applyFavoritesFilter();
+            }
+            Toast.makeText(this, nowFav ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
+        });
     }
 
     // ==================== 搜索 ====================
@@ -386,7 +409,7 @@ public class MainActivity extends AppCompatActivity {
         updateCount();
         if (count == 0) {
             tvEmpty.setVisibility(View.VISIBLE);
-            tvEmpty.setText("还没有收藏的歌曲\n点击歌曲右侧爱心收藏");
+            tvEmpty.setText("还没有收藏的歌曲\n播放歌曲时点击底栏爱心收藏");
         } else {
             tvEmpty.setVisibility(View.GONE);
         }
@@ -938,12 +961,18 @@ public class MainActivity extends AppCompatActivity {
             tvTotalTime.setText("00:00");
             // 清除歌词区封面
             lrcView.setCoverBitmap(null);
+            // 重置收藏按钮
+            btnFav.setText("\u2661");
+            btnFav.setTextColor(colorFavInactive);
             return;
         }
         tvNowTitle.setText(bean.getTitle());
         tvNowArtist.setText(bean.getArtist());
         sbProgress.setMax((int) bean.getDuration());
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
+
+        // 更新底栏收藏按钮状态
+        updateFavoriteButton(bean);
 
         // 加载封面到歌词区作为背景(增大尺寸以填满歌词区)
         int coverSize = 600; // 背景封面尺寸
@@ -954,6 +983,49 @@ public class MainActivity extends AppCompatActivity {
                         lrcView.setCoverBitmap(bitmap);
                     }
                 });
+    }
+
+    /** 更新底栏收藏按钮图标(根据当前歌曲收藏状态) */
+    private void updateFavoriteButton(MusicBean bean) {
+        if (bean == null || favoriteManager == null) {
+            btnFav.setText("\u2661");
+            btnFav.setTextColor(colorFavInactive);
+            return;
+        }
+        boolean isFav = favoriteManager.isFavorite(bean);
+        btnFav.setText(isFav ? "\u2665" : "\u2661");
+        btnFav.setTextColor(isFav ? colorFavActive : colorFavInactive);
+    }
+
+    /**
+     * 滚动列表到当前播放歌曲位置
+     * 用歌曲身份匹配 filteredData,确保即使播放列表和显示列表不一致也能正确定位
+     */
+    private void scrollToCurrentSong() {
+        if (service == null) return;
+        MusicBean current = service.getCurrentMusic();
+        if (current == null) return;
+
+        // 在显示列表中查找当前播放歌曲的位置
+        int pos = adapter.findPositionByBean(current);
+        if (pos < 0) return;
+
+        // 确保该位置数据已加载(分批加载机制)
+        adapter.ensureLoaded(pos);
+
+        // 更新高亮索引
+        adapter.setPlayingIndex(pos);
+
+        // 滚动到该位置(使用 scrollToPosition,车机性能弱,不用平滑滚动)
+        LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
+        if (lm != null) {
+            // 检查当前是否可见,不可见才滚动(避免不必要的跳动)
+            int firstVisible = lm.findFirstVisibleItemPosition();
+            int lastVisible = lm.findLastVisibleItemPosition();
+            if (pos < firstVisible || pos > lastVisible) {
+                rvList.scrollToPosition(pos);
+            }
+        }
     }
 
     /** 更新播放按钮:播放中=蓝色圆形+暂停图标,暂停中=红色圆形+播放图标 */

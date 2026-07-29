@@ -305,6 +305,54 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
     }
 
+    /**
+     * 确保指定位置的数据已加载(分批加载机制下,远处位置可能尚未加载)
+     * @return true 如果位置在 filteredData 范围内
+     */
+    public synchronized boolean ensureLoaded(int position) {
+        if (position < 0 || position >= filteredData.size()) {
+            return false;
+        }
+        // 如果位置已超出当前加载范围,补充加载
+        while (loadedCount <= position && hasMore) {
+            int start = loadedCount;
+            int end = Math.min(loadedCount + BATCH_SIZE, filteredData.size());
+            for (int i = start; i < end; i++) {
+                data.add(filteredData.get(i));
+            }
+            int addedCount = end - start;
+            loadedCount = end;
+            hasMore = loadedCount < filteredData.size();
+            if (addedCount > 0) {
+                notifyItemRangeInserted(start, addedCount);
+            }
+        }
+        return position < data.size();
+    }
+
+    /**
+     * 根据歌曲对象在 filteredData 中查找位置(用 song key 匹配)
+     * 用于播放列表和显示列表不一致时,定位当前播放歌曲
+     * @return 位置索引,未找到返回 -1
+     */
+    public synchronized int findPositionByBean(MusicBean target) {
+        if (target == null) return -1;
+        String targetKey = getSongKey(target);
+        if (targetKey == null) return -1;
+        for (int i = 0; i < filteredData.size(); i++) {
+            if (targetKey.equals(getSongKey(filteredData.get(i)))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 获取 filteredData 中指定位置的歌曲(供外部查询) */
+    public synchronized MusicBean getFilteredItem(int position) {
+        if (position < 0 || position >= filteredData.size()) return null;
+        return filteredData.get(position);
+    }
+
     public void setOnItemClickListener(OnItemClickListener l) {
         this.listener = l;
     }
@@ -348,11 +396,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         holder.tvArtist.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
         holder.vSource.setBackgroundColor(bean.isNetwork() ? colorSourceNetwork : colorSourceLocal);
 
-        // 收藏爱心:已收藏红色实心♡,未收藏灰色空心♡
-        boolean isFav = favoriteManager != null && favoriteManager.isFavorite(bean);
-        holder.btnFavorite.setText(isFav ? "\u2665" : "\u2661");
-        holder.btnFavorite.setTextColor(isFav ? colorFavoriteActive : colorFavoriteInactive);
-
         // 使用缓存的封面尺寸
         CoverLoader.getInstance().load(bean, holder.ivCover, coverSizeList);
 
@@ -362,18 +405,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 if (pos >= 0 && pos < data.size()) {
                     listener.onItemClick(pos, data.get(pos));
                 }
-            }
-        });
-
-        // 收藏按钮点击
-        holder.btnFavorite.setOnClickListener(v -> {
-            if (favoriteManager == null) return;
-            boolean nowFav = favoriteManager.toggleFavorite(bean);
-            // 更新爱心显示
-            holder.btnFavorite.setText(nowFav ? "\u2665" : "\u2661");
-            holder.btnFavorite.setTextColor(nowFav ? colorFavoriteActive : colorFavoriteInactive);
-            if (favoriteListener != null) {
-                favoriteListener.onFavoriteClick(bean, nowFav);
             }
         });
 
@@ -392,7 +423,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         TextView tvTitle;
         TextView tvArtist;
         View vSource;
-        TextView btnFavorite;
 
         VH(@NonNull View itemView) {
             super(itemView);
@@ -401,7 +431,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             tvTitle = itemView.findViewById(R.id.tv_title);
             tvArtist = itemView.findViewById(R.id.tv_artist);
             vSource = itemView.findViewById(R.id.v_source);
-            btnFavorite = itemView.findViewById(R.id.btn_favorite);
         }
     }
 }
