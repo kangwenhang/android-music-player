@@ -18,6 +18,8 @@ public class NavidromeConfig {
     private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
     private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录
     private static final String KEY_AUTO_PLAY = "auto_play"; // 打开软件自动播放
+    private static final String KEY_LAST_INDEX = "last_play_index"; // 上次播放索引
+    private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -122,5 +124,25 @@ public class NavidromeConfig {
     /** 设置打开软件自动播放 */
     public void setAutoPlay(boolean autoPlay) {
         prefs.edit().putBoolean(KEY_AUTO_PLAY, autoPlay).apply();
+    }
+
+    /** 获取上次播放的歌曲索引 */
+    public int getLastPlayIndex() {
+        return prefs.getInt(KEY_LAST_INDEX, 0);
+    }
+
+    /** 保存上次播放的歌曲索引 */
+    public void setLastPlayIndex(int index) {
+        prefs.edit().putInt(KEY_LAST_INDEX, index).apply();
+    }
+
+    /** 获取上次播放进度(ms) */
+    public int getLastPlayPosition() {
+        return prefs.getInt(KEY_LAST_POSITION, 0);
+    }
+
+    /** 保存上次播放进度(ms) */
+    public void setLastPlayPosition(int position) {
+        prefs.edit().putInt(KEY_LAST_POSITION, position).apply();
     }
 }

@@ -138,7 +138,12 @@ public class MainActivity extends AppCompatActivity {
             service = b.getService();
             bound = true;
             if (!musicList.isEmpty()) {
-                service.setPlayList(musicList, 0);
+                // 恢复上次播放位置
+                int lastIndex = navidromeConfig.getLastPlayIndex();
+                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                    lastIndex = 0;
+                }
+                service.setPlayList(musicList, lastIndex);
             }
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
@@ -147,6 +152,17 @@ public class MainActivity extends AppCompatActivity {
             lrcView.setLrcList(service.getCurrentLrc());
             // 滚动列表到当前播放歌曲
             scrollToCurrentSong();
+
+            // 自动播放:恢复上次歌曲和进度
+            if (autoPlayPending && !service.isPlaying() && !musicList.isEmpty()) {
+                autoPlayPending = false;
+                int lastIndex = navidromeConfig.getLastPlayIndex();
+                int lastPos = navidromeConfig.getLastPlayPosition();
+                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                    lastIndex = 0;
+                }
+                service.playIndexWithSeek(lastIndex, lastPos);
+            }
         }
 
         @Override
@@ -644,11 +660,17 @@ public class MainActivity extends AppCompatActivity {
             tvEmpty.setVisibility(View.GONE);
             // 立即设置播放列表,本地音乐可播
             if (service != null) {
-                service.setPlayList(musicList, 0);
-                // 自动播放(仅首次加载时触发)
+                // 恢复上次播放位置
+                int lastIndex = navidromeConfig.getLastPlayIndex();
+                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                    lastIndex = 0;
+                }
+                service.setPlayList(musicList, lastIndex);
+                // 自动播放(service已连接时触发)
                 if (autoPlayPending && !service.isPlaying()) {
                     autoPlayPending = false;
-                    service.playIndex(0);
+                    int lastPos = navidromeConfig.getLastPlayPosition();
+                    service.playIndexWithSeek(lastIndex, lastPos);
                 }
             }
         }

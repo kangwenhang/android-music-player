@@ -76,6 +76,8 @@ public class MusicService extends Service {
 
     /** 防止快速切歌导致卡死:记录当前播放请求的唯一标识 */
     private volatile int playToken = 0;
+    /** 待跳转的播放位置(ms),prepareAndPlay完成后seekTo */
+    private int pendingSeekPosition = 0;
     /** 切歌防抖:最小间隔(ms),避免连续快速切歌 */
     private static final long SWITCH_DEBOUNCE_MS = 300;
 
@@ -195,6 +197,17 @@ public class MusicService extends Service {
             return;
         }
         currentIndex = index;
+        pendingSeekPosition = 0;
+        prepareAndPlay();
+    }
+
+    /** 播放指定索引并跳转到指定进度(ms) */
+    public void playIndexWithSeek(int index, int positionMs) {
+        if (playList.isEmpty() || index < 0 || index >= playList.size()) {
+            return;
+        }
+        currentIndex = index;
+        pendingSeekPosition = positionMs;
         prepareAndPlay();
     }
 
@@ -583,6 +596,15 @@ public class MusicService extends Service {
                             Log.w(TAG, "equalizer init failed", e);
                         }
                         mp.start();
+                        // 恢复上次播放进度
+                        if (pendingSeekPosition > 0) {
+                            try {
+                                mp.seekTo(pendingSeekPosition);
+                            } catch (Exception e) {
+                                Log.w(TAG, "seekTo failed", e);
+                            }
+                            pendingSeekPosition = 0;
+                        }
                         // 加载歌词
                         loadLyrics(currentBean);
                         updateRemoteControlMetadata(currentBean);
@@ -705,6 +727,12 @@ public class MusicService extends Service {
 
     /** 状态变化广播 */
     private void notifyState() {
+        // 保存当前播放索引,下次启动可恢复
+        try {
+            NavidromeConfig config = new NavidromeConfig(this);
+            config.setLastPlayIndex(currentIndex);
+        } catch (Exception ignored) {
+        }
         Intent i = new Intent(ACTION_STATE_CHANGED);
         i.putExtra("index", currentIndex);
         i.putExtra("playing", isPlaying());
@@ -827,6 +855,16 @@ public class MusicService extends Service {
 
     @Override
     public void onDestroy() {
+        // 保存播放状态,下次自动播放可恢复
+        try {
+            NavidromeConfig config = new NavidromeConfig(this);
+            config.setLastPlayIndex(currentIndex);
+            if (player != null && isPrepared) {
+                config.setLastPlayPosition(getCurrentPosition());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "save play state failed", e);
+        }
         try {
             if (remoteControlClient != null && audioManager != null) {
                 audioManager.unregisterRemoteControlClient(remoteControlClient);
