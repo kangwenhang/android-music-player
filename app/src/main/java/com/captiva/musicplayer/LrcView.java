@@ -37,11 +37,11 @@ public class LrcView extends View {
     private final Paint scrimPaint = new Paint();
 
     /** 行间距(每行歌词之间的间距,px) */
-    private float lineSpacing = 12f;
+    private float lineSpacing = 10f;
     /** 当前行字体大小 */
-    private float currentTextSize = 24f;
+    private float currentTextSize = 20f;
     /** 其他行字体大小 */
-    private float normalTextSize = 18f;
+    private float normalTextSize = 15f;
     /** 最多显示行数(含当前行,上下各2行) */
     private static final int MAX_VISIBLE_LINES = 5;
     /** 歌词左右边距 */
@@ -109,8 +109,7 @@ public class LrcView extends View {
     }
 
     /**
-     * 将封面缩放到适配视图(高清,不占满整个视图,留出边距)
-     * 使用 contain 模式:完整显示封面,不裁剪
+     * 将封面缩放到填满歌词显示区域(center-crop,无黑边)
      */
     private Bitmap createScaledBitmap(Bitmap src) {
         if (src == null || getWidth() <= 0 || getHeight() <= 0) {
@@ -122,11 +121,10 @@ public class LrcView extends View {
             int sw = src.getWidth();
             int sh = src.getHeight();
 
-            // 使用 contain 模式:按短边缩放,完整显示不裁剪
-            // 缩放到视图尺寸的 85%,留出边距
-            float targetScale = Math.min((float) vw / sw, (float) vh / sh) * 0.85f;
-            int nw = (int) (sw * targetScale);
-            int nh = (int) (sh * targetScale);
+            // center-crop:按长边缩放,填满视图(可能有裁剪但无黑边)
+            float scale = Math.max((float) vw / sw, (float) vh / sh);
+            int nw = (int) (sw * scale);
+            int nh = (int) (sh * scale);
             if (nw < 1) nw = 1;
             if (nh < 1) nh = 1;
             return Bitmap.createScaledBitmap(src, nw, nh, true);
