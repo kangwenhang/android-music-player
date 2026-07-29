@@ -47,6 +47,16 @@ android {
     namespace 'com.captiva.musicplayer'
     compileSdk 30
 
+    // 固定签名:本地和 CI 用同一密钥,确保 APK 签名一致可覆盖安装
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'captiva123'
+            keyAlias 'debug'
+            keyPassword 'captiva123'
+        }
+    }
+
     defaultConfig {
         applicationId "com.captiva.musicplayer"
         // 核心:最低支持安卓 4.2.2(科帕奇 15 款改装车机)
@@ -68,7 +78,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
+            signingConfig signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
