@@ -1,7 +1,11 @@
 name: Build and Release Android APK
 
 on:
-  # 仅手动触发,不再每次 push 自动构建
+  # 推送即触发自动构建
+  push:
+    branches:
+      - local-test
+  # 保留手动触发
   workflow_dispatch:
 
 jobs:
