@@ -67,14 +67,15 @@ public class LrcView extends View {
         currentPaint.setColor(Color.parseColor("#FFFFFF"));
         currentPaint.setTextSize(currentTextSize);
         currentPaint.setAntiAlias(true);
-        currentPaint.setTextAlign(Paint.Align.CENTER);
+        // StaticLayout.ALIGN_CENTER 负责居中,Paint 用 LEFT 避免冲突
+        currentPaint.setTextAlign(Paint.Align.LEFT);
         currentPaint.setShadowLayer(6f, 2f, 2f, Color.parseColor("#AA000000"));
 
         // 其他行:半透明灰
         normalPaint.setColor(Color.parseColor("#CCFFFFFF"));
         normalPaint.setTextSize(normalTextSize);
         normalPaint.setAntiAlias(true);
-        normalPaint.setTextAlign(Paint.Align.CENTER);
+        normalPaint.setTextAlign(Paint.Align.LEFT);
         normalPaint.setShadowLayer(4f, 1f, 1f, Color.parseColor("#80000000"));
 
         // 封面绘制
@@ -107,7 +108,10 @@ public class LrcView extends View {
         invalidate();
     }
 
-    /** 将封面放大到填满视图(高清,不过度放大) */
+    /**
+     * 将封面缩放到适配视图(高清,不占满整个视图,留出边距)
+     * 使用 contain 模式:完整显示封面,不裁剪
+     */
     private Bitmap createScaledBitmap(Bitmap src) {
         if (src == null || getWidth() <= 0 || getHeight() <= 0) {
             return null;
@@ -118,26 +122,14 @@ public class LrcView extends View {
             int sw = src.getWidth();
             int sh = src.getHeight();
 
-            // 计算填满视图所需的缩放比例(center-crop)
-            float scale = Math.max((float) vw / sw, (float) vh / sh);
-
-            // 如果原图已经大于视图,不放大(避免不必要的内存消耗)
-            if (scale > 1.0f) {
-                // 原图小于视图,需要放大
-                int nw = (int) (sw * scale);
-                int nh = (int) (sh * scale);
-                // 限制最大尺寸为视图尺寸的1.2倍(刚好填满即可,不过度放大)
-                int maxDim = (int) (Math.max(vw, vh) * 1.2f);
-                if (nw > maxDim || nh > maxDim) {
-                    float ratio = (float) maxDim / Math.max(nw, nh);
-                    nw = (int) (nw * ratio);
-                    nh = (int) (nh * ratio);
-                }
-                return Bitmap.createScaledBitmap(src, nw, nh, true);
-            } else {
-                // 原图已够大,直接裁剪使用(不缩小,保持清晰度)
-                return src;
-            }
+            // 使用 contain 模式:按短边缩放,完整显示不裁剪
+            // 缩放到视图尺寸的 85%,留出边距
+            float targetScale = Math.min((float) vw / sw, (float) vh / sh) * 0.85f;
+            int nw = (int) (sw * targetScale);
+            int nh = (int) (sh * targetScale);
+            if (nw < 1) nw = 1;
+            if (nh < 1) nh = 1;
+            return Bitmap.createScaledBitmap(src, nw, nh, true);
         } catch (OutOfMemoryError e) {
             return src;
         } catch (Exception e) {
