@@ -236,16 +236,23 @@ public class LrcParser {
 
     /**
      * 根据当前播放位置查找歌词索引
-     * 严格按照歌词时间标签匹配,不添加额外偏移
-     * 返回时间戳 <= position 的最后一行索引
+     *
+     * MediaPlayer.getCurrentPosition() 返回的是"已解码位置",不是"实际播放位置"。
+     * 实际听到的音频比 getCurrentPosition() 超前约 200ms(音频输出缓冲导致)。
+     * 因此需要加 200ms 补偿,让歌词与实际听到的音频同步。
+     *
+     * @param position MediaPlayer.getCurrentPosition() 返回的播放位置(毫秒)
+     * @return 当前应显示的歌词行索引, -1 表示无匹配
      */
     public static int findLrcIndex(List<LrcEntry> list, long position) {
         if (list == null || list.isEmpty()) {
             return -1;
         }
+        // 补偿音频输出延迟:getCurrentPosition() 比实际播放滞后约 200ms
+        long adjustedPos = position + 200;
         int idx = -1;
         for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).getTime() <= position) {
+            if (list.get(i).getTime() <= adjustedPos) {
                 idx = i;
             } else {
                 break;
