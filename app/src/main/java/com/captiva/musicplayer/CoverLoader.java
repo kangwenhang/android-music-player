@@ -19,8 +19,9 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 封面图异步加载器(优化版)
@@ -28,6 +29,12 @@ import java.util.concurrent.Executors;
  * - 本地歌曲:从嵌入式专辑封面提取(MediaMetadataRetriever)
  * - Navidrome 歌曲:从 getCoverArt URL 下载
  * - 磁盘缓存避免重复网络请求,大幅提升二次加载速度
+ *
+ * 滑动性能优化:
+ * - 使用 ThreadPoolExecutor 管理队列,滑动时自动清理积压请求
+ * - 磁盘缓存解码使用采样率+RGB_565,避免解码全尺寸大图
+ * - 支持暂停/恢复加载(快速滑动时暂停,停止后恢复)
+ * - 清理磁盘缓存降频,避免每次保存都遍历文件
  */
 public class CoverLoader {
 
@@ -36,14 +43,24 @@ public class CoverLoader {
     private static final String DISK_CACHE_DIR = "cover_cache";
     private static final long DISK_CACHE_MAX_SIZE = 30 * 1024 * 1024; // 30MB磁盘缓存
 
+    /** 队列积压超过此数量时,清空旧请求(避免卡顿) */
+    private static final int MAX_QUEUE_SIZE = 15;
+    /** 每隔多少次保存才检查一次磁盘缓存大小 */
+    private static final int CLEAN_INTERVAL = 10;
+
     private static CoverLoader instance;
 
     private final LruCache<String, Bitmap> cache;
     /** 正在加载中的回调集合,防止重复请求 */
     private final Map<String, BitmapCallback> pendingCallbacks = new HashMap<>();
-    private final ExecutorService executor;
+    private final ThreadPoolExecutor executor;
     private final Handler mainHandler;
     private File diskCacheDir;
+
+    /** 是否暂停加载(快速滑动时暂停,减少IO压力) */
+    private volatile boolean paused = false;
+    /** 保存计数器(降频清理磁盘缓存) */
+    private int saveCount = 0;
 
     private CoverLoader() {
         cache = new LruCache<String, Bitmap>(CACHE_SIZE) {
@@ -58,7 +75,10 @@ public class CoverLoader {
             }
         };
         // 车机性能弱,只用1个线程加载封面,避免OOM
-        executor = Executors.newFixedThreadPool(1);
+        // 使用 ThreadPoolExecutor 以便管理队列(清理积压请求)
+        executor = new ThreadPoolExecutor(
+                1, 1, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>());
         mainHandler = new Handler(Looper.getMainLooper());
     }
 
@@ -84,6 +104,20 @@ public class CoverLoader {
     }
 
     /**
+     * 设置暂停/恢复加载
+     * 快速滑动时暂停,停止滑动后恢复
+     * 暂停时清空积压队列,恢复时只加载当前可见项
+     */
+    public void setPaused(boolean paused) {
+        this.paused = paused;
+        if (paused) {
+            // 暂停时清空积压队列(这些请求对应的item可能已经滑出屏幕)
+            executor.getQueue().clear();
+            Log.d(TAG, "封面加载已暂停,清空积压队列(" + executor.getQueue().size() + "项)");
+        }
+    }
+
+    /**
      * 异步加载封面并设置到 ImageView
      * @param bean  歌曲信息
      * @param iv    目标 ImageView
@@ -99,9 +133,10 @@ public class CoverLoader {
             return;
         }
 
-        // 1. 先查内存缓存
+        // 1. 先查内存缓存(命中则直接设置,不经过线程池)
         Bitmap cached = cache.get(key);
         if (cached != null) {
+            iv.setTag(key);
             iv.setImageBitmap(cached);
             return;
         }
@@ -109,6 +144,18 @@ public class CoverLoader {
         // 占位图
         iv.setImageResource(android.R.color.transparent);
         iv.setBackgroundResource(R.drawable.bg_cover_placeholder);
+        iv.setTag(key);
+
+        // 2. 暂停模式下不提交新请求(等待滑动停止后由RecyclerView重新绑定触发)
+        if (paused) {
+            return;
+        }
+
+        // 3. 队列积压过多时,清空旧请求(这些大概率是滑出屏幕的item)
+        if (executor.getQueue().size() > MAX_QUEUE_SIZE) {
+            executor.getQueue().clear();
+            Log.d(TAG, "队列积压过多,清空旧请求");
+        }
 
         executor.execute(new Runnable() {
             @Override
@@ -119,6 +166,7 @@ public class CoverLoader {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
+                            // tag 校验:确保 ImageView 还在显示同一首歌
                             Object tag = iv.getTag();
                             if (tag != null && tag.equals(key)) {
                                 iv.setBackgroundResource(0);
@@ -129,8 +177,6 @@ public class CoverLoader {
                 }
             }
         });
-
-        iv.setTag(key);
     }
 
     /**
@@ -210,7 +256,7 @@ public class CoverLoader {
     /** 实际加载 Bitmap */
     private Bitmap loadBitmap(MusicBean bean, String key, int size, boolean fullRes) {
         // 先查磁盘缓存
-        Bitmap diskCached = loadFromDiskCache(key);
+        Bitmap diskCached = loadFromDiskCache(key, size, fullRes);
         if (diskCached != null) {
             return diskCached;
         }
@@ -227,22 +273,39 @@ public class CoverLoader {
         return bmp;
     }
 
-    /** 从磁盘缓存加载 */
-    private Bitmap loadFromDiskCache(String key) {
+    /** 从磁盘缓存加载(使用采样率+RGB_565,避免解码全尺寸大图) */
+    private Bitmap loadFromDiskCache(String key, int targetSize, boolean fullRes) {
         if (diskCacheDir == null) return null;
+        FileInputStream fis = null;
         try {
             String fileName = md5(key) + ".cover";
             File file = new File(diskCacheDir, fileName);
             if (!file.exists()) return null;
-            FileInputStream fis = null;
-            try {
-                fis = new FileInputStream(file);
-                return BitmapFactory.decodeStream(fis);
-            } finally {
-                if (fis != null) fis.close();
-            }
+
+            fis = new FileInputStream(file);
+            // 先获取图片尺寸
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inJustDecodeBounds = true;
+            BitmapFactory.decodeStream(fis, null, opts);
+            // 关闭后重新打开(Stream不能重用)
+            fis.close();
+            fis = new FileInputStream(file);
+
+            // 计算采样率(列表缩略图限制200px,全分辨率用传入尺寸)
+            int actualTarget = fullRes ? targetSize : Math.min(targetSize, 200);
+            opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, actualTarget);
+            opts.inJustDecodeBounds = false;
+            opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
+            opts.inPurgeable = true;
+
+            Bitmap bmp = BitmapFactory.decodeStream(fis, null, opts);
+            return bmp;
         } catch (Exception e) {
             return null;
+        } finally {
+            if (fis != null) {
+                try { fis.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -260,8 +323,12 @@ public class CoverLoader {
             } finally {
                 if (fos != null) fos.close();
             }
-            // 清理过期缓存
-            cleanDiskCacheIfNeeded();
+            // 降频清理磁盘缓存(每 CLEAN_INTERVAL 次保存才检查一次)
+            saveCount++;
+            if (saveCount >= CLEAN_INTERVAL) {
+                saveCount = 0;
+                cleanDiskCacheIfNeeded();
+            }
         } catch (Exception e) {
             Log.w(TAG, "saveToDiskCache failed", e);
         }

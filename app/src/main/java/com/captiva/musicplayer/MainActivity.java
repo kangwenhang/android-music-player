@@ -296,11 +296,31 @@ public class MainActivity extends AppCompatActivity {
         if (animator instanceof SimpleItemAnimator) {
             ((SimpleItemAnimator) animator).setSupportsChangeAnimations(false);
         }
-        // 增大缓存池(减少滑动时重新绑定)
-        rvList.setItemViewCacheSize(20);
+        // 增大缓存池(减少滑动时重新绑定),但不要太大(车机内存有限)
+        rvList.setItemViewCacheSize(10);
         // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
         rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
+        // 滑动状态监听:快速滑动(惯性)时暂停封面加载,停止后恢复
+        // 避免大量 MediaMetadataRetriever 调用阻塞单线程,导致卡顿
+        rvList.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+                if (newState == RecyclerView.SCROLL_STATE_SETTLING) {
+                    // 惯性滑动中:暂停封面加载
+                    CoverLoader.getInstance().setPaused(true);
+                } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    // 停止滑动:恢复加载,刷新当前可见项
+                    CoverLoader.getInstance().setPaused(false);
+                    // 通知 adapter 刷新可见项(触发封面重新加载)
+                    int firstVisible = ((LinearLayoutManager) rvList.getLayoutManager()).findFirstVisibleItemPosition();
+                    int lastVisible = ((LinearLayoutManager) rvList.getLayoutManager()).findLastVisibleItemPosition();
+                    if (firstVisible >= 0 && lastVisible >= 0) {
+                        adapter.notifyItemRangeChanged(firstVisible, lastVisible - firstVisible + 1);
+                    }
+                }
+            }
+        });
         tvEmpty.setText("正在扫描本地音乐...");
         tvEmpty.setVisibility(View.VISIBLE);
     }
