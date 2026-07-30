@@ -13,6 +13,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.text.Editable;
@@ -36,6 +37,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -1464,12 +1466,24 @@ public class MainActivity extends AppCompatActivity {
         downloadThread.start();
     }
 
-    /** 弹出系统安装器安装 APK(安卓 4.2.2 兼容) */
+    /** 弹出系统安装器安装 APK(兼容安卓 4.2.2 ~ 12+) */
     private void installApk(File apkFile) {
         Log.d(TAG, "开始安装 APK: " + apkFile.getAbsolutePath()
                 + " (" + apkFile.length() + " bytes)");
         Intent intent = new Intent(Intent.ACTION_VIEW);
-        intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+        Uri apkUri;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // 安卓 7.0+ 禁止 file:// URI 跨进程传递,必须用 FileProvider
+            apkUri = FileProvider.getUriForFile(this,
+                    getPackageName() + ".fileprovider", apkFile);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Log.d(TAG, "使用 FileProvider URI: " + apkUri);
+        } else {
+            // 安卓 4.2.2 ~ 6.0 可直接用 file://
+            apkUri = Uri.fromFile(apkFile);
+            Log.d(TAG, "使用 file:// URI: " + apkUri);
+        }
+        intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         // 检查系统是否有安装器能处理此 Intent
         if (intent.resolveActivity(getPackageManager()) == null) {
