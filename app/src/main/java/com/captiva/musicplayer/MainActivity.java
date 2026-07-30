@@ -91,6 +91,8 @@ public class MainActivity extends AppCompatActivity {
     private NavidromeConfig navidromeConfig;
     /** 网络歌曲列表缓存(同步后保存,下次秒开) */
     private SongCache songCache;
+    /** 本地歌曲列表缓存(扫描后保存,下次秒开) */
+    private LocalMusicCache localMusicCache;
     /** 收藏管理器 */
     private FavoriteManager favoriteManager;
     /** 是否正在只显示收藏(收藏夹模式) */
@@ -204,6 +206,7 @@ public class MainActivity extends AppCompatActivity {
 
         navidromeConfig = new NavidromeConfig(this);
         songCache = new SongCache(this);
+        localMusicCache = new LocalMusicCache(this);
         favoriteManager = new FavoriteManager(this);
 
         // 初始化 NavidromeApi(如果已配置)
@@ -340,6 +343,11 @@ public class MainActivity extends AppCompatActivity {
             if (service != null) {
                 // 用当前显示的列表作为播放列表
                 List<MusicBean> displayList = adapter.getDisplayList();
+                // 用 bean 身份验证位置(防止列表变化后位置错位导致"乱跳")
+                int realPos = adapter.findPositionByBean(bean);
+                if (realPos >= 0 && realPos != position) {
+                    position = realPos;
+                }
                 service.setPlayList(displayList, position);
                 service.playIndex(position);
             }
@@ -614,14 +622,14 @@ public class MainActivity extends AppCompatActivity {
         return tv;
     }
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 屏幕信息 / 清除缓存 / 关于 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 刷新列表 / 屏幕信息 / 清除缓存 / 关于 */
     private void showSettingsMenu() {
         final String[] itemTexts = {
             "均衡器", "服务器设置",
             "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"),
-            "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存", "关于"
+            "时长过滤设置", "刷新歌曲列表", "屏幕分辨率与DPI", "清除列表缓存", "关于"
         };
-        final String[] itemIcons = {"♪", "📡", "▶", "⏱", "📐", "🗑", "ℹ"};
+        final String[] itemIcons = {"♪", "📡", "▶", "⏱", "🔄", "📐", "🗑", "ℹ"};
 
         // 自定义 Adapter:图标 + 文字 + 箭头
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
@@ -669,10 +677,12 @@ public class MainActivity extends AppCompatActivity {
                 } else if (which == 3) {
                     showDurationFilterDialog();
                 } else if (which == 4) {
-                    showScreenInfoDialog();
+                    refreshMusicList();
                 } else if (which == 5) {
-                    showClearCacheDialog();
+                    showScreenInfoDialog();
                 } else if (which == 6) {
+                    showClearCacheDialog();
+                } else if (which == 7) {
                     showAboutDialog();
                 }
             }
@@ -752,25 +762,35 @@ public class MainActivity extends AppCompatActivity {
         showDialogFull(sd.dialog);
     }
 
-    /** 清除网络缓存确认对话框(全屏美化) */
+    /** 清除歌曲列表缓存确认对话框(全屏美化) */
     private void showClearCacheDialog() {
         final SubDialog sd = createSubDialog("🗑", "清除歌曲列表缓存");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
-        boolean hasCache = songCache.exists();
-        String msg = hasCache
-                ? "缓存时间: " + formatCacheTime(songCache.getCachedAt())
-                : "当前无缓存数据";
-        sd.body.addView(createInfoCard(
-                msg + "\n\n此操作仅清除歌曲列表缓存,不影响已下载的音乐文件"));
+        boolean hasNetCache = songCache.exists();
+        boolean hasLocalCache = localMusicCache.exists();
+        StringBuilder sb = new StringBuilder();
+        if (hasNetCache) {
+            sb.append("网络缓存: ").append(formatCacheTime(songCache.getCachedAt())).append("\n");
+        }
+        if (hasLocalCache) {
+            sb.append("本地缓存: ").append(formatCacheTime(localMusicCache.getCachedAt())).append("\n");
+        }
+        if (sb.length() == 0) {
+            sb.append("当前无缓存数据");
+        }
+        sb.append("\n\n此操作清除歌曲列表缓存(网络+本地),不影响已下载的音乐文件\n清除后下次打开将从U盘重新扫描");
 
-        if (hasCache) {
+        sd.body.addView(createInfoCard(sb.toString()));
+
+        if (hasNetCache || hasLocalCache) {
             Button btnClear = createDialogButton("清除", true);
             btnClear.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
                     songCache.clear();
+                    localMusicCache.clear();
                     Toast.makeText(MainActivity.this, "缓存已清除", Toast.LENGTH_SHORT).show();
                     dRef[0].dismiss();
                 }
@@ -1375,7 +1395,43 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 1. 先用 MediaStore 快速加载(秒开)
+        // 0. 优先从本地缓存加载(秒开,完全不读U盘)
+        //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
+        //    新增/删除歌曲需手动"刷新列表"(设置菜单)
+        List<MusicBean> cachedList = localMusicCache.load();
+        if (cachedList != null && !cachedList.isEmpty()) {
+            musicList.clear();
+            musicList.addAll(cachedList);
+            // 排序(确保和刷新后的顺序一致,避免视觉跳动)
+            java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
+                @Override
+                public int compare(MusicBean a, MusicBean b) {
+                    return a.getTitle().compareToIgnoreCase(b.getTitle());
+                }
+            });
+            adapter.setData(musicList);
+            updateCount();
+            tvEmpty.setVisibility(View.GONE);
+            // 立即设置播放列表
+            if (service != null) {
+                int lastIndex = navidromeConfig.getLastPlayIndex();
+                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                    lastIndex = 0;
+                }
+                service.setPlayList(musicList, lastIndex);
+                if (autoPlayPending && !service.isPlaying()) {
+                    autoPlayPending = false;
+                    int lastPos = navidromeConfig.getLastPlayPosition();
+                    service.playIndexWithSeek(lastIndex, lastPos);
+                }
+            }
+            // 缓存路径不扫描U盘(用户要求:点击歌曲才读U盘)
+            // 仅启动后台服务器同步(如果配置了Navidrome)
+            startBackgroundSync();
+            return;
+        }
+
+        // 1. 无缓存:用 MediaStore 快速加载(秒开)
         final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(this, syncPath);
 
         musicList.clear();
@@ -1388,15 +1444,12 @@ public class MainActivity extends AppCompatActivity {
             tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
         } else {
             tvEmpty.setVisibility(View.GONE);
-            // 立即设置播放列表,本地音乐可播
             if (service != null) {
-                // 恢复上次播放位置
                 int lastIndex = navidromeConfig.getLastPlayIndex();
                 if (lastIndex < 0 || lastIndex >= musicList.size()) {
                     lastIndex = 0;
                 }
                 service.setPlayList(musicList, lastIndex);
-                // 自动播放(service已连接时触发)
                 if (autoPlayPending && !service.isPlaying()) {
                     autoPlayPending = false;
                     int lastPos = navidromeConfig.getLastPlayPosition();
@@ -1405,21 +1458,137 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 2. 后台递归扫描补全 + 同步(不阻塞 UI)
+        // 2. 后台递归扫描补全 + 同步
+        backgroundScanAndMerge(syncPath, quickList, false);
+    }
+
+    /**
+     * 手动刷新歌曲列表:从U盘重新扫描
+     * 适用场景:用户在U盘新增/删除了歌曲,需要更新列表
+     * 扫描在后台线程执行,不阻塞UI
+     */
+    private void refreshMusicList() {
+        final String syncPath = navidromeConfig.getSyncPath();
+        if (syncPath == null || syncPath.isEmpty()) {
+            Toast.makeText(this, "未配置扫描目录", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 显示扫描进度
+        tvSyncStatus.setVisibility(View.VISIBLE);
+        tvSyncStatus.setText("正在扫描U盘...");
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // 完整扫描U盘目录
+                final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
+
+                // 排序
+                java.util.Collections.sort(fullList, new java.util.Comparator<MusicBean>() {
+                    @Override
+                    public int compare(MusicBean a, MusicBean b) {
+                        return a.getTitle().compareToIgnoreCase(b.getTitle());
+                    }
+                });
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvSyncStatus.setVisibility(View.GONE);
+
+                        if (fullList.isEmpty()) {
+                            Toast.makeText(MainActivity.this, "未找到音乐文件", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+
+                        // 记录旧数量用于提示
+                        int oldCount = musicList.size();
+
+                        // 用扫描结果替换当前列表
+                        musicList.clear();
+                        musicList.addAll(fullList);
+                        adapter.setData(musicList);
+                        updateCount();
+
+                        if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+
+                        // 更新播放列表(保留当前播放歌曲位置)
+                        if (service != null && !musicList.isEmpty()) {
+                            MusicBean currentSong = service.getCurrentMusic();
+                            int newIndex = 0;
+                            if (currentSong != null) {
+                                String curKey = getSongKey(currentSong);
+                                for (int i = 0; i < musicList.size(); i++) {
+                                    if (curKey.equals(getSongKey(musicList.get(i)))) {
+                                        newIndex = i;
+                                        break;
+                                    }
+                                }
+                            }
+                            service.setPlayList(musicList, newIndex);
+                            adapter.setPlayingIndex(newIndex);
+                        }
+
+                        // 保存到缓存(下次秒开) — 强制保存(内容可能变化但数量不变)
+                        localMusicCache.forceSaveAsync(musicList);
+
+                        int diff = fullList.size() - oldCount;
+                        String msg;
+                        if (diff > 0) {
+                            msg = "扫描完成: " + fullList.size() + " 首(新增 " + diff + " 首)";
+                        } else if (diff < 0) {
+                            msg = "扫描完成: " + fullList.size() + " 首(减少 " + (-diff) + " 首)";
+                        } else {
+                            msg = "扫描完成: " + fullList.size() + " 首";
+                        }
+                        Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * 后台扫描U盘并合并到列表(不阻塞UI)
+     * 仅用于:首次无缓存时的补全扫描 / 手动刷新列表
+     * 缓存路径不再调用此方法(用户要求:缓存秒开,点击歌曲才读U盘)
+     *
+     * @param syncPath 扫描路径
+     * @param existingList 当前已有的列表(用于去重)
+     * @param fromCache 是否从缓存加载(existingList来自缓存,需校验文件存在性)
+     */
+    private void backgroundScanAndMerge(final String syncPath, final List<MusicBean> existingList, final boolean fromCache) {
         new Thread(new Runnable() {
             @Override
             public void run() {
                 // 后台完整扫描(递归遍历目录,含 MediaStore 未收录的文件)
                 final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
 
-                // 合并新发现的文件(MediaStore 没有的)
-                // 用规范化路径去重(消除 /sdcard vs /storage/emulated/0 差异)
+                // 合并新发现的文件
                 final List<MusicBean> toAdd = new ArrayList<>();
                 java.util.Set<String> existingPaths = new java.util.HashSet<>();
-                for (MusicBean b : quickList) {
+                for (MusicBean b : existingList) {
                     String p = MusicScanner.normalizePath(b.getData());
                     if (!p.isEmpty()) {
                         existingPaths.add(p);
+                    }
+                }
+                // 校验已有文件是否仍存在(移除已删除的)
+                final List<MusicBean> validList = new ArrayList<>();
+                if (fromCache) {
+                    java.util.Set<String> fullPaths = new java.util.HashSet<>();
+                    for (MusicBean b : fullList) {
+                        String p = MusicScanner.normalizePath(b.getData());
+                        if (!p.isEmpty()) fullPaths.add(p);
+                    }
+                    for (MusicBean b : existingList) {
+                        String p = MusicScanner.normalizePath(b.getData());
+                        if (p.isEmpty() || fullPaths.contains(p)) {
+                            validList.add(b);
+                        }
                     }
                 }
                 for (MusicBean b : fullList) {
@@ -1429,33 +1598,93 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-                if (!toAdd.isEmpty()) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            musicList.addAll(toAdd);
-                            java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
-                                @Override
-                                public int compare(MusicBean a, MusicBean b) {
-                                    return a.getTitle().compareToIgnoreCase(b.getTitle());
-                                }
-                            });
-                            adapter.setData(musicList);
-                            updateCount();
-                            if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
-                                tvEmpty.setVisibility(View.GONE);
-                            }
-                            if (service != null && !musicList.isEmpty()) {
-                                service.setPlayList(musicList, 0);
-                            }
-                        }
-                    });
+                // 判断是否有实际变化(无变化则不刷新列表,避免视觉跳动)
+                final boolean hasChanges;
+                if (fromCache) {
+                    // 缓存模式:文件被删除或新增了文件才算变化
+                    hasChanges = (validList.size() != existingList.size()) || !toAdd.isEmpty();
+                } else {
+                    hasChanges = !toAdd.isEmpty();
                 }
+
+                if (!hasChanges) {
+                    // 无变化:首次无缓存时仍需保存缓存(让下次秒开)
+                    if (!fromCache && !musicList.isEmpty()) {
+                        localMusicCache.forceSaveAsync(musicList);
+                    }
+                    // 仅启动后台服务器同步
+                    startBackgroundSync();
+                    return;
+                }
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (fromCache) {
+                            // 缓存模式:用校验后的列表(移除已删除文件)+ 新增文件
+                            musicList.clear();
+                            musicList.addAll(validList);
+                            musicList.addAll(toAdd);
+                        } else {
+                            // 非缓存模式:追加新发现的
+                            musicList.addAll(toAdd);
+                        }
+
+                        // 排序
+                        java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
+                            @Override
+                            public int compare(MusicBean a, MusicBean b) {
+                                return a.getTitle().compareToIgnoreCase(b.getTitle());
+                            }
+                        });
+                        adapter.setData(musicList);
+                        updateCount();
+                        if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+
+                        // 更新播放列表(保留当前播放歌曲,不重置索引)
+                        if (service != null && !musicList.isEmpty()) {
+                            MusicBean currentSong = service.getCurrentMusic();
+                            int newIndex = 0;
+                            if (currentSong != null) {
+                                // 用 song key 在新列表中查找当前播放歌曲的位置
+                                String curKey = getSongKey(currentSong);
+                                for (int i = 0; i < musicList.size(); i++) {
+                                    if (curKey.equals(getSongKey(musicList.get(i)))) {
+                                        newIndex = i;
+                                        break;
+                                    }
+                                }
+                            }
+                            service.setPlayList(musicList, newIndex);
+                            // 同步更新列表高亮(避免高亮错位)
+                            adapter.setPlayingIndex(newIndex);
+                        }
+
+                        // 保存缓存(下次秒开) — 强制保存(扫描后内容可能变化)
+                        localMusicCache.forceSaveAsync(musicList);
+                    }
+                });
 
                 // 3. 后台自动同步服务器新歌
                 startBackgroundSync();
             }
         }).start();
+    }
+
+    /** 生成歌曲唯一key(用于匹配播放位置,与 MusicAdapter.getSongKey 规则一致) */
+    private String getSongKey(MusicBean b) {
+        if (b == null) return "";
+        if (b.isNetwork()) {
+            return "net_" + b.getStreamId();
+        } else {
+            String data = b.getData();
+            if (data != null && !data.isEmpty()) {
+                return "local_" + MusicScanner.normalizePath(data);
+            }
+            return "local_" + b.getId();
+        }
     }
 
     /**
