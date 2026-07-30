@@ -50,7 +50,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvEmpty, tvCount, tvSyncStatus;
     // UI - 顶栏
     private EditText etSearch;
-    private Button btnSettings, btnFavorites;
+    private Button btnSettings, btnFavorites, btnEq;
     private TextView tvServerStatus;
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
@@ -124,6 +124,9 @@ public class MainActivity extends AppCompatActivity {
                 if (service != null) {
                     lrcView.setLrcList(service.getCurrentLrc());
                 }
+                // 更新EQ按钮显示(切歌后可能应用了单曲绑定的EQ)
+                String eqPreset = intent.getStringExtra("eqPreset");
+                updateEqButtonText(eqPreset);
                 // 滚动列表到当前播放歌曲(含高亮+确保数据加载)
                 scrollToCurrentSong();
             }
@@ -149,6 +152,8 @@ public class MainActivity extends AppCompatActivity {
             updatePlayButton(service.isPlaying());
             btnMode.setText(service.getPlayMode().getShortLabel());
             lrcView.setLrcList(service.getCurrentLrc());
+            // 更新EQ按钮显示
+            updateEqButtonText(null);
             // 滚动列表到当前播放歌曲
             scrollToCurrentSong();
 
@@ -268,6 +273,7 @@ public class MainActivity extends AppCompatActivity {
         etSearch = findViewById(R.id.et_search);
         btnSettings = findViewById(R.id.btn_settings);
         btnFavorites = findViewById(R.id.btn_favorites);
+        btnEq = findViewById(R.id.btn_eq);
         tvServerStatus = findViewById(R.id.tv_server_status);
         tvNowTitle = findViewById(R.id.tv_now_title);
         tvNowArtist = findViewById(R.id.tv_now_artist);
@@ -359,6 +365,11 @@ public class MainActivity extends AppCompatActivity {
         // 设置(均衡器 + 服务器统一入口)
         btnSettings.setOnClickListener(v -> {
             showSettingsMenu();
+        });
+
+        // 均衡器快捷按钮:弹出预设模式快速切换
+        btnEq.setOnClickListener(v -> {
+            showEqualizerQuickSwitch();
         });
 
         // 收藏夹:切换只看收藏
@@ -669,17 +680,97 @@ public class MainActivity extends AppCompatActivity {
         builder.show();
     }
 
-    /** 打开均衡器(需播放状态) */
+    /** 打开均衡器(无需播放状态,支持静默调节) */
     private void openEqualizer() {
-        if (service != null && service.isPlaying()) {
-            startActivity(new Intent(this, EqualizerActivity.class));
-        } else {
-            Toast.makeText(this, "请先开始播放音乐,均衡器才能生效", Toast.LENGTH_SHORT).show();
-            if (service != null && !musicList.isEmpty()) {
-                service.setPlayList(musicList, 0);
-                service.playIndex(0);
+        startActivity(new Intent(this, EqualizerActivity.class));
+    }
+
+    // ==================== 均衡器快捷切换 ====================
+
+    /** 更新EQ按钮显示当前模式名 */
+    private void updateEqButtonText(String eqPreset) {
+        if (btnEq == null) return;
+        String preset = eqPreset;
+        if (preset == null || preset.isEmpty()) {
+            EqualizerManager eqMgr = MusicDataHolder.getInstance().getEqualizerManager();
+            if (eqMgr != null) {
+                preset = eqMgr.getActivePreset();
             }
         }
+        if (preset == null || preset.isEmpty()) {
+            preset = "关闭";
+        }
+        btnEq.setText("EQ:" + preset);
+    }
+
+    /**
+     * 弹出均衡器预设快速切换弹窗
+     * 显示所有预设(内置+自定义),点击即切换
+     * 含"进入均衡器"入口
+     */
+    private void showEqualizerQuickSwitch() {
+        EqualizerManager eqMgr = MusicDataHolder.getInstance().getEqualizerManager();
+        if (eqMgr == null) {
+            Toast.makeText(this, "均衡器未初始化", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 获取所有预设名(内置 + 自定义)
+        List<String> allPresets = eqMgr.getAllPresetNames();
+        // 在末尾添加"进入均衡器"和"绑定当前歌曲"选项
+        List<String> items = new ArrayList<>(allPresets);
+        items.add("进入均衡器调节");
+
+        // 检查当前歌曲是否有绑定EQ
+        MusicBean currentSong = (service != null) ? service.getCurrentMusic() : null;
+        String songEq = (currentSong != null) ? eqMgr.getSongEqPreset(currentSong) : null;
+        if (currentSong != null) {
+            if (songEq != null) {
+                items.add("取消当前歌曲EQ绑定(当前: " + songEq + ")");
+            } else {
+                items.add("绑定当前EQ到此歌曲");
+            }
+        }
+
+        final String[] itemsArray = items.toArray(new String[0]);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("均衡器模式" + (currentSong != null && songEq != null
+                ? "  (歌曲已绑定: " + songEq + ")" : ""));
+        builder.setItems(itemsArray, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                if (which < allPresets.size()) {
+                    // 选择了预设模式
+                    String preset = allPresets.get(which);
+                    eqMgr.applyPreset(preset);
+                    // 如果有当前歌曲,也更新绑定(如果之前有绑定的话保持绑定,否则只改全局)
+                    updateEqButtonText(preset);
+                    Toast.makeText(MainActivity.this,
+                            "均衡器: " + preset, Toast.LENGTH_SHORT).show();
+                } else if (itemsArray[which].startsWith("进入均衡器")) {
+                    // 进入均衡器界面
+                    openEqualizer();
+                } else if (itemsArray[which].startsWith("绑定当前EQ")) {
+                    // 绑定当前EQ到当前歌曲
+                    if (currentSong != null) {
+                        String currentActive = eqMgr.getActivePreset();
+                        eqMgr.bindSongEq(currentSong, currentActive);
+                        Toast.makeText(MainActivity.this,
+                                "已将 \"" + currentActive + "\" 绑定到此歌曲",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                } else if (itemsArray[which].startsWith("取消当前歌曲")) {
+                    // 取消绑定
+                    if (currentSong != null) {
+                        eqMgr.unbindSongEq(currentSong);
+                        Toast.makeText(MainActivity.this,
+                                "已取消此歌曲的EQ绑定", Toast.LENGTH_SHORT).show();
+                        updateEqButtonText(eqMgr.getActivePreset());
+                    }
+                }
+            }
+        });
+        builder.show();
     }
 
     // ==================== 服务器状态显示 ====================
@@ -1257,6 +1348,8 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // 从其他页面返回时重新隐藏系统 UI
         hideSystemUI();
+        // 从均衡器页面返回时刷新EQ按钮显示(可能修改了设置或新增了自定义预设)
+        updateEqButtonText(null);
         // 从设置页面返回时,如果配置有更新则重新加载
         if (needReload) {
             needReload = false;

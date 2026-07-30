@@ -5,6 +5,13 @@ import android.content.SharedPreferences;
 import android.media.audiofx.Equalizer;
 import android.util.Log;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
 /**
  * 均衡器管理器
  * 封装系统 Equalizer(API 9+),提供预设和自定义频段调节
@@ -13,15 +20,20 @@ import android.util.Log;
  * 1. 支持在未播放歌曲时调节 —— 使用全局音频会话(sessionId=0)初始化
  * 2. 设置持久化 —— 均衡器参数保存到 SharedPreferences,重启不丢失
  * 3. 自动恢复 —— 播放歌曲时重新绑定 audioSession,自动应用已保存的设置
+ * 4. 自定义预设 —— 用户可保存自定义均衡器模式,持久化存储
+ * 5. 单曲EQ绑定 —— 每首歌可绑定独立均衡器模式,切歌时自动应用
  */
 public class EqualizerManager {
 
     private static final String TAG = "EqualizerManager";
     private static final String PREFS_NAME = "equalizer_settings";
+    private static final String PREFS_CUSTOM = "equalizer_custom_presets";
+    private static final String PREFS_SONG_BINDING = "equalizer_song_binding";
 
+    /** 默认预设(含"关闭"),顺序固定 */
     public static final String[] PRESETS_DEFAULT = {"关闭", "流行", "摇滚", "古典", "人声"};
 
-    // 预设参数(针对常见 5 段均衡器)
+    // 内置预设参数(针对常见 5 段均衡器)
     private static final String[] PRESET_NAMES = {"流行", "摇滚", "古典", "人声"};
     private static final int[][] PRESET_LEVELS = {
             {0, 200, 400, 200, 0},       // 流行
@@ -35,6 +47,9 @@ public class EqualizerManager {
     private String currentPreset = "关闭";
     private short[] bandLevels; // 自定义频段等级(mB)
     private int bandCount = 5;  // 默认假设 5 段
+
+    /** 当前应用的单曲EQ模式名(null表示使用全局设置) */
+    private String currentSongPreset = null;
 
     private Context context;
 
@@ -269,8 +284,32 @@ public class EqualizerManager {
         }
     }
 
+    /**
+     * 将预设应用到均衡器硬件(不修改全局设置状态,不保存)
+     * 用于单曲EQ绑定:应用歌曲绑定的预设,但不覆盖全局设置
+     */
+    private void applyPresetToHardware(String preset) {
+        if (equalizer == null) return;
+        short bc = equalizer.getNumberOfBands();
+        if ("关闭".equals(preset)) {
+            try { equalizer.setEnabled(false); } catch (Exception ignored) {}
+            for (short i = 0; i < bc; i++) {
+                try { equalizer.setBandLevel(i, (short) 0); } catch (Exception ignored) {}
+            }
+            return;
+        }
+        int[] target = getPresetLevels(preset);
+        if (target == null) return;
+        try { equalizer.setEnabled(true); } catch (Exception ignored) {}
+        for (short i = 0; i < bc && i < target.length; i++) {
+            try { equalizer.setBandLevel(i, (short) target[i]); } catch (Exception ignored) {}
+        }
+    }
+
     /** 应用预设 */
     public void applyPreset(String preset) {
+        // 手动切换预设时清除单曲EQ状态(用户主动覆盖了歌曲绑定)
+        currentSongPreset = null;
         currentPreset = preset;
         if (equalizer != null) {
             if ("关闭".equals(preset)) {
@@ -301,14 +340,16 @@ public class EqualizerManager {
         saveSettings();
     }
 
-    /** 获取预设对应的频段参数 */
+    /** 获取预设对应的频段参数(内置+自定义) */
     private int[] getPresetLevels(String preset) {
+        // 先查内置预设
         for (int i = 0; i < PRESET_NAMES.length; i++) {
             if (PRESET_NAMES[i].equals(preset)) {
                 return PRESET_LEVELS[i];
             }
         }
-        return null;
+        // 再查自定义预设
+        return getCustomPresetLevels(preset);
     }
 
     public String getCurrentPreset() {
@@ -328,6 +369,242 @@ public class EqualizerManager {
         } catch (Exception e) {
             return PRESETS_DEFAULT;
         }
+    }
+
+    // ==================== 自定义预设 ====================
+
+    /**
+     * 保存自定义预设
+     * @param name 预设名称
+     * @param levels 频段等级数组(mB)
+     * @return true 保存成功,false 名称已存在或为空
+     */
+    public boolean saveCustomPreset(String name, short[] levels) {
+        if (name == null || name.trim().isEmpty()) return false;
+        name = name.trim();
+        // 不允许与内置预设重名
+        for (String builtin : PRESETS_DEFAULT) {
+            if (builtin.equals(name)) return false;
+        }
+        if (context == null) return false;
+        try {
+            SharedPreferences sp = context.getSharedPreferences(PREFS_CUSTOM, Context.MODE_PRIVATE);
+            String existing = sp.getString("presets", "{}");
+            JSONObject root = new JSONObject(existing);
+            // 检查是否已存在
+            if (root.has(name)) return false;
+            JSONArray arr = new JSONArray();
+            if (levels != null) {
+                for (short v : levels) {
+                    arr.put((int) v);
+                }
+            }
+            root.put(name, arr);
+            sp.edit().putString("presets", root.toString()).apply();
+            Log.d(TAG, "保存自定义预设: " + name);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "saveCustomPreset failed", e);
+            return false;
+        }
+    }
+
+    /** 覆盖已存在的自定义预设(用于编辑) */
+    public boolean overwriteCustomPreset(String name, short[] levels) {
+        if (name == null || name.trim().isEmpty()) return false;
+        name = name.trim();
+        for (String builtin : PRESETS_DEFAULT) {
+            if (builtin.equals(name)) return false;
+        }
+        if (context == null) return false;
+        try {
+            SharedPreferences sp = context.getSharedPreferences(PREFS_CUSTOM, Context.MODE_PRIVATE);
+            String existing = sp.getString("presets", "{}");
+            JSONObject root = new JSONObject(existing);
+            JSONArray arr = new JSONArray();
+            if (levels != null) {
+                for (short v : levels) {
+                    arr.put((int) v);
+                }
+            }
+            root.put(name, arr);
+            sp.edit().putString("presets", root.toString()).apply();
+            Log.d(TAG, "覆盖自定义预设: " + name);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "overwriteCustomPreset failed", e);
+            return false;
+        }
+    }
+
+    /** 删除自定义预设 */
+    public boolean deleteCustomPreset(String name) {
+        if (name == null || context == null) return false;
+        try {
+            SharedPreferences sp = context.getSharedPreferences(PREFS_CUSTOM, Context.MODE_PRIVATE);
+            String existing = sp.getString("presets", "{}");
+            JSONObject root = new JSONObject(existing);
+            if (!root.has(name)) return false;
+            root.remove(name);
+            sp.edit().putString("presets", root.toString()).apply();
+            Log.d(TAG, "删除自定义预设: " + name);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "deleteCustomPreset failed", e);
+            return false;
+        }
+    }
+
+    /** 获取所有自定义预设名 */
+    public List<String> getCustomPresetNames() {
+        List<String> names = new ArrayList<>();
+        if (context == null) return names;
+        try {
+            SharedPreferences sp = context.getSharedPreferences(PREFS_CUSTOM, Context.MODE_PRIVATE);
+            String existing = sp.getString("presets", "{}");
+            JSONObject root = new JSONObject(existing);
+            Iterator<String> keys = root.keys();
+            while (keys.hasNext()) {
+                names.add(keys.next());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "getCustomPresetNames failed", e);
+        }
+        return names;
+    }
+
+    /** 获取自定义预设的频段参数 */
+    public int[] getCustomPresetLevels(String name) {
+        if (name == null || context == null) return null;
+        try {
+            SharedPreferences sp = context.getSharedPreferences(PREFS_CUSTOM, Context.MODE_PRIVATE);
+            String existing = sp.getString("presets", "{}");
+            JSONObject root = new JSONObject(existing);
+            if (!root.has(name)) return null;
+            JSONArray arr = root.getJSONArray(name);
+            int[] levels = new int[arr.length()];
+            for (int i = 0; i < arr.length(); i++) {
+                levels[i] = arr.getInt(i);
+            }
+            return levels;
+        } catch (Exception e) {
+            Log.w(TAG, "getCustomPresetLevels failed", e);
+            return null;
+        }
+    }
+
+    /**
+     * 获取所有预设名(内置 + 自定义),用于显示
+     * 顺序:关闭, 流行, 摇滚, 古典, 人声, [自定义1, 自定义2, ...]
+     */
+    public List<String> getAllPresetNames() {
+        List<String> all = new ArrayList<>();
+        for (String p : PRESETS_DEFAULT) {
+            all.add(p);
+        }
+        all.addAll(getCustomPresetNames());
+        return all;
+    }
+
+    /** 判断是否为自定义预设 */
+    public boolean isCustomPreset(String name) {
+        if (name == null) return false;
+        for (String builtin : PRESETS_DEFAULT) {
+            if (builtin.equals(name)) return false;
+        }
+        return true;
+    }
+
+    // ==================== 单曲EQ绑定 ====================
+
+    /**
+     * 生成歌曲唯一标识(与 MusicAdapter.getSongKey 一致)
+     * 网络歌曲用 streamId,本地歌曲用规范化文件路径
+     */
+    public static String getSongKey(MusicBean bean) {
+        if (bean == null) return "";
+        if (bean.isNetwork()) {
+            return "net_" + bean.getStreamId();
+        } else {
+            String data = bean.getData();
+            if (data != null && !data.isEmpty()) {
+                return "local_" + MusicScanner.normalizePath(data);
+            }
+            return "local_" + bean.getId();
+        }
+    }
+
+    /**
+     * 给歌曲绑定均衡器预设
+     * @param bean 歌曲对象
+     * @param presetName 预设名(内置或自定义),null 表示取消绑定
+     */
+    public void bindSongEq(MusicBean bean, String presetName) {
+        if (context == null || bean == null) return;
+        String key = getSongKey(bean);
+        if (key.isEmpty()) return;
+        SharedPreferences sp = context.getSharedPreferences(PREFS_SONG_BINDING, Context.MODE_PRIVATE);
+        SharedPreferences.Editor ed = sp.edit();
+        if (presetName == null || presetName.isEmpty()) {
+            ed.remove(key);
+        } else {
+            ed.putString(key, presetName);
+        }
+        ed.apply();
+        Log.d(TAG, "绑定歌曲EQ: " + key + " -> " + presetName);
+    }
+
+    /** 获取歌曲绑定的均衡器预设名(未绑定返回null) */
+    public String getSongEqPreset(MusicBean bean) {
+        if (context == null || bean == null) return null;
+        String key = getSongKey(bean);
+        if (key.isEmpty()) return null;
+        SharedPreferences sp = context.getSharedPreferences(PREFS_SONG_BINDING, Context.MODE_PRIVATE);
+        return sp.getString(key, null);
+    }
+
+    /** 取消歌曲的均衡器绑定 */
+    public void unbindSongEq(MusicBean bean) {
+        bindSongEq(bean, null);
+    }
+
+    /**
+     * 应用歌曲绑定的均衡器(切歌时调用)
+     * 如果歌曲有绑定预设,应用该预设(不覆盖全局设置);否则恢复全局设置
+     * @param bean 当前播放歌曲
+     */
+    public void applySongEq(MusicBean bean) {
+        if (bean == null) return;
+        String songPreset = getSongEqPreset(bean);
+        if (songPreset != null && !songPreset.isEmpty()) {
+            // 有单曲绑定,将绑定的预设应用到均衡器硬件(不修改全局设置)
+            currentSongPreset = songPreset;
+            if (equalizer != null) {
+                applyPresetToHardware(songPreset);
+            }
+            Log.d(TAG, "应用单曲EQ: " + songPreset);
+        } else {
+            // 无单曲绑定,恢复全局设置
+            currentSongPreset = null;
+            loadSettings();
+            if (equalizer != null) {
+                applyStoredSettings();
+            }
+            Log.d(TAG, "无单曲EQ绑定,恢复全局设置: " + currentPreset);
+        }
+    }
+
+    /** 获取当前生效的EQ模式名(优先单曲绑定) */
+    public String getActivePreset() {
+        if (currentSongPreset != null && !currentSongPreset.isEmpty()) {
+            return currentSongPreset;
+        }
+        return currentPreset;
+    }
+
+    /** 清除当前单曲EQ状态(切歌前调用) */
+    public void clearSongEqState() {
+        currentSongPreset = null;
     }
 
     // ==================== 设置持久化 ====================

@@ -15,6 +15,8 @@ public class MusicDataHolder {
     private EqualizerManager equalizerManager;
     private NavidromeApi navidromeApi;
     private boolean navidromeEnabled = false;
+    /** 当前播放的歌曲(供 EqualizerActivity 等获取) */
+    private MusicBean currentPlayingMusic;
 
     private MusicDataHolder() {
     }
@@ -56,5 +58,15 @@ public class MusicDataHolder {
 
     public void setNavidromeEnabled(boolean enabled) {
         this.navidromeEnabled = enabled;
+    }
+
+    /** 获取当前播放的歌曲 */
+    public MusicBean getCurrentPlayingMusic() {
+        return currentPlayingMusic;
+    }
+
+    /** 设置当前播放的歌曲(由 MusicService 调用) */
+    public void setCurrentPlayingMusic(MusicBean music) {
+        this.currentPlayingMusic = music;
     }
 }

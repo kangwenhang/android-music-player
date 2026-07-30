@@ -294,6 +294,24 @@
                     android:textColor="@color/favorite_inactive"
                     android:textSize="24sp"
                     android:textStyle="bold" />
+
+                <!-- 均衡器(方形按钮,显示当前EQ模式,点击弹出预设快速切换) -->
+                <Button
+                    android:id="@+id/btn_eq"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/btn_circle_size"
+                    android:layout_marginLeft="@dimen/btn_circle_spacing"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingLeft="14dp"
+                    android:paddingRight="14dp"
+                    android:gravity="center"
+                    android:background="@drawable/bg_btn"
+                    android:text="EQ:关闭"
+                    android:textColor="@color/btn_text"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:singleLine="true" />
             </LinearLayout>
 
             <!-- 右侧:歌曲标题 + 艺术家 -->

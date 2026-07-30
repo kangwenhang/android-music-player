@@ -1,19 +1,29 @@
 package com.captiva.musicplayer;
 
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.util.List;
+
 /**
  * 均衡器界面(美化版)
- * - 支持开关、预设选择、各频段手动调节
+ * - 支持开关、预设选择(内置+自定义)、各频段手动调节
+ * - 保存自定义预设模式(持久化)
+ * - 绑定均衡器到单曲(切歌自动恢复)
+ * - 长按自定义预设可删除
  * - 无需播放歌曲即可调节(使用全局音频会话)
  * - 设置自动保存,播放时自动恢复
  */
@@ -23,6 +33,9 @@ public class EqualizerActivity extends AppCompatActivity {
     private LinearLayout llPresets;
     private LinearLayout llBands;
     private TextView tvHint;
+    private Button btnSaveCustom;
+    private Button btnBindSong;
+    private TextView tvSongBinding;
 
     private EqualizerManager eqManager;
 
@@ -37,6 +50,9 @@ public class EqualizerActivity extends AppCompatActivity {
         llPresets = findViewById(R.id.ll_presets);
         llBands = findViewById(R.id.ll_bands);
         tvHint = findViewById(R.id.tv_eq_hint);
+        btnSaveCustom = findViewById(R.id.btn_save_custom);
+        btnBindSong = findViewById(R.id.btn_bind_song);
+        tvSongBinding = findViewById(R.id.tv_song_binding);
         Button btnBack = findViewById(R.id.btn_eq_back);
         btnBack.setOnClickListener(v -> finish());
 
@@ -73,8 +89,23 @@ public class EqualizerActivity extends AppCompatActivity {
         buildPresetButtons();
         buildBandSeekbars();
 
+        // 保存自定义预设按钮
+        btnSaveCustom.setOnClickListener(v -> showSaveCustomPresetDialog());
+
+        // 绑定当前EQ到歌曲按钮
+        btnBindSong.setOnClickListener(v -> showBindSongDialog());
+
         // 根据状态显示提示
         updateHint();
+        updateSongBindingStatus();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 返回时刷新预设按钮(可能在其他地方添加了自定义预设)
+        buildPresetButtons();
+        updateSongBindingStatus();
     }
 
     /** 更新提示文字 */
@@ -86,36 +117,93 @@ public class EqualizerActivity extends AppCompatActivity {
         }
     }
 
-    /** 构建预设按钮 */
+    /** 更新当前歌曲EQ绑定状态显示 */
+    private void updateSongBindingStatus() {
+        // 尝试获取当前播放歌曲
+        MusicBean currentSong = getCurrentPlayingSong();
+        if (currentSong == null) {
+            tvSongBinding.setText("当前无播放歌曲");
+            btnBindSong.setEnabled(false);
+            btnBindSong.setText("绑定当前EQ到此歌曲");
+            return;
+        }
+        btnBindSong.setEnabled(true);
+        String songEq = eqManager.getSongEqPreset(currentSong);
+        if (songEq != null && !songEq.isEmpty()) {
+            tvSongBinding.setText("当前歌曲「" + truncate(currentSong.getTitle(), 15)
+                    + "」已绑定: " + songEq);
+            btnBindSong.setText("修改绑定 / 取消绑定");
+        } else {
+            tvSongBinding.setText("当前歌曲「" + truncate(currentSong.getTitle(), 15)
+                    + "」未绑定EQ");
+            btnBindSong.setText("绑定当前EQ到此歌曲");
+        }
+    }
+
+    /** 获取当前播放歌曲(通过 MusicDataHolder 获取) */
+    private MusicBean getCurrentPlayingSong() {
+        return MusicDataHolder.getInstance().getCurrentPlayingMusic();
+    }
+
+    /** 截断字符串 */
+    private String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() > max ? s.substring(0, max) + "..." : s;
+    }
+
+    /** 构建预设按钮(内置 + 自定义) */
     private void buildPresetButtons() {
-        String[] presets = EqualizerManager.PRESETS_DEFAULT;
         llPresets.removeAllViews();
-        String current = eqManager.getCurrentPreset();
-        for (String p : presets) {
-            Button btn = new Button(this);
-            btn.setText(p);
-            btn.setMinWidth(96);
-            btn.setMinHeight(48);
-            btn.setPadding(32, 16, 32, 16);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.setMargins(0, 0, 12, 0);
-            btn.setLayoutParams(lp);
-            highlightPreset(btn, p.equals(current));
-            btn.setOnClickListener(v -> {
-                if ("关闭".equals(p)) {
-                    swEnable.setChecked(false);
-                    eqManager.applyPreset("关闭");
-                } else {
-                    swEnable.setChecked(true);
-                    eqManager.applyPreset(p);
-                }
-                refreshPresetButtons(p);
-                refreshBandSeekbars();
-            });
+        String current = eqManager.getActivePreset();
+
+        // 内置预设
+        for (String p : EqualizerManager.PRESETS_DEFAULT) {
+            Button btn = createPresetButton(p, p.equals(current), false);
             llPresets.addView(btn);
         }
+
+        // 自定义预设
+        List<String> customNames = eqManager.getCustomPresetNames();
+        for (String p : customNames) {
+            Button btn = createPresetButton(p, p.equals(current), true);
+            llPresets.addView(btn);
+        }
+    }
+
+    /** 创建单个预设按钮 */
+    private Button createPresetButton(String preset, boolean selected, boolean isCustom) {
+        Button btn = new Button(this);
+        btn.setText(preset);
+        btn.setMinWidth(96);
+        btn.setMinHeight(48);
+        btn.setPadding(32, 16, 32, 16);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 12, 0);
+        btn.setLayoutParams(lp);
+        highlightPreset(btn, selected);
+        btn.setOnClickListener(v -> {
+            if ("关闭".equals(preset)) {
+                swEnable.setChecked(false);
+                eqManager.applyPreset("关闭");
+            } else {
+                swEnable.setChecked(true);
+                eqManager.applyPreset(preset);
+            }
+            refreshPresetButtons(preset);
+            refreshBandSeekbars();
+            updateSongBindingStatus();
+        });
+
+        // 自定义预设支持长按删除
+        if (isCustom) {
+            btn.setOnLongClickListener(v -> {
+                showDeleteCustomPresetDialog(preset);
+                return true;
+            });
+        }
+        return btn;
     }
 
     /** 刷新预设按钮高亮 */
@@ -267,6 +355,158 @@ public class EqualizerActivity extends AppCompatActivity {
                     }
                 }
             }
+        }
+    }
+
+    // ==================== 自定义预设操作 ====================
+
+    /** 弹出保存自定义预设对话框 */
+    private void showSaveCustomPresetDialog() {
+        // 收集当前频段设置
+        short count = eqManager.getBandCount();
+        if (count == 0) count = 5;
+        final short[] currentLevels = new short[count];
+        for (short i = 0; i < count; i++) {
+            currentLevels[i] = eqManager.getBandLevel(i);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("保存自定义预设");
+
+        final EditText etName = new EditText(this);
+        etName.setHint("输入预设名称");
+        etName.setInputType(InputType.TYPE_CLASS_TEXT);
+        int padding = (int) (20 * getResources().getDisplayMetrics().density);
+        etName.setPadding(padding, padding, padding, padding);
+        builder.setView(etName);
+
+        builder.setPositiveButton("保存", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                String name = etName.getText().toString().trim();
+                if (name.isEmpty()) {
+                    Toast.makeText(EqualizerActivity.this, "请输入名称", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                // 检查是否与内置预设重名
+                boolean isBuiltin = false;
+                for (String builtin : EqualizerManager.PRESETS_DEFAULT) {
+                    if (builtin.equals(name)) {
+                        isBuiltin = true;
+                        break;
+                    }
+                }
+                if (isBuiltin) {
+                    Toast.makeText(EqualizerActivity.this,
+                            "不能与内置预设重名", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                // 尝试保存(如果已存在,询问是否覆盖)
+                if (eqManager.getCustomPresetLevels(name) != null) {
+                    // 已存在,询问覆盖
+                    new AlertDialog.Builder(EqualizerActivity.this)
+                            .setTitle("预设已存在")
+                            .setMessage("预设「" + name + "」已存在,是否覆盖?")
+                            .setPositiveButton("覆盖", (d, w) -> {
+                                eqManager.overwriteCustomPreset(name, currentLevels);
+                                Toast.makeText(EqualizerActivity.this,
+                                        "已覆盖预设: " + name, Toast.LENGTH_SHORT).show();
+                                buildPresetButtons();
+                            })
+                            .setNegativeButton("取消", null)
+                            .show();
+                } else {
+                    boolean ok = eqManager.saveCustomPreset(name, currentLevels);
+                    if (ok) {
+                        Toast.makeText(EqualizerActivity.this,
+                                "已保存预设: " + name, Toast.LENGTH_SHORT).show();
+                        buildPresetButtons();
+                    } else {
+                        Toast.makeText(EqualizerActivity.this,
+                                "保存失败", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
+        builder.setNegativeButton("取消", null);
+        builder.show();
+    }
+
+    /** 弹出删除自定义预设确认对话框 */
+    private void showDeleteCustomPresetDialog(final String presetName) {
+        new AlertDialog.Builder(this)
+                .setTitle("删除自定义预设")
+                .setMessage("确定删除预设「" + presetName + "」吗?")
+                .setPositiveButton("删除", (d, w) -> {
+                    boolean ok = eqManager.deleteCustomPreset(presetName);
+                    if (ok) {
+                        Toast.makeText(this, "已删除: " + presetName, Toast.LENGTH_SHORT).show();
+                        buildPresetButtons();
+                    } else {
+                        Toast.makeText(this, "删除失败", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 单曲EQ绑定 ====================
+
+    /** 弹出绑定/取消绑定对话框 */
+    private void showBindSongDialog() {
+        final MusicBean currentSong = getCurrentPlayingSong();
+        if (currentSong == null) {
+            Toast.makeText(this, "当前无播放歌曲", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String songEq = eqManager.getSongEqPreset(currentSong);
+        if (songEq != null && !songEq.isEmpty()) {
+            // 已有绑定,提供修改或取消选项
+            List<String> allPresets = eqManager.getAllPresetNames();
+            final String[] items = new String[allPresets.size() + 1];
+            for (int i = 0; i < allPresets.size(); i++) {
+                items[i] = allPresets.get(i);
+            }
+            items[allPresets.size()] = "取消绑定";
+
+            new AlertDialog.Builder(this)
+                    .setTitle("修改歌曲EQ绑定\n「" + truncate(currentSong.getTitle(), 20) + "」")
+                    .setItems(items, (d, which) -> {
+                        if (which == allPresets.size()) {
+                            // 取消绑定
+                            eqManager.unbindSongEq(currentSong);
+                            Toast.makeText(this, "已取消绑定", Toast.LENGTH_SHORT).show();
+                        } else {
+                            String preset = allPresets.get(which);
+                            eqManager.bindSongEq(currentSong, preset);
+                            eqManager.applyPreset(preset);
+                            refreshPresetButtons(preset);
+                            refreshBandSeekbars();
+                            Toast.makeText(this, "已绑定: " + preset, Toast.LENGTH_SHORT).show();
+                        }
+                        updateSongBindingStatus();
+                    })
+                    .show();
+        } else {
+            // 无绑定,直接绑定当前生效的预设
+            String activePreset = eqManager.getActivePreset();
+            if ("关闭".equals(activePreset)) {
+                Toast.makeText(this, "当前EQ为关闭状态,请先选择一个预设", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("绑定歌曲EQ")
+                    .setMessage("将「" + activePreset + "」绑定到「"
+                            + truncate(currentSong.getTitle(), 20) + "」?\n"
+                            + "绑定后,播放此歌曲时自动切换到此EQ模式")
+                    .setPositiveButton("绑定", (d, w) -> {
+                        eqManager.bindSongEq(currentSong, activePreset);
+                        Toast.makeText(this, "已绑定: " + activePreset, Toast.LENGTH_SHORT).show();
+                        updateSongBindingStatus();
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
         }
     }
 
