@@ -16,11 +16,16 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -500,41 +505,63 @@ public class MainActivity extends AppCompatActivity {
 
     /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 屏幕信息 / 清除缓存 / 关于 */
     private void showSettingsMenu() {
-        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存", "关于"};
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
-                this, R.layout.dialog_settings_item, items);
+        final String[] itemTexts = {
+            "均衡器", "服务器设置",
+            "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"),
+            "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存", "关于"
+        };
+        final String[] itemIcons = {"♪", "📡", "▶", "⏱", "📐", "🗑", "ℹ"};
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("设置");
-        builder.setAdapter(adapter, new DialogInterface.OnClickListener() {
+        // 自定义 Adapter:图标 + 文字 + 箭头
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                this, R.layout.dialog_settings_item, itemTexts) {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public View getView(int position, View convertView, ViewGroup parent) {
+                if (convertView == null) {
+                    convertView = LayoutInflater.from(getContext()).inflate(
+                            R.layout.dialog_settings_item, parent, false);
+                }
+                TextView tvIcon = (TextView) convertView.findViewById(R.id.tv_item_icon);
+                TextView tvText = (TextView) convertView.findViewById(R.id.tv_item_text);
+                tvIcon.setText(itemIcons[position]);
+                tvText.setText(itemTexts[position]);
+                return convertView;
+            }
+        };
+
+        // 使用自定义布局
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null);
+        ListView lv = (ListView) dialogView.findViewById(R.id.lv_settings);
+        lv.setAdapter(adapter);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(dialogView)
+                .create();
+
+        lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(android.widget.AdapterView<?> parent, View view, int which, long id) {
+                dialog.dismiss();
                 if (which == 0) {
-                    // 均衡器
                     openEqualizer();
                 } else if (which == 1) {
-                    // 服务器设置
                     needReload = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
                 } else if (which == 2) {
-                    // 自动播放开关
                     showAutoPlayDialog();
                 } else if (which == 3) {
-                    // 时长过滤设置
                     showDurationFilterDialog();
                 } else if (which == 4) {
-                    // 屏幕分辨率与DPI
                     showScreenInfoDialog();
                 } else if (which == 5) {
-                    // 清除网络缓存
                     showClearCacheDialog();
                 } else if (which == 6) {
-                    // 关于
                     showAboutDialog();
                 }
             }
         });
-        builder.show();
+
+        dialog.show();
     }
 
     /** 自动播放设置对话框 */

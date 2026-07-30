@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 均衡器预设按钮背景(选中:蓝色渐变高亮) -->
+<!-- 均衡器强调按钮(蓝色渐变,用于保存/绑定) -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
             <gradient
                 android:angle="135"
                 android:startColor="#29B6F6"
-                android:endColor="#0288D1" />
-            <corners android:radius="26dp" />
+                android:endColor="#01579B" />
+            <corners android:radius="14dp" />
         </shape>
     </item>
     <item>
@@ -16,7 +16,7 @@
                 android:angle="135"
                 android:startColor="#4FC3F7"
                 android:endColor="#0288D1" />
-            <corners android:radius="26dp" />
+            <corners android:radius="14dp" />
         </shape>
     </item>
 </selector>
