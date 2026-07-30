@@ -46,6 +46,20 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: gradle assembleDebug --no-daemon --no-build-cache
 
+      - name: Verify APK signing (v1 only)
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "=== APK 签名验证 ==="
+          # 使用 apksigner 验证签名方案
+          APKSIGNER=$(find $ANDROID_HOME -name "apksigner" 2>/dev/null | head -1)
+          if [ -n "$APKSIGNER" ]; then
+            $APKSIGNER verify -v "$APK_PATH" 2>&1 || true
+          else
+            echo "apksigner not found, using jarsigner"
+            jarsigner -verify -verbose "$APK_PATH" 2>&1 | head -5 || true
+          fi
+          echo "=== 签名验证完成 ==="
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

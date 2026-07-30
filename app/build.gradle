@@ -87,10 +87,13 @@ android {
             storePassword 'captiva123'
             keyAlias 'debug'
             keyPassword 'captiva123'
-            // 安卓 4.2.2 只支持 v1(JAR)签名,v2/v3/v4 是 Android 7.0+ 才支持
-            // 必须禁用 v2+,否则旧系统安装时报"安装包解析失败"
+            // 安卓 4.2.2 只支持 v1(JAR)签名
+            // v2(APK Signature Scheme v2,Android 7.0+)、v3(v3,key rotation)、v4(v4,增量安装)
+            // 都必须禁用,否则旧系统安装时报"安装包解析失败"
             v1SigningEnabled true
             v2SigningEnabled false
+            v3SigningEnabled false
+            v4SigningEnabled false
         }
     }
 
