@@ -303,13 +303,13 @@
                     android:layout_marginLeft="@dimen/btn_circle_spacing"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:paddingLeft="14dp"
-                    android:paddingRight="14dp"
+                    android:paddingLeft="20dp"
+                    android:paddingRight="20dp"
                     android:gravity="center"
                     android:background="@drawable/bg_btn"
                     android:text="EQ:关闭"
                     android:textColor="@color/btn_text"
-                    android:textSize="16sp"
+                    android:textSize="20sp"
                     android:textStyle="bold"
                     android:singleLine="true" />
             </LinearLayout>
