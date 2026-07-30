@@ -206,23 +206,29 @@ public class MainActivity extends AppCompatActivity {
         initViews();
         setupListeners();
 
-        // 启动服务器状态监控
-        statusMonitor.start(MusicDataHolder.getInstance().getNavidromeApi());
+        // 延迟启动重量级初始化,让 UI 先渲染(避免启动时白屏/卡顿)
+        // 先显示"加载中"提示,等 UI 渲染完再执行扫描等耗时操作
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                // 启动服务器状态监控
+                statusMonitor.start(MusicDataHolder.getInstance().getNavidromeApi());
 
-        // 启动并绑定服务
-        Intent si = new Intent(this, MusicService.class);
-        startService(si);
-        bindService(si, connection, Context.BIND_AUTO_CREATE);
+                // 启动并绑定服务
+                Intent si = new Intent(MainActivity.this, MusicService.class);
+                startService(si);
+                bindService(si, connection, Context.BIND_AUTO_CREATE);
 
-        // 默认加载音乐(扫描同步目录)
-        if (hasStoragePermission()) {
-            // 标记是否需要自动播放
-            autoPlayPending = navidromeConfig.isAutoPlay();
-            loadMusic();
-        } else {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
-        }
+                // 加载音乐(扫描同步目录)
+                if (hasStoragePermission()) {
+                    autoPlayPending = navidromeConfig.isAutoPlay();
+                    loadMusic();
+                } else {
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_STORAGE);
+                }
+            }
+        });
     }
 
     /**

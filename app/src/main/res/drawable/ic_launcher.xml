@@ -1,16 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 矢量启动图标(替代 PNG,兼容 API 14+) -->
+<!-- 矢量启动图标(替代 PNG,兼容 API 14+)
+     粉橙渐变背景 + 白色音符,类似 iOS 音乐 App 风格 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
-    <!-- 深蓝背景 -->
+
+    <!-- 粉橙渐变背景 -->
     <path
-        android:fillColor="#1A237E"
+        android:fillColor="#FA2D48"
         android:pathData="M0,0h48v48h-48z" />
-    <!-- 音符 -->
+    <!-- 顶部粉色渐变叠加(模拟上粉下橙效果) -->
     <path
-        android:fillColor="#4FC3F7"
-        android:pathData="M20,10v18.5c-1.2,-0.7 -2.6,-1.1 -4,-1.1 -3.3,0 -6,2.7 -6,6s2.7,6 6,6 6,-2.7 6,-6V16h8v-6h-10z" />
+        android:fillColor="#FF6B6B"
+        android:pathData="M0,0h48v24h-48z" />
+
+    <!-- 白色八分音符(带符尾) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18,12v18.5c-1.2,-0.7 -2.6,-1.1 -4,-1.1 -3.3,0 -6,2.7 -6,6s2.7,6 6,6 6,-2.7 6,-6V18h10v-6H18z" />
+
+    <!-- 音符符尾 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,18l10,-2v6l-10,2z" />
 </vector>
