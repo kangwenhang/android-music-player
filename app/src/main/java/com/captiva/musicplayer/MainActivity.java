@@ -1381,6 +1381,8 @@ public class MainActivity extends AppCompatActivity {
                             final int percent = (int) (totalRead * 100 / totalSize);
                             if (percent != lastPercent) {
                                 lastPercent = percent;
+                                // 捕获当前已下载字节数(匿名类只能引用final变量)
+                                final long currentRead = totalRead;
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
@@ -1391,7 +1393,7 @@ public class MainActivity extends AppCompatActivity {
                                             downloadPercent.setText(percent + "%");
                                         }
                                         if (downloadStatus != null) {
-                                            String sizeStr = formatSize(totalRead) + " / " + formatSize(totalSize);
+                                            String sizeStr = formatSize(currentRead) + " / " + formatSize(totalSize);
                                             downloadStatus.setText("正在下载: " + sizeStr);
                                         }
                                     }
