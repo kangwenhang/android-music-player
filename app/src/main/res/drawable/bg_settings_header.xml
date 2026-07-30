@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 顶部标题栏背景:深色渐变+底部蓝色微光线 -->
+<!-- 设置弹窗头部背景(深色渐变,匹配标题栏风格) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 主背景渐变 -->
+    <!-- 主背景:与标题栏一致 -->
     <item>
         <shape android:shape="rectangle">
             <gradient
@@ -10,7 +10,7 @@
                 android:angle="270" />
         </shape>
     </item>
-    <!-- 底部1px蓝色高光线 -->
+    <!-- 底部1px蓝灰高光线 -->
     <item android:top="-1dp" android:bottom="-1dp">
         <shape android:shape="rectangle">
             <solid android:color="@android:color/transparent" />

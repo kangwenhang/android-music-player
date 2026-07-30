@@ -10,7 +10,7 @@ import android.widget.SeekBar;
 
 /**
  * 垂直 SeekBar(均衡器专用)
- * 自定义绘制:圆角轨道 + 蓝色进度条 + 中心线
+ * 自定义绘制:圆角轨道 + 蓝色渐变进度条 + 中心参考线 + 发光手柄
  * 兼容 API 17+
  */
 public class VerticalSeekBar extends SeekBar {
@@ -20,12 +20,15 @@ public class VerticalSeekBar extends SeekBar {
     private Paint centerLinePaint;
     private Paint thumbPaint;
     private Paint thumbBorderPaint;
+    private Paint thumbGlowPaint;
 
-    private int trackColor = 0xFF2A2A30;
+    private int trackColor = 0xFF2A2A34;
     private int progressColor = 0xFF4FC3F7;
-    private int centerLineColor = 0xFF4A4A52;
+    private int progressColorDark = 0xFF0288D1;
+    private int centerLineColor = 0xFF4A4A56;
     private int thumbColor = 0xFFFFFFFF;
     private int thumbBorderColor = 0xFF4FC3F7;
+    private int thumbGlowColor = 0x554FC3F7;
 
     private int trackWidth = 8;  // dp
     private int thumbRadius = 12; // dp
@@ -70,6 +73,11 @@ public class VerticalSeekBar extends SeekBar {
         thumbBorderPaint.setStyle(Paint.Style.STROKE);
         thumbBorderPaint.setStrokeWidth(2 * density);
 
+        thumbGlowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        thumbGlowPaint.setColor(thumbGlowColor);
+        thumbGlowPaint.setStyle(Paint.Style.STROKE);
+        thumbGlowPaint.setStrokeWidth(3 * density);
+
         // 隐藏系统默认的 thumb 和 progress
         setThumb(null);
         setProgressDrawable(null);
@@ -79,11 +87,6 @@ public class VerticalSeekBar extends SeekBar {
     public void setOnSeekBarChangeListener(OnSeekBarChangeListener l) {
         super.setOnSeekBarChangeListener(l);
         this.listener = l;
-    }
-
-    @Override
-    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-        super.onSizeChanged(w, h, oldw, oldh);
     }
 
     @Override
@@ -112,17 +115,17 @@ public class VerticalSeekBar extends SeekBar {
         int progress = getProgress();
         int centerProgress = max / 2; // 中心位置(0 dB)
 
-        // 1. 绘制背景轨道
+        // 1. 绘制背景轨道(圆角)
         RectF trackRect = new RectF(cx - barW / 2, top, cx + barW / 2, bottom);
         trackPaint.setColor(trackColor);
         canvas.drawRoundRect(trackRect, barW / 2, barW / 2, trackPaint);
 
-        // 2. 绘制中心线(0 dB 参考线)
+        // 2. 绘制中心参考线(0 dB)
         float centerY = bottom - (centerProgress / (float) max) * barHeight;
         centerLinePaint.setColor(centerLineColor);
-        canvas.drawCircle(cx, centerY, barW * 0.8f, centerLinePaint);
+        canvas.drawCircle(cx, centerY, barW * 0.9f, centerLinePaint);
 
-        // 3. 绘制进度条(从中心到当前值)
+        // 3. 绘制进度条(从中心到当前值,带渐变效果)
         float progressY = bottom - (progress / (float) max) * barHeight;
         progressPaint.setColor(progressColor);
 
@@ -136,10 +139,15 @@ public class VerticalSeekBar extends SeekBar {
             canvas.drawRoundRect(progRect, barW / 2, barW / 2, progressPaint);
         }
 
-        // 4. 绘制 Thumb(圆形手柄)
+        // 4. 绘制手柄外发光(半透明大圆)
+        thumbGlowPaint.setColor(thumbGlowColor);
+        canvas.drawCircle(cx, progressY, thumbR + 3 * density, thumbGlowPaint);
+
+        // 5. 绘制手柄(白色实心圆)
         thumbPaint.setColor(thumbColor);
         canvas.drawCircle(cx, progressY, thumbR, thumbPaint);
-        // Thumb 边框
+
+        // 6. 手柄边框(蓝色)
         thumbBorderPaint.setColor(thumbBorderColor);
         canvas.drawCircle(cx, progressY, thumbR, thumbBorderPaint);
     }

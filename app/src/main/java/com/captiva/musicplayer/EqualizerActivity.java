@@ -106,6 +106,15 @@ public class EqualizerActivity extends AppCompatActivity {
         // 返回时刷新预设按钮(可能在其他地方添加了自定义预设)
         buildPresetButtons();
         updateSongBindingStatus();
+        hideSystemUI();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            hideSystemUI();
+        }
     }
 
     /** 更新提示文字 */
@@ -174,10 +183,11 @@ public class EqualizerActivity extends AppCompatActivity {
     private Button createPresetButton(String preset, boolean selected, boolean isCustom) {
         Button btn = new Button(this);
         btn.setText(preset);
-        btn.setMinWidth(96);
-        btn.setMinHeight(52);
-        btn.setPadding(32, 16, 32, 16);
+        btn.setMinWidth(100);
+        btn.setMinHeight(54);
+        btn.setPadding(36, 16, 36, 16);
         btn.setTextSize(20f);
+        btn.setAllCaps(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -222,10 +232,10 @@ public class EqualizerActivity extends AppCompatActivity {
     private void highlightPreset(Button btn, boolean selected) {
         if (selected) {
             btn.setBackgroundResource(R.drawable.bg_eq_preset_selected);
-            btn.setTextColor(0xFF0A1A2A);
+            btn.setTextColor(0xFFFFFFFF);
         } else {
             btn.setBackgroundResource(R.drawable.bg_eq_preset);
-            btn.setTextColor(0xFFC0C0C5);
+            btn.setTextColor(0xFFB0B0B8);
         }
     }
 

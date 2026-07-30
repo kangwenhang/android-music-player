@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 均衡器界面(美化版) -->
+<!-- 均衡器界面(美化版:渐变头部+层次卡片) -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -13,14 +13,14 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- 顶部栏 -->
+        <!-- 顶部栏(蓝色渐变) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:padding="12dp"
-            android:background="@drawable/bg_eq_card"
+            android:padding="16dp"
+            android:background="@drawable/bg_eq_header"
             android:layout_marginBottom="16dp">
 
             <Button
@@ -38,8 +38,8 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="均衡器"
-                android:textColor="@color/text_title"
+                android:text="♪  均衡器"
+                android:textColor="#FFFFFF"
                 android:textSize="@dimen/title_text_size"
                 android:textStyle="bold" />
 
@@ -54,14 +54,22 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:padding="20dp"
+            android:padding="24dp"
             android:background="@drawable/bg_eq_card"
             android:layout_marginBottom="16dp">
+
+            <TextView
+                android:layout_width="36dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="🔊"
+                android:textSize="24sp" />
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:layout_marginLeft="10dp"
                 android:text="启用均衡器"
                 android:textColor="@color/text_primary"
                 android:textSize="22sp" />
@@ -79,17 +87,35 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="20dp"
+            android:padding="24dp"
             android:background="@drawable/bg_eq_card"
             android:layout_marginBottom="16dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="预设音效"
-                android:textColor="@color/text_secondary"
-                android:textSize="20sp"
-                android:layout_marginBottom="12dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="14dp">
+
+                <TextView
+                    android:layout_width="28dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="♫"
+                    android:textColor="@color/accent"
+                    android:textSize="22sp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginLeft="8dp"
+                    android:text="预设音效"
+                    android:textColor="@color/accent"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
@@ -109,17 +135,35 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="20dp"
+            android:padding="24dp"
             android:background="@drawable/bg_eq_card"
             android:layout_marginBottom="16dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="频段调节"
-                android:textColor="@color/text_secondary"
-                android:textSize="20sp"
-                android:layout_marginBottom="12dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="14dp">
+
+                <TextView
+                    android:layout_width="28dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="🎚"
+                    android:textColor="@color/accent"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginLeft="8dp"
+                    android:text="频段调节"
+                    android:textColor="@color/accent"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <!-- 频段调节区域(动态添加 VerticalSeekBar) -->
             <LinearLayout
@@ -137,7 +181,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="8dp">
+                android:layout_marginTop="10dp">
 
                 <TextView
                     android:layout_width="0dp"
@@ -184,28 +228,47 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="20dp"
+            android:padding="24dp"
             android:background="@drawable/bg_eq_card"
             android:layout_marginTop="16dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="自定义与歌曲绑定"
-                android:textColor="@color/text_secondary"
-                android:textSize="20sp"
-                android:layout_marginBottom="12dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="14dp">
+
+                <TextView
+                    android:layout_width="28dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="★"
+                    android:textColor="@color/accent"
+                    android:textSize="22sp" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginLeft="8dp"
+                    android:text="自定义与歌曲绑定"
+                    android:textColor="@color/accent"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <!-- 保存为自定义预设 -->
             <Button
                 android:id="@+id/btn_save_custom"
                 android:layout_width="match_parent"
                 android:layout_height="52dp"
-                android:background="@drawable/bg_eq_btn_back"
+                android:background="@drawable/bg_eq_btn_accent"
                 android:text="保存当前设置为自定义预设"
-                android:textColor="@color/btn_text"
+                android:textColor="#FFFFFF"
                 android:textSize="20sp"
-                android:layout_marginBottom="8dp" />
+                android:textStyle="bold"
+                android:layout_marginBottom="10dp" />
 
             <!-- 绑定当前EQ到正在播放的歌曲 -->
             <Button
@@ -222,7 +285,7 @@
                 android:id="@+id/tv_song_binding"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="10dp"
                 android:textColor="@color/eq_hint_text"
                 android:textSize="@dimen/sub_text_size" />
 
@@ -230,7 +293,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="6dp"
                 android:text="提示:长按自定义预设可删除"
                 android:textColor="@color/eq_hint_text"
                 android:textSize="16sp" />

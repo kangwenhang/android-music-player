@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 均衡器预设按钮背景(未选中状态) -->
+<!-- 均衡器预设按钮背景(未选中:深色药丸形) -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="#4A4A52" />
-            <corners android:radius="24dp" />
-            <stroke android:width="1dp" android:color="#5A5A62" />
+            <gradient
+                android:angle="135"
+                android:startColor="#4A4A56"
+                android:endColor="#3A3A46" />
+            <corners android:radius="26dp" />
+            <stroke android:width="1dp" android:color="#5A5A66" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#2E2E34" />
-            <corners android:radius="24dp" />
-            <stroke android:width="1dp" android:color="#3A3A42" />
+            <gradient
+                android:angle="135"
+                android:startColor="#2E2E38"
+                android:endColor="#262630" />
+            <corners android:radius="26dp" />
+            <stroke android:width="1dp" android:color="#3A3A44" />
         </shape>
     </item>
 </selector>

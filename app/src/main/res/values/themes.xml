@@ -9,6 +9,9 @@
         <item name="android:windowBackground">@color/bg_main</item>
         <item name="android:statusBarColor">@color/bg_title_bar</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
+        <!-- 启动即全屏(XML层保证,Java再加固) -->
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
         <!-- 关闭窗口动画(车机性能弱) -->
         <item name="android:windowAnimationStyle">@style/NoAnimation</item>
     </style>
@@ -27,6 +30,18 @@
         <item name="android:taskToFrontExitAnimation">@null</item>
         <item name="android:taskToBackEnterAnimation">@null</item>
         <item name="android:taskToBackExitAnimation">@null</item>
+    </style>
+
+    <!-- 全屏深色 Dialog 主题(设置弹窗使用)
+         用 Dialog 而非 Dialog.Alert 做父类,避免浮动窗口属性干扰全屏 -->
+    <style name="Theme.CaptivaDialog" parent="Theme.AppCompat.Dialog">
+        <item name="android:windowBackground">@color/bg_main</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="colorAccent">@color/accent</item>
     </style>
 
 </resources>

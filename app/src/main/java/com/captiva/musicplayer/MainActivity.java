@@ -1,6 +1,7 @@
 package com.captiva.musicplayer;
 
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -16,11 +17,16 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -291,6 +297,32 @@ public class MainActivity extends AppCompatActivity {
         tvCurrentTime = findViewById(R.id.tv_current_time);
         tvTotalTime = findViewById(R.id.tv_total_time);
         sbProgress = findViewById(R.id.sb_progress);
+
+        // 修复安卓4.x进度条圆圈黑块(三重修复):
+        // 1. 用Bitmap绘制圆圈thumb,保证ARGB_8888正确透明(无ShapeDrawable黑块)
+        // 2. 清除SeekBar默认背景(消除系统残留thumb阴影)
+        // 3. 设置thumbOffset=0(消除clip与thumb之间的缝隙)
+        float density = getResources().getDisplayMetrics().density;
+        int thumbSize = (int) (18 * density);
+        android.graphics.Bitmap thumbBmp = android.graphics.Bitmap.createBitmap(
+                thumbSize, thumbSize, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(thumbBmp);
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setAntiAlias(true);
+        // 蓝色描边圆
+        paint.setColor(0xFF4FC3F7);
+        canvas.drawCircle(thumbSize / 2f, thumbSize / 2f, thumbSize / 2f - 1, paint);
+        // 白色内圆
+        paint.setColor(0xFFFFFFFF);
+        canvas.drawCircle(thumbSize / 2f, thumbSize / 2f, thumbSize / 2f - 1 - 3 * density, paint);
+        android.graphics.drawable.BitmapDrawable thumbDrawable =
+                new android.graphics.drawable.BitmapDrawable(getResources(), thumbBmp);
+        sbProgress.setThumb(thumbDrawable);
+        // 清除默认背景(消除系统thumb残留)
+        sbProgress.setBackgroundDrawable(null);
+        // 消除clip与thumb之间的缝隙
+        sbProgress.setThumbOffset(0);
+
         btnPrev = findViewById(R.id.btn_prev);
         btnPlay = findViewById(R.id.btn_play);
         btnNext = findViewById(R.id.btn_next);
@@ -498,92 +530,276 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
+    /** 全屏子弹窗持有器(统一风格) */
+    private static class SubDialog {
+        Dialog dialog;
+        LinearLayout body;
+        LinearLayout buttons;
+    }
+
+    /**
+     * 显示 Dialog 并强制全屏
+     * 使用普通 Dialog(非 AlertDialog),避免内部容器包裹导致无法全屏
+     */
+    private void showDialogFull(Dialog dialog) {
+        dialog.show();
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
+            window.getDecorView().setPadding(0, 0, 0, 0);
+            // 清除默认 Dialog 背景Drawable(可能带圆角/padding)
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF16161C));
+        }
+    }
+
+    /**
+     * 创建全屏设置子弹窗:深色头部 + 关闭按钮 + 内容区 + 按钮区
+     * 使用 Dialog.setContentView 直接设置视图,无 AlertDialog 包裹层
+     */
+    private SubDialog createSubDialog(String icon, String title) {
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_sub_content, null);
+        SubDialog sd = new SubDialog();
+        sd.body = (LinearLayout) view.findViewById(R.id.ll_dialog_body);
+        sd.buttons = (LinearLayout) view.findViewById(R.id.ll_dialog_buttons);
+        ((TextView) view.findViewById(R.id.tv_dialog_icon)).setText(icon);
+        ((TextView) view.findViewById(R.id.tv_dialog_title)).setText(title);
+        sd.dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
+        sd.dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        sd.dialog.setContentView(view);
+        final Dialog d = sd.dialog;
+        view.findViewById(R.id.btn_dialog_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { d.dismiss(); }
+        });
+        return sd;
+    }
+
+    /** 创建美化按钮(正面=深蓝调+亮字,负面=深灰) */
+    private Button createDialogButton(String text, boolean positive) {
+        Button btn = new Button(this);
+        btn.setText(text);
+        btn.setTextColor(positive
+                ? getResources().getColor(R.color.accent) : 0xFFC0C0C5);
+        btn.setTextSize(16);
+        btn.setMinWidth(0);
+        btn.setMinimumWidth(0);
+        btn.setMinHeight(0);
+        btn.setMinimumHeight(0);
+        btn.setPadding(48, 18, 48, 18);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        lp.setMargins(8, 0, 8, 0);
+        btn.setLayoutParams(lp);
+        btn.setBackgroundResource(positive
+                ? R.drawable.bg_dialog_btn_positive : R.drawable.bg_dialog_btn_negative);
+        return btn;
+    }
+
+    /** 创建信息卡片(圆角深色背景,内含文字) */
+    private TextView createInfoCard(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(getResources().getColor(R.color.text_primary));
+        tv.setTextSize(17);
+        tv.setLineSpacing(4, 1);
+        tv.setPadding(28, 24, 28, 24);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = 16;
+        tv.setLayoutParams(lp);
+        tv.setBackgroundResource(R.drawable.bg_info_card);
+        return tv;
+    }
+
     /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 屏幕信息 / 清除缓存 / 关于 */
     private void showSettingsMenu() {
-        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存", "关于"};
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
-                this, R.layout.dialog_settings_item, items);
+        final String[] itemTexts = {
+            "均衡器", "服务器设置",
+            "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"),
+            "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存", "关于"
+        };
+        final String[] itemIcons = {"♪", "📡", "▶", "⏱", "📐", "🗑", "ℹ"};
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("设置");
-        builder.setAdapter(adapter, new DialogInterface.OnClickListener() {
+        // 自定义 Adapter:图标 + 文字 + 箭头
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                this, R.layout.dialog_settings_item, itemTexts) {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public View getView(int position, View convertView, ViewGroup parent) {
+                if (convertView == null) {
+                    convertView = LayoutInflater.from(getContext()).inflate(
+                            R.layout.dialog_settings_item, parent, false);
+                }
+                TextView tvIcon = (TextView) convertView.findViewById(R.id.tv_item_icon);
+                TextView tvText = (TextView) convertView.findViewById(R.id.tv_item_text);
+                tvIcon.setText(itemIcons[position]);
+                tvText.setText(itemTexts[position]);
+                return convertView;
+            }
+        };
+
+        // 使用自定义布局
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null);
+        ListView lv = (ListView) dialogView.findViewById(R.id.lv_settings);
+        lv.setAdapter(adapter);
+
+        final Dialog dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(dialogView);
+
+        // 关闭按钮
+        dialogView.findViewById(R.id.btn_settings_close).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { dialog.dismiss(); }
+        });
+
+        lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(android.widget.AdapterView<?> parent, View view, int which, long id) {
+                dialog.dismiss();
                 if (which == 0) {
-                    // 均衡器
                     openEqualizer();
                 } else if (which == 1) {
-                    // 服务器设置
                     needReload = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
                 } else if (which == 2) {
-                    // 自动播放开关
                     showAutoPlayDialog();
                 } else if (which == 3) {
-                    // 时长过滤设置
                     showDurationFilterDialog();
                 } else if (which == 4) {
-                    // 屏幕分辨率与DPI
                     showScreenInfoDialog();
                 } else if (which == 5) {
-                    // 清除网络缓存
                     showClearCacheDialog();
                 } else if (which == 6) {
-                    // 关于
                     showAboutDialog();
                 }
             }
         });
-        builder.show();
+
+        showDialogFull(dialog);
     }
 
-    /** 自动播放设置对话框 */
+    /** 自动播放设置对话框(全屏美化) */
     private void showAutoPlayDialog() {
+        final SubDialog sd = createSubDialog("▶", "打开软件自动播放");
         boolean current = navidromeConfig.isAutoPlay();
         final String[] items = {"开启", "关闭"};
-        int checked = current ? 0 : 1;
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("打开软件自动播放");
-        builder.setSingleChoiceItems(items, checked, new DialogInterface.OnClickListener() {
+        final boolean[] values = {true, false};
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
+
+        // 提示信息
+        sd.body.addView(createInfoCard("选择打开应用时是否自动播放上次的歌曲"));
+
+        for (int i = 0; i < items.length; i++) {
+            final int index = i;
+            final boolean selected = (current == values[i]);
+            // 选项行
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(28, 22, 28, 22);
+            row.setBackgroundResource(R.drawable.bg_dialog_option);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = 12;
+            row.setLayoutParams(rowLp);
+
+            // 选中圆点
+            final TextView dot = new TextView(this);
+            dot.setTextSize(22);
+            dot.setText(selected ? "●" : "○");
+            dot.setTextColor(selected
+                    ? getResources().getColor(R.color.accent) : 0xFF6A6A70);
+            dot.setPadding(0, 0, 18, 0);
+
+            // 文字
+            TextView label = new TextView(this);
+            label.setText(items[i]);
+            label.setTextColor(getResources().getColor(R.color.text_primary));
+            label.setTextSize(20);
+            label.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+            row.addView(dot);
+            row.addView(label);
+
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    navidromeConfig.setAutoPlay(values[index]);
+                    Toast.makeText(MainActivity.this,
+                            "自动播放已" + (values[index] ? "开启" : "关闭"),
+                            Toast.LENGTH_SHORT).show();
+                    dRef[0].dismiss();
+                }
+            });
+
+            sd.body.addView(row);
+        }
+
+        // 底部按钮
+        Button btnCancel = createDialogButton("关闭", false);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
-                navidromeConfig.setAutoPlay(which == 0);
-                Toast.makeText(MainActivity.this,
-                        "自动播放已" + (which == 0 ? "开启" : "关闭"),
-                        Toast.LENGTH_SHORT).show();
-                dialog.dismiss();
-            }
+            public void onClick(View v) { dRef[0].dismiss(); }
         });
-        builder.setNegativeButton("取消", null);
-        builder.show();
+        sd.buttons.addView(btnCancel);
+
+        showDialogFull(sd.dialog);
     }
 
-    /** 清除网络缓存确认对话框 */
+    /** 清除网络缓存确认对话框(全屏美化) */
     private void showClearCacheDialog() {
+        final SubDialog sd = createSubDialog("🗑", "清除歌曲列表缓存");
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
+
         boolean hasCache = songCache.exists();
         String msg = hasCache
                 ? "缓存时间: " + formatCacheTime(songCache.getCachedAt())
                 : "当前无缓存数据";
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("清除歌曲列表缓存");
-        builder.setMessage(msg + "\n此操作仅清除歌曲列表缓存,不影响已下载的音乐文件");
+        sd.body.addView(createInfoCard(
+                msg + "\n\n此操作仅清除歌曲列表缓存,不影响已下载的音乐文件"));
+
         if (hasCache) {
-            builder.setPositiveButton("清除", new DialogInterface.OnClickListener() {
+            Button btnClear = createDialogButton("清除", true);
+            btnClear.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(DialogInterface dialog, int which) {
+                public void onClick(View v) {
                     songCache.clear();
                     Toast.makeText(MainActivity.this, "缓存已清除", Toast.LENGTH_SHORT).show();
+                    dRef[0].dismiss();
                 }
             });
-            builder.setNegativeButton("取消", null);
+            Button btnCancel = createDialogButton("取消", false);
+            btnCancel.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) { dRef[0].dismiss(); }
+            });
+            sd.buttons.addView(btnClear);
+            sd.buttons.addView(btnCancel);
         } else {
-            builder.setPositiveButton("确定", null);
+            Button btnOk = createDialogButton("确定", true);
+            btnOk.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) { dRef[0].dismiss(); }
+            });
+            sd.buttons.addView(btnOk);
         }
-        builder.show();
+
+        showDialogFull(sd.dialog);
     }
 
-    /** 屏幕分辨率与DPI信息对话框 */
+    /** 屏幕分辨率与DPI信息对话框(全屏美化) */
     private void showScreenInfoDialog() {
+        final SubDialog sd = createSubDialog("📐", "屏幕分辨率与DPI");
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
+
         // 获取屏幕分辨率和DPI
         android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
         getWindowManager().getDefaultDisplay().getMetrics(dm);
@@ -644,34 +860,50 @@ public class MainActivity extends AppCompatActivity {
         sb.append("总像素: ").append(widthPx * heightPx).append("\n");
         sb.append("宽高比: ").append(String.format("%.2f", (double) widthPx / heightPx));
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("屏幕分辨率与DPI");
-        builder.setMessage(sb.toString());
-        builder.setPositiveButton("确定", null);
-        builder.show();
+        sd.body.addView(createInfoCard(sb.toString()));
+
+        Button btnOk = createDialogButton("确定", true);
+        btnOk.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { dRef[0].dismiss(); }
+        });
+        sd.buttons.addView(btnOk);
+
+        showDialogFull(sd.dialog);
     }
 
-    /** 时长过滤设置对话框:自定义输入秒数 */
+    /** 时长过滤设置对话框(全屏美化):自定义输入秒数 */
     private void showDurationFilterDialog() {
+        final SubDialog sd = createSubDialog("⏱", "最小时长过滤(秒)");
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
         final int currentMin = navidromeConfig.getMinDuration();
 
-        // 创建输入框
+        // 提示卡片
+        sd.body.addView(createInfoCard("低于此时长的音频将被过滤\n输入 0 表示显示全部\n范围 0~600 秒"));
+
+        // 创建美化输入框
         final EditText etInput = new EditText(this);
         etInput.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
         etInput.setText(currentMin > 0 ? String.valueOf(currentMin) : "");
-        etInput.setHint("输入秒数,如30(0表示不过滤)");
+        etInput.setHint("输入秒数,如 30(0 表示不过滤)");
         etInput.setTextColor(getResources().getColor(R.color.text_primary));
         etInput.setHintTextColor(getResources().getColor(R.color.search_hint));
-        etInput.setPadding(24, 16, 24, 16);
-        etInput.setBackgroundResource(R.drawable.bg_search);
+        etInput.setTextSize(18);
+        etInput.setPadding(28, 20, 28, 20);
+        etInput.setBackgroundResource(R.drawable.bg_info_card);
+        LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        etLp.bottomMargin = 16;
+        etInput.setLayoutParams(etLp);
+        sd.body.addView(etInput);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("最小时长过滤(秒)");
-        builder.setMessage("低于此时长的音频将被过滤\n输入0表示显示全部");
-        builder.setView(etInput);
-        builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
+        // 底部按钮
+        Button btnOk = createDialogButton("确定", true);
+        btnOk.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void onClick(View v) {
                 String input = etInput.getText().toString().trim();
                 int newMin = 0;
                 try {
@@ -686,12 +918,20 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(MainActivity.this,
                         "已设置最小时长: " + (newMin == 0 ? "不过滤" : newMin + "秒"),
                         Toast.LENGTH_SHORT).show();
+                dRef[0].dismiss();
                 // 重新加载音乐
                 loadMusic();
             }
         });
-        builder.setNegativeButton("取消", null);
-        builder.show();
+        Button btnCancel = createDialogButton("取消", false);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { dRef[0].dismiss(); }
+        });
+        sd.buttons.addView(btnOk);
+        sd.buttons.addView(btnCancel);
+
+        showDialogFull(sd.dialog);
     }
 
     /** 打开均衡器(无需播放状态,支持静默调节) */
@@ -701,8 +941,12 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 关于与检测更新 ====================
 
-    /** 关于对话框 */
+    /** 关于对话框(全屏美化) */
     private void showAboutDialog() {
+        final SubDialog sd = createSubDialog("ℹ", "关于");
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
+
         String verName = "1.0";
         int verCode = 1;
         try {
@@ -713,30 +957,44 @@ public class MainActivity extends AppCompatActivity {
             // ignore
         }
 
+        // 版本信息卡片
         StringBuilder sb = new StringBuilder();
         sb.append("科帕奇音乐播放器\n\n");
         sb.append("版本: ").append(verName).append(" (").append(verCode).append(")\n");
         sb.append("适配: 安卓 4.2.2+ 车机\n");
-        sb.append("分辨率: 1024×600 横屏\n\n");
-        sb.append("功能:\n");
-        sb.append("• 本地/Navidrome 网络双模式播放\n");
-        sb.append("• 歌词叠加封面显示\n");
-        sb.append("• 均衡器(预设/自定义/单曲绑定)\n");
-        sb.append("• 收藏夹 / 搜索 / 自动播放\n\n");
-        sb.append("GitHub:\n");
-        sb.append("kangwenhang/android-music-player");
+        sb.append("分辨率: 1024×600 横屏");
+        sd.body.addView(createInfoCard(sb.toString()));
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("关于");
-        builder.setMessage(sb.toString());
-        builder.setPositiveButton("检测更新", new DialogInterface.OnClickListener() {
+        // 功能列表卡片
+        StringBuilder sb2 = new StringBuilder();
+        sb2.append("功能:\n");
+        sb2.append("• 本地/Navidrome 网络双模式播放\n");
+        sb2.append("• 歌词叠加封面显示\n");
+        sb2.append("• 均衡器(预设/自定义/单曲绑定)\n");
+        sb2.append("• 收藏夹 / 搜索 / 自动播放");
+        sd.body.addView(createInfoCard(sb2.toString()));
+
+        // GitHub 信息卡片
+        sd.body.addView(createInfoCard("GitHub:\nkangwenhang/android-music-player"));
+
+        // 底部按钮
+        Button btnUpdate = createDialogButton("检测更新", true);
+        btnUpdate.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
+            public void onClick(View v) {
+                dRef[0].dismiss();
                 checkForUpdate();
             }
         });
-        builder.setNegativeButton("关闭", null);
-        builder.show();
+        Button btnClose = createDialogButton("关闭", false);
+        btnClose.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { dRef[0].dismiss(); }
+        });
+        sd.buttons.addView(btnUpdate);
+        sd.buttons.addView(btnClose);
+
+        showDialogFull(sd.dialog);
     }
 
     /** GitHub 仓库信息 */
@@ -1643,6 +1901,15 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         unregisterReceiver(stateReceiver);
         handler.removeCallbacks(progressTask);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 窗口重新获得焦点时(如关闭弹窗后)重新隐藏系统UI,保持全屏
+        if (hasFocus) {
+            hideSystemUI();
+        }
     }
 
     /** 上次按返回键的时间戳,用于双击退出判断 */

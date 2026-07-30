@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 选项行背景(选中暗蓝调,未选中深色,整体低饱和) -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#1E2D3D" />
+            <corners android:radius="12dp" />
+            <stroke android:width="1dp" android:color="#2A5070" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#2A3540" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#222230" />
+            <corners android:radius="12dp" />
+            <stroke android:width="1dp" android:color="#2E2E38" />
+        </shape>
+    </item>
+</selector>

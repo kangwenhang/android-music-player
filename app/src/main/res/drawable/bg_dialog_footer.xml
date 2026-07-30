@@ -1,17 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 顶部标题栏背景:深色渐变+底部蓝色微光线 -->
+<!-- 弹窗底部按钮区背景(深色渐变+顶部高光线,匹配标题栏) -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 主背景渐变 -->
     <item>
         <shape android:shape="rectangle">
             <gradient
-                android:startColor="#262632"
-                android:endColor="#1C1C24"
+                android:startColor="#1C1C24"
+                android:endColor="#262632"
                 android:angle="270" />
         </shape>
     </item>
-    <!-- 底部1px蓝色高光线 -->
-    <item android:top="-1dp" android:bottom="-1dp">
+    <item android:left="-1dp" android:right="-1dp" android:top="-1dp">
         <shape android:shape="rectangle">
             <solid android:color="@android:color/transparent" />
             <stroke android:width="1dp" android:color="#2A3A4A" />
