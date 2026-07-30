@@ -27,6 +27,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -1170,8 +1171,11 @@ public class MainActivity extends AppCompatActivity {
     private void showUpdateDialog(final String tag, String name, String body,
                                   final String releaseUrl, final String apkUrl,
                                   String currentVer) {
+        final SubDialog sd = createSubDialog("⬆", "发现新版本");
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
+
         StringBuilder msg = new StringBuilder();
-        msg.append("发现新版本!\n\n");
         msg.append("当前版本: ").append(currentVer).append("\n");
         msg.append("最新版本: ").append(tag).append("\n");
         if (name != null && !name.isEmpty() && !name.equals(tag)) {
@@ -1179,45 +1183,273 @@ public class MainActivity extends AppCompatActivity {
         }
         msg.append("\n更新内容:\n");
         if (body != null && !body.isEmpty()) {
-            // 截取前 500 字符,避免太长
             String preview = body.length() > 500 ? body.substring(0, 500) + "..." : body;
             msg.append(preview);
         } else {
             msg.append("详见 GitHub Release 页面");
         }
-
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("检测到更新");
-        builder.setMessage(msg.toString());
+        sd.body.addView(createInfoCard(msg.toString()));
 
         if (apkUrl != null && !apkUrl.isEmpty()) {
-            // 有 APK 直链,可直接下载
-            builder.setPositiveButton("下载APK", new DialogInterface.OnClickListener() {
+            // 有 APK 直链,应用内下载并显示进度条
+            Button btnDownload = createDialogButton("下载更新", true);
+            btnDownload.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
-                    startActivity(browserIntent);
+                public void onClick(View v) {
+                    dRef[0].dismiss();
+                    downloadAndInstallApk(apkUrl, tag);
                 }
             });
-            builder.setNeutralButton("查看详情", new DialogInterface.OnClickListener() {
+            sd.buttons.addView(btnDownload);
+
+            Button btnDetails = createDialogButton("查看详情", false);
+            btnDetails.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(DialogInterface dialog, int which) {
+                public void onClick(View v) {
                     Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
                     startActivity(browserIntent);
                 }
             });
+            sd.buttons.addView(btnDetails);
         } else {
-            // 无 APK,跳转到 Release 页面
-            builder.setPositiveButton("查看详情", new DialogInterface.OnClickListener() {
+            // 无 APK 直链,跳转到 Release 页面
+            Button btnDetails = createDialogButton("查看详情", true);
+            btnDetails.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public void onClick(DialogInterface dialog, int which) {
+                public void onClick(View v) {
                     Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
                     startActivity(browserIntent);
                 }
             });
+            sd.buttons.addView(btnDetails);
         }
-        builder.setNegativeButton("以后再说", null);
-        builder.show();
+
+        Button btnLater = createDialogButton("以后再说", false);
+        btnLater.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { dRef[0].dismiss(); }
+        });
+        sd.buttons.addView(btnLater);
+
+        showDialogFull(sd.dialog);
+    }
+
+    // ==================== 应用内下载更新 ====================
+
+    /** 下载进度对话框 */
+    private Dialog downloadDialog;
+    /** 进度条 */
+    private ProgressBar downloadProgress;
+    /** 进度文字 */
+    private TextView downloadPercent;
+    /** 下载状态文字 */
+    private TextView downloadStatus;
+    /** 下载线程(用于取消) */
+    private volatile Thread downloadThread;
+    private volatile boolean downloadCancelled = false;
+
+    /**
+     * 应用内下载 APK 并显示进度条,下载完成后自动弹出安装
+     * @param apkUrl APK 下载地址
+     * @param versionTag 版本标签(用于文件名)
+     */
+    private void downloadAndInstallApk(final String apkUrl, final String versionTag) {
+        downloadCancelled = false;
+
+        // 创建下载进度对话框
+        SubDialog sd = createSubDialog("⬇", "正在下载更新");
+
+        // 进度信息卡片
+        LinearLayout progressLayout = new LinearLayout(this);
+        progressLayout.setOrientation(LinearLayout.VERTICAL);
+        progressLayout.setPadding(28, 24, 28, 24);
+
+        downloadStatus = new TextView(this);
+        downloadStatus.setText("正在连接服务器...");
+        downloadStatus.setTextColor(getResources().getColor(R.color.text_primary));
+        downloadStatus.setTextSize(15);
+        downloadStatus.setLineSpacing(4, 1);
+        progressLayout.addView(downloadStatus);
+
+        // 间距
+        View spacer = new View(this);
+        spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 16));
+        progressLayout.addView(spacer);
+
+        // 进度条
+        downloadProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        downloadProgress.setMax(100);
+        downloadProgress.setProgress(0);
+        downloadProgress.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        progressLayout.addView(downloadProgress);
+
+        // 百分比文字
+        downloadPercent = new TextView(this);
+        downloadPercent.setText("0%");
+        downloadPercent.setTextColor(getResources().getColor(R.color.text_secondary));
+        downloadPercent.setTextSize(14);
+        downloadPercent.setGravity(android.view.Gravity.CENTER);
+        downloadPercent.setPadding(0, 8, 0, 0);
+        progressLayout.addView(downloadPercent);
+
+        sd.body.addView(progressLayout);
+
+        // 取消按钮
+        Button btnCancel = createDialogButton("取消下载", false);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                downloadCancelled = true;
+                if (downloadThread != null) {
+                    downloadThread.interrupt();
+                }
+                if (downloadDialog != null && downloadDialog.isShowing()) {
+                    downloadDialog.dismiss();
+                }
+                Toast.makeText(MainActivity.this, "下载已取消", Toast.LENGTH_SHORT).show();
+            }
+        });
+        sd.buttons.addView(btnCancel);
+
+        downloadDialog = sd.dialog;
+        showDialogFull(downloadDialog);
+
+        // 后台线程下载
+        downloadThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                HttpURLConnection conn = null;
+                InputStream is = null;
+                java.io.FileOutputStream fos = null;
+                try {
+                    URL url = new URL(apkUrl);
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setRequestProperty("Accept", "application/octet-stream");
+                    conn.setConnectTimeout(30000);
+                    conn.setReadTimeout(30000);
+                    conn.connect();
+
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode != 200) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (downloadDialog != null && downloadDialog.isShowing()) {
+                                    downloadDialog.dismiss();
+                                }
+                                Toast.makeText(MainActivity.this, "下载失败: 服务器错误(" + responseCode + ")",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                        return;
+                    }
+
+                    final int totalSize = conn.getContentLength();
+                    is = conn.getInputStream();
+
+                    // 保存到外部存储(安卓 4.2.2 兼容)
+                    File downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
+                            android.os.Environment.DIRECTORY_DOWNLOADS);
+                    if (!downloadDir.exists()) {
+                        downloadDir.mkdirs();
+                    }
+                    String fileName = "captiva-music-" + versionTag + ".apk";
+                    final File apkFile = new File(downloadDir, fileName);
+                    fos = new java.io.FileOutputStream(apkFile);
+
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    long totalRead = 0;
+                    int lastPercent = -1;
+
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        if (downloadCancelled) {
+                            fos.close();
+                            fos = null;
+                            apkFile.delete();
+                            return;
+                        }
+                        fos.write(buffer, 0, bytesRead);
+                        totalRead += bytesRead;
+
+                        if (totalSize > 0) {
+                            final int percent = (int) (totalRead * 100 / totalSize);
+                            if (percent != lastPercent) {
+                                lastPercent = percent;
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (downloadProgress != null) {
+                                            downloadProgress.setProgress(percent);
+                                        }
+                                        if (downloadPercent != null) {
+                                            downloadPercent.setText(percent + "%");
+                                        }
+                                        if (downloadStatus != null) {
+                                            String sizeStr = formatSize(totalRead) + " / " + formatSize(totalSize);
+                                            downloadStatus.setText("正在下载: " + sizeStr);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+
+                    fos.flush();
+                    fos.close();
+                    fos = null;
+
+                    // 下载完成,关闭进度对话框,弹出安装
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (downloadDialog != null && downloadDialog.isShowing()) {
+                                downloadDialog.dismiss();
+                            }
+                            Toast.makeText(MainActivity.this, "下载完成,正在安装...",
+                                    Toast.LENGTH_SHORT).show();
+                            installApk(apkFile);
+                        }
+                    });
+
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (downloadDialog != null && downloadDialog.isShowing()) {
+                                downloadDialog.dismiss();
+                            }
+                            Toast.makeText(MainActivity.this, "下载失败: " + e.getMessage(),
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } finally {
+                    if (fos != null) { try { fos.close(); } catch (Exception e) {} }
+                    if (is != null) { try { is.close(); } catch (Exception e) {} }
+                    if (conn != null) conn.disconnect();
+                }
+            }
+        }, "ApkDownload");
+        downloadThread.start();
+    }
+
+    /** 弹出系统安装器安装 APK(安卓 4.2.2 兼容) */
+    private void installApk(File apkFile) {
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+    }
+
+    /** 格式化文件大小 */
+    private String formatSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
     // ==================== 均衡器快捷切换 ====================
