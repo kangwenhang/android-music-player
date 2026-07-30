@@ -18,7 +18,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -61,6 +63,8 @@ public class CoverLoader {
     private volatile boolean paused = false;
     /** 保存计数器(降频清理磁盘缓存) */
     private int saveCount = 0;
+    /** 已确认无封面的歌曲 key 集合,避免重复尝试 MediaMetadataRetriever(U盘IO极慢) */
+    private final Set<String> noCoverSet = new HashSet<>();
 
     private CoverLoader() {
         cache = new LruCache<String, Bitmap>(CACHE_SIZE) {
@@ -133,6 +137,13 @@ public class CoverLoader {
             return;
         }
 
+        // 0. 已确认无封面:直接显示占位图,不经过任何线程池/U盘IO
+        if (noCoverSet.contains(key)) {
+            iv.setImageResource(android.R.color.transparent);
+            iv.setBackgroundResource(R.drawable.bg_cover_placeholder);
+            return;
+        }
+
         // 1. 先查内存缓存(命中则直接设置,不经过线程池)
         Bitmap cached = cache.get(key);
         if (cached != null) {
@@ -174,6 +185,27 @@ public class CoverLoader {
                             }
                         }
                     });
+                }
+            }
+        });
+    }
+
+    /**
+     * 预加载封面到内存缓存(不绑定 ImageView)
+     * 用于滑动停止后提前加载即将可见的封面,减少后续滚动时的U盘IO
+     */
+    public void preload(MusicBean bean, int size) {
+        if (bean == null) return;
+        final String key = getCacheKey(bean);
+        if (key == null || noCoverSet.contains(key)) return;
+        if (cache.get(key) != null) return; // 已在内存缓存中
+        if (paused) return;
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                final Bitmap bmp = loadBitmap(bean, key, size, false);
+                if (bmp != null) {
+                    cache.put(key, bmp);
                 }
             }
         });
@@ -266,9 +298,12 @@ public class CoverLoader {
         } else {
             bmp = loadLocalCover(bean, size, fullRes);
         }
-        // 写入磁盘缓存(后台线程,不阻塞UI)
         if (bmp != null) {
+            // 写入磁盘缓存(后台线程,不阻塞UI)
             saveToDiskCache(key, bmp);
+        } else {
+            // 确认无封面,加入黑名单避免重复尝试(U盘IO极慢)
+            noCoverSet.add(key);
         }
         return bmp;
     }

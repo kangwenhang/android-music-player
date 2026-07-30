@@ -307,16 +307,30 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
                 if (newState == RecyclerView.SCROLL_STATE_SETTLING) {
-                    // 惯性滑动中:暂停封面加载
+                    // 惯性滑动中:暂停封面加载,清空积压队列
                     CoverLoader.getInstance().setPaused(true);
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    // 停止滑动:恢复加载,刷新当前可见项
+                    // 停止滑动:恢复加载,刷新当前可见项并预加载附近封面
                     CoverLoader.getInstance().setPaused(false);
-                    // 通知 adapter 刷新可见项(触发封面重新加载)
-                    int firstVisible = ((LinearLayoutManager) rvList.getLayoutManager()).findFirstVisibleItemPosition();
-                    int lastVisible = ((LinearLayoutManager) rvList.getLayoutManager()).findLastVisibleItemPosition();
-                    if (firstVisible >= 0 && lastVisible >= 0) {
-                        adapter.notifyItemRangeChanged(firstVisible, lastVisible - firstVisible + 1);
+                    LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
+                    if (lm == null) return;
+                    int firstVisible = lm.findFirstVisibleItemPosition();
+                    int lastVisible = lm.findLastVisibleItemPosition();
+                    if (firstVisible < 0 || lastVisible < 0) return;
+
+                    // 刷新当前可见项(触发封面重新加载)
+                    adapter.notifyItemRangeChanged(firstVisible, lastVisible - firstVisible + 1);
+
+                    // 预加载上下各 10 个 item 的封面(U盘场景下提前缓存,减少后续滚动IO)
+                    int preloadRange = 10;
+                    int preloadStart = Math.max(0, firstVisible - preloadRange);
+                    int preloadEnd = Math.min(adapter.getItemCount() - 1, lastVisible + preloadRange);
+                    int coverSizePx = (int) getResources().getDimension(R.dimen.cover_size_list);
+                    for (int i = preloadStart; i <= preloadEnd; i++) {
+                        MusicBean bean = adapter.getFilteredItem(i);
+                        if (bean != null) {
+                            CoverLoader.getInstance().preload(bean, coverSizePx);
+                        }
                     }
                 }
             }
