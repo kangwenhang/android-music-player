@@ -1,6 +1,7 @@
 package com.captiva.musicplayer;
 
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -505,16 +506,16 @@ public class MainActivity extends AppCompatActivity {
 
     /** 全屏子弹窗持有器(统一风格) */
     private static class SubDialog {
-        AlertDialog dialog;
+        Dialog dialog;
         LinearLayout body;
         LinearLayout buttons;
     }
 
     /**
-     * 显示 Dialog 并立即强制全屏(同步调用,比 OnShowListener 更可靠)
-     * 安卓 4.x 上 AlertDialog 会给 DecorView 加 padding,必须手动清除
+     * 显示 Dialog 并强制全屏
+     * 使用普通 Dialog(非 AlertDialog),避免内部容器包裹导致无法全屏
      */
-    private void showDialogFull(AlertDialog dialog) {
+    private void showDialogFull(Dialog dialog) {
         dialog.show();
         android.view.Window window = dialog.getWindow();
         if (window != null) {
@@ -522,12 +523,14 @@ public class MainActivity extends AppCompatActivity {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT);
             window.getDecorView().setPadding(0, 0, 0, 0);
+            // 清除默认 Dialog 背景Drawable(可能带圆角/padding)
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF16161C));
         }
     }
 
     /**
      * 创建全屏设置子弹窗:深色头部 + 关闭按钮 + 内容区 + 按钮区
-     * 性能说明:纯 XML 布局 + Drawable 渲染,系统缓存,零额外开销
+     * 使用 Dialog.setContentView 直接设置视图,无 AlertDialog 包裹层
      */
     private SubDialog createSubDialog(String icon, String title) {
         View view = LayoutInflater.from(this).inflate(R.layout.dialog_sub_content, null);
@@ -536,10 +539,10 @@ public class MainActivity extends AppCompatActivity {
         sd.buttons = (LinearLayout) view.findViewById(R.id.ll_dialog_buttons);
         ((TextView) view.findViewById(R.id.tv_dialog_icon)).setText(icon);
         ((TextView) view.findViewById(R.id.tv_dialog_title)).setText(title);
-        sd.dialog = new AlertDialog.Builder(this, R.style.Theme_CaptivaDialog)
-                .setView(view)
-                .create();
-        final AlertDialog d = sd.dialog;
+        sd.dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
+        sd.dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        sd.dialog.setContentView(view);
+        final Dialog d = sd.dialog;
         view.findViewById(R.id.btn_dialog_close).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) { d.dismiss(); }
@@ -616,9 +619,9 @@ public class MainActivity extends AppCompatActivity {
         ListView lv = (ListView) dialogView.findViewById(R.id.lv_settings);
         lv.setAdapter(adapter);
 
-        AlertDialog dialog = new AlertDialog.Builder(this, R.style.Theme_CaptivaDialog)
-                .setView(dialogView)
-                .create();
+        final Dialog dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(dialogView);
 
         // 关闭按钮
         dialogView.findViewById(R.id.btn_settings_close).setOnClickListener(new View.OnClickListener() {
@@ -658,7 +661,7 @@ public class MainActivity extends AppCompatActivity {
         boolean current = navidromeConfig.isAutoPlay();
         final String[] items = {"开启", "关闭"};
         final boolean[] values = {true, false};
-        final AlertDialog[] dRef = new AlertDialog[1];
+        final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
         // 提示信息
@@ -726,7 +729,7 @@ public class MainActivity extends AppCompatActivity {
     /** 清除网络缓存确认对话框(全屏美化) */
     private void showClearCacheDialog() {
         final SubDialog sd = createSubDialog("🗑", "清除歌曲列表缓存");
-        final AlertDialog[] dRef = new AlertDialog[1];
+        final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
         boolean hasCache = songCache.exists();
@@ -768,7 +771,7 @@ public class MainActivity extends AppCompatActivity {
     /** 屏幕分辨率与DPI信息对话框(全屏美化) */
     private void showScreenInfoDialog() {
         final SubDialog sd = createSubDialog("📐", "屏幕分辨率与DPI");
-        final AlertDialog[] dRef = new AlertDialog[1];
+        final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
         // 获取屏幕分辨率和DPI
@@ -846,7 +849,7 @@ public class MainActivity extends AppCompatActivity {
     /** 时长过滤设置对话框(全屏美化):自定义输入秒数 */
     private void showDurationFilterDialog() {
         final SubDialog sd = createSubDialog("⏱", "最小时长过滤(秒)");
-        final AlertDialog[] dRef = new AlertDialog[1];
+        final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
         final int currentMin = navidromeConfig.getMinDuration();
 
@@ -915,7 +918,7 @@ public class MainActivity extends AppCompatActivity {
     /** 关于对话框(全屏美化) */
     private void showAboutDialog() {
         final SubDialog sd = createSubDialog("ℹ", "关于");
-        final AlertDialog[] dRef = new AlertDialog[1];
+        final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
         String verName = "1.0";
