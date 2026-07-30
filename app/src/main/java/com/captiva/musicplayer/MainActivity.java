@@ -298,16 +298,30 @@ public class MainActivity extends AppCompatActivity {
         tvTotalTime = findViewById(R.id.tv_total_time);
         sbProgress = findViewById(R.id.sb_progress);
 
-        // 修复安卓4.x进度条圆圈黑块:
-        // XML shape/layer-list 的透明区域在4.x上会渲染成黑块
-        // 改用 GradientDrawable 代码创建,只绘制圆形不填充矩形边界
-        int thumbSize = (int) (16 * getResources().getDisplayMetrics().density);
-        android.graphics.drawable.GradientDrawable thumb = new android.graphics.drawable.GradientDrawable();
-        thumb.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        thumb.setColor(0xFFFFFFFF);
-        thumb.setStroke((int) (3 * getResources().getDisplayMetrics().density), 0xFF4FC3F7);
-        thumb.setSize(thumbSize, thumbSize);
-        sbProgress.setThumb(thumb);
+        // 修复安卓4.x进度条圆圈黑块(三重修复):
+        // 1. 用Bitmap绘制圆圈thumb,保证ARGB_8888正确透明(无ShapeDrawable黑块)
+        // 2. 清除SeekBar默认背景(消除系统残留thumb阴影)
+        // 3. 设置thumbOffset=0(消除clip与thumb之间的缝隙)
+        float density = getResources().getDisplayMetrics().density;
+        int thumbSize = (int) (18 * density);
+        android.graphics.Bitmap thumbBmp = android.graphics.Bitmap.createBitmap(
+                thumbSize, thumbSize, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(thumbBmp);
+        android.graphics.Paint paint = new android.graphics.Paint();
+        paint.setAntiAlias(true);
+        // 蓝色描边圆
+        paint.setColor(0xFF4FC3F7);
+        canvas.drawCircle(thumbSize / 2f, thumbSize / 2f, thumbSize / 2f - 1, paint);
+        // 白色内圆
+        paint.setColor(0xFFFFFFFF);
+        canvas.drawCircle(thumbSize / 2f, thumbSize / 2f, thumbSize / 2f - 1 - 3 * density, paint);
+        android.graphics.drawable.BitmapDrawable thumbDrawable =
+                new android.graphics.drawable.BitmapDrawable(getResources(), thumbBmp);
+        sbProgress.setThumb(thumbDrawable);
+        // 清除默认背景(消除系统thumb残留)
+        sbProgress.setBackgroundDrawable(null);
+        // 消除clip与thumb之间的缝隙
+        sbProgress.setThumbOffset(0);
 
         btnPrev = findViewById(R.id.btn_prev);
         btnPlay = findViewById(R.id.btn_play);

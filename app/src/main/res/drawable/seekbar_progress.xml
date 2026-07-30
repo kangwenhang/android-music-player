@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 进度条样式:圆角轨道+蓝色进度 -->
+<!-- 进度条样式:圆角轨道+蓝色进度
+     安卓4.x: clip+corners会在clip边界产生黑线,改用scale代替clip -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 背景轨道 -->
     <item android:id="@android:id/background">
@@ -8,18 +9,18 @@
             <corners android:radius="4dp" />
         </shape>
     </item>
-    <!-- 缓冲(次要进度,API 1+) -->
+    <!-- 缓冲(次要进度) -->
     <item android:id="@android:id/secondaryProgress">
-        <clip>
+        <scale android:scaleWidth="100%">
             <shape android:shape="rectangle">
                 <solid android:color="#37474F" />
                 <corners android:radius="4dp" />
             </shape>
-        </clip>
+        </scale>
     </item>
     <!-- 主进度 -->
     <item android:id="@android:id/progress">
-        <clip>
+        <scale android:scaleWidth="100%">
             <shape android:shape="rectangle">
                 <gradient
                     android:angle="0"
@@ -27,6 +28,6 @@
                     android:endColor="#29B6F6" />
                 <corners android:radius="4dp" />
             </shape>
-        </clip>
+        </scale>
     </item>
 </layer-list>
