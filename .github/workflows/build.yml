@@ -46,19 +46,35 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: gradle assembleDebug --no-daemon --no-build-cache
 
-      - name: Verify APK signing (v1 only)
+      - name: Re-sign APK with v1 only (strip v2/v3 signature)
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-          echo "=== APK 签名验证 ==="
-          # 使用 apksigner 验证签名方案
+          echo "=== 原始 APK 签名检查 ==="
           APKSIGNER=$(find $ANDROID_HOME -name "apksigner" 2>/dev/null | head -1)
+          echo "apksigner: ${APKSIGNER:-not found}"
+
           if [ -n "$APKSIGNER" ]; then
+            # 用 apksigner 重新签名,只启用 v1
+            echo "=== 重新签名(仅 v1)==="
+            $APKSIGNER sign \
+              --ks app/debug.keystore \
+              --ks-pass pass:captiva123 \
+              --key-pass pass:captiva123 \
+              --ks-key-alias debug \
+              --v1-signing-enabled true \
+              --v2-signing-enabled false \
+              --v3-signing-enabled false \
+              --v4-signing-enabled false \
+              "$APK_PATH"
+
+            echo "=== 签名验证 ==="
             $APKSIGNER verify -v "$APK_PATH" 2>&1 || true
           else
-            echo "apksigner not found, using jarsigner"
-            jarsigner -verify -verbose "$APK_PATH" 2>&1 | head -5 || true
+            echo "apksigner not found, keeping original signing"
           fi
-          echo "=== 签名验证完成 ==="
+          echo "=== 签名处理完成 ==="
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
