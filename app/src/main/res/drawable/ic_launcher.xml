@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 矢量启动图标(替代 PNG,兼容 API 14+)
-     粉橙渐变背景 + 白色音符,类似 iOS 音乐 App 风格 -->
+     粉橙渐变背景 + 白色音符 + 圆角,类似 iOS 音乐 App 风格 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
 
-    <!-- 粉橙渐变背景 -->
+    <!-- 圆角背景(圆角半径10) -->
     <path
         android:fillColor="#FA2D48"
-        android:pathData="M0,0h48v48h-48z" />
+        android:pathData="M10,0 L38,0 Q48,0 48,10 L48,38 Q48,48 38,48 L10,48 Q0,48 0,38 L0,10 Q0,0 10,0 Z" />
     <!-- 顶部粉色渐变叠加(模拟上粉下橙效果) -->
     <path
         android:fillColor="#FF6B6B"
-        android:pathData="M0,0h48v24h-48z" />
+        android:pathData="M10,0 L38,0 Q48,0 48,10 L48,24 L0,24 L0,10 Q0,0 10,0 Z" />
 
     <!-- 白色八分音符(带符尾) -->
     <path
