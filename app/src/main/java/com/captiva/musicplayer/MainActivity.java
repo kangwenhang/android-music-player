@@ -510,12 +510,18 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout buttons;
     }
 
-    /** 强制 Dialog 窗口全屏(在 show() 后调用) */
-    private void forceFullScreen(AlertDialog dialog) {
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setLayout(
+    /**
+     * 显示 Dialog 并立即强制全屏(同步调用,比 OnShowListener 更可靠)
+     * 安卓 4.x 上 AlertDialog 会给 DecorView 加 padding,必须手动清除
+     */
+    private void showDialogFull(AlertDialog dialog) {
+        dialog.show();
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT);
+            window.getDecorView().setPadding(0, 0, 0, 0);
         }
     }
 
@@ -534,13 +540,6 @@ public class MainActivity extends AppCompatActivity {
                 .setView(view)
                 .create();
         final AlertDialog d = sd.dialog;
-        // show 后强制全屏
-        d.setOnShowListener(new DialogInterface.OnShowListener() {
-            @Override
-            public void onShow(DialogInterface di) {
-                forceFullScreen((AlertDialog) di);
-            }
-        });
         view.findViewById(R.id.btn_dialog_close).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) { d.dismiss(); }
@@ -620,12 +619,11 @@ public class MainActivity extends AppCompatActivity {
         AlertDialog dialog = new AlertDialog.Builder(this, R.style.Theme_CaptivaDialog)
                 .setView(dialogView)
                 .create();
-        // show 后强制全屏
-        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+
+        // 关闭按钮
+        dialogView.findViewById(R.id.btn_settings_close).setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onShow(DialogInterface di) {
-                forceFullScreen((AlertDialog) di);
-            }
+            public void onClick(View v) { dialog.dismiss(); }
         });
 
         lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
@@ -651,7 +649,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        dialog.show();
+        showDialogFull(dialog);
     }
 
     /** 自动播放设置对话框(全屏美化) */
@@ -722,7 +720,7 @@ public class MainActivity extends AppCompatActivity {
         });
         sd.buttons.addView(btnCancel);
 
-        sd.dialog.show();
+        showDialogFull(sd.dialog);
     }
 
     /** 清除网络缓存确认对话框(全屏美化) */
@@ -764,7 +762,7 @@ public class MainActivity extends AppCompatActivity {
             sd.buttons.addView(btnOk);
         }
 
-        sd.dialog.show();
+        showDialogFull(sd.dialog);
     }
 
     /** 屏幕分辨率与DPI信息对话框(全屏美化) */
@@ -842,7 +840,7 @@ public class MainActivity extends AppCompatActivity {
         });
         sd.buttons.addView(btnOk);
 
-        sd.dialog.show();
+        showDialogFull(sd.dialog);
     }
 
     /** 时长过滤设置对话框(全屏美化):自定义输入秒数 */
@@ -904,7 +902,7 @@ public class MainActivity extends AppCompatActivity {
         sd.buttons.addView(btnOk);
         sd.buttons.addView(btnCancel);
 
-        sd.dialog.show();
+        showDialogFull(sd.dialog);
     }
 
     /** 打开均衡器(无需播放状态,支持静默调节) */
@@ -967,7 +965,7 @@ public class MainActivity extends AppCompatActivity {
         sd.buttons.addView(btnUpdate);
         sd.buttons.addView(btnClose);
 
-        sd.dialog.show();
+        showDialogFull(sd.dialog);
     }
 
     /** GitHub 仓库信息 */
