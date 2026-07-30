@@ -736,7 +736,21 @@ public class MainActivity extends AppCompatActivity {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("均衡器模式" + (currentSong != null && songEq != null
                 ? "  (歌曲已绑定: " + songEq + ")" : ""));
-        builder.setItems(itemsArray, new DialogInterface.OnClickListener() {
+        // 自定义适配器,加大列表项字体(车机电阻屏优化)
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, itemsArray) {
+            @Override
+            public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                View view = super.getView(position, convertView, parent);
+                if (view instanceof TextView) {
+                    TextView tv = (TextView) view;
+                    tv.setTextSize(20f);
+                    tv.setPadding(48, 32, 48, 32);
+                }
+                return view;
+            }
+        };
+        builder.setAdapter(adapter, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 if (which < allPresets.size()) {

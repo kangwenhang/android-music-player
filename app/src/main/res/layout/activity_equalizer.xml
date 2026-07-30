@@ -26,12 +26,12 @@
             <Button
                 android:id="@+id/btn_eq_back"
                 android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:minWidth="72dp"
+                android:layout_height="52dp"
+                android:minWidth="80dp"
                 android:background="@drawable/bg_eq_btn_back"
                 android:text="返回"
                 android:textColor="@color/btn_text"
-                android:textSize="@dimen/sub_text_size" />
+                android:textSize="20sp" />
 
             <TextView
                 android:layout_width="0dp"
@@ -44,8 +44,8 @@
                 android:textStyle="bold" />
 
             <View
-                android:layout_width="72dp"
-                android:layout_height="44dp" />
+                android:layout_width="80dp"
+                android:layout_height="52dp" />
         </LinearLayout>
 
         <!-- 开关卡片 -->
@@ -64,7 +64,7 @@
                 android:layout_weight="1"
                 android:text="启用均衡器"
                 android:textColor="@color/text_primary"
-                android:textSize="20sp" />
+                android:textSize="22sp" />
 
             <Switch
                 android:id="@+id/sw_eq_enable"
@@ -88,7 +88,7 @@
                 android:layout_height="wrap_content"
                 android:text="预设音效"
                 android:textColor="@color/text_secondary"
-                android:textSize="@dimen/sub_text_size"
+                android:textSize="20sp"
                 android:layout_marginBottom="12dp" />
 
             <HorizontalScrollView
@@ -118,7 +118,7 @@
                 android:layout_height="wrap_content"
                 android:text="频段调节"
                 android:textColor="@color/text_secondary"
-                android:textSize="@dimen/sub_text_size"
+                android:textSize="20sp"
                 android:layout_marginBottom="12dp" />
 
             <!-- 频段调节区域(动态添加 VerticalSeekBar) -->
@@ -146,7 +146,7 @@
                     android:gravity="start"
                     android:text="−"
                     android:textColor="@color/eq_freq_label"
-                    android:textSize="16sp" />
+                    android:textSize="20sp" />
 
                 <TextView
                     android:layout_width="0dp"
@@ -155,7 +155,7 @@
                     android:gravity="center"
                     android:text="0 dB"
                     android:textColor="@color/eq_freq_label"
-                    android:textSize="14sp" />
+                    android:textSize="18sp" />
 
                 <TextView
                     android:layout_width="0dp"
@@ -164,7 +164,7 @@
                     android:gravity="end"
                     android:text="+"
                     android:textColor="@color/eq_freq_label"
-                    android:textSize="16sp" />
+                    android:textSize="20sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -193,29 +193,29 @@
                 android:layout_height="wrap_content"
                 android:text="自定义与歌曲绑定"
                 android:textColor="@color/text_secondary"
-                android:textSize="@dimen/sub_text_size"
+                android:textSize="20sp"
                 android:layout_marginBottom="12dp" />
 
             <!-- 保存为自定义预设 -->
             <Button
                 android:id="@+id/btn_save_custom"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
+                android:layout_height="52dp"
                 android:background="@drawable/bg_eq_btn_back"
                 android:text="保存当前设置为自定义预设"
                 android:textColor="@color/btn_text"
-                android:textSize="@dimen/sub_text_size"
+                android:textSize="20sp"
                 android:layout_marginBottom="8dp" />
 
             <!-- 绑定当前EQ到正在播放的歌曲 -->
             <Button
                 android:id="@+id/btn_bind_song"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
+                android:layout_height="52dp"
                 android:background="@drawable/bg_eq_btn_back"
                 android:text="绑定当前EQ到此歌曲"
                 android:textColor="@color/btn_text"
-                android:textSize="@dimen/sub_text_size" />
+                android:textSize="20sp" />
 
             <!-- 当前歌曲EQ绑定状态 -->
             <TextView
@@ -233,7 +233,7 @@
                 android:layout_marginTop="4dp"
                 android:text="提示:长按自定义预设可删除"
                 android:textColor="@color/eq_hint_text"
-                android:textSize="13sp" />
+                android:textSize="16sp" />
         </LinearLayout>
 
     </LinearLayout>
