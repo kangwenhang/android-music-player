@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置弹窗(全屏:渐变头部 + 图标列表) -->
+<!-- 通用子弹窗布局(全屏深色+渐变头部+内容区+按钮区) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -16,24 +16,24 @@
         android:background="@drawable/bg_settings_header">
 
         <TextView
+            android:id="@+id/tv_dialog_icon"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⚙"
             android:textColor="#FFFFFF"
             android:textSize="28sp"
             android:layout_marginRight="12dp" />
 
         <TextView
+            android:id="@+id/tv_dialog_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="设置"
             android:textColor="#FFFFFF"
             android:textSize="26sp"
             android:textStyle="bold" />
 
         <Button
-            android:id="@+id/btn_settings_close"
+            android:id="@+id/btn_dialog_close"
             android:layout_width="52dp"
             android:layout_height="52dp"
             android:minWidth="0dp"
@@ -45,15 +45,30 @@
             android:textSize="22sp" />
     </LinearLayout>
 
-    <!-- 菜单列表容器(Java动态填充) -->
-    <ListView
-        android:id="@+id/lv_settings"
+    <!-- 内容区域(Java 动态填充) -->
+    <ScrollView
+        android:id="@+id/sv_dialog_content"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:divider="@android:color/transparent"
-        android:dividerHeight="8dp"
+        android:scrollbars="none"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:id="@+id/ll_dialog_body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- 底部按钮区(Java 动态填充) -->
+    <LinearLayout
+        android:id="@+id/ll_dialog_buttons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
         android:padding="16dp"
-        android:scrollbars="none" />
+        android:background="@drawable/bg_dialog_footer" />
 
 </LinearLayout>
