@@ -197,7 +197,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-          TAG="v$(date +'%Y%m%d-%H%M%S')"
+
+          # 优先使用 HEAD 上的 git tag 作为 Release 标签(如 v2.1)
+          # 没有标签时回退到时间戳标签
+          GIT_TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+          if [ -n "$GIT_TAG" ]; then
+            TAG="$GIT_TAG"
+            echo "使用 git tag 作为 Release 标签: $TAG"
+          else
+            TAG="v$(date +'%Y%m%d-%H%M%S')"
+            echo "无 git tag,使用时间戳标签: $TAG"
+          fi
+
+          # 如果该 tag 已有 release,先删除旧 release(重新构建覆盖)
+          EXISTING=$(gh release view "$TAG" --json id -q '.id' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "删除旧的 Release $TAG,重新创建"
+            gh release delete "$TAG" --yes 2>/dev/null || true
+          fi
 
           PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name' 2>/dev/null || echo "")
           echo "上一个 Release tag: ${PREV_TAG:-无}"
