@@ -49,8 +49,72 @@ jobs:
           name: captiva-music-debug
           path: app/build/outputs/apk/debug/*.apk
 
-      # 只有 main 分支才创建 Release,local-test 仅构建验证
-      - name: Create GitHub Release (main only)
+      # ========== local-test: 创建预发布(调试用) ==========
+      - name: Create Prerelease (local-test)
+        if: github.ref == 'refs/heads/local-test'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+
+          # 预发布用递增版本号 v1.0.<commit数>,保证新版本排在最上面
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          TAG="v1.0.${COMMIT_COUNT}-pre"
+          echo "预发布版本标签: ${TAG}"
+
+          # 获取上一个 Release 的 tag(用于 changelog)
+          PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name' 2>/dev/null || echo "")
+          echo "上一个 Release tag: ${PREV_TAG:-无}"
+
+          if [ -n "$PREV_TAG" ]; then
+            git fetch origin "refs/tags/${PREV_TAG}:refs/tags/${PREV_TAG}" 2>/dev/null || true
+          fi
+
+          MAX_COMMITS=15
+          if [ -n "$PREV_TAG" ] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
+            TOTAL_COUNT=$(git rev-list --count "${PREV_TAG}..HEAD" 2>/dev/null || echo "0")
+            CHANGELOG=$(git log --pretty=format:"- %s" --max-count=${MAX_COMMITS} "${PREV_TAG}..HEAD" 2>/dev/null | grep -v "^- Merge" || true)
+            echo "找到 ${PREV_TAG}, 共 ${TOTAL_COUNT} 条新 commit"
+            if [ "$TOTAL_COUNT" -gt "$MAX_COMMITS" ]; then
+              CHANGELOG="${CHANGELOG}"$'\n'"- ...还有 $((TOTAL_COUNT - MAX_COMMITS)) 条更早的更新"
+            fi
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" -10 | grep -v "^- Merge" || true)
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- 无代码变更(重新构建)"
+          fi
+
+          BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')
+          APK_INFO=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep -E "versionCode|versionName" | head -1 || echo "")
+
+          cat > /tmp/release_notes.md << EOF
+          ## 调试预发布
+
+          - 构建时间: ${BUILD_TIME}
+          - 版本标签: ${TAG}
+          - 分支: local-test
+          - 版本信息: ${APK_INFO}
+
+          ## 本次更新
+          ${CHANGELOG}
+
+          ## 安装说明
+          这是调试预发布版本,下载 APK 后传输到车机安装即可。
+          每次构建 versionCode 自动递增,可直接覆盖安装。
+          EOF
+
+          # 删除同 tag 的旧预发布(如果存在),确保每次都是最新构建
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+
+          gh release create "$TAG" "$APK_PATH" \
+            --title "调试预发布 ${TAG}" \
+            --notes-file /tmp/release_notes.md \
+            --prerelease
+
+      # ========== main: 创建正式发布 ==========
+      - name: Create GitHub Release (main)
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,45 +122,32 @@ jobs:
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           TAG="v$(date +'%Y%m%d-%H%M%S')"
 
-          # 通过 GitHub API 获取上一个 Release 的 tag(最可靠)
           PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=1" --jq '.[0].tag_name' 2>/dev/null || echo "")
           echo "上一个 Release tag: ${PREV_TAG:-无}"
 
-          # 确保上一个 tag 在本地存在(用于 git log 范围查询)
           if [ -n "$PREV_TAG" ]; then
             git fetch origin "refs/tags/${PREV_TAG}:refs/tags/${PREV_TAG}" 2>/dev/null || true
           fi
 
-          # 只显示自上次 Release 以来的新 commit(最多 15 条,避免过长)
           MAX_COMMITS=15
           if [ -n "$PREV_TAG" ] && git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
             TOTAL_COUNT=$(git rev-list --count "${PREV_TAG}..HEAD" 2>/dev/null || echo "0")
             CHANGELOG=$(git log --pretty=format:"- %s" --max-count=${MAX_COMMITS} "${PREV_TAG}..HEAD" 2>/dev/null | grep -v "^- Merge" || true)
-            echo "找到 ${PREV_TAG}, 共 ${TOTAL_COUNT} 条新 commit, 显示最近 ${MAX_COMMITS} 条"
+            echo "找到 ${PREV_TAG}, 共 ${TOTAL_COUNT} 条新 commit"
             if [ "$TOTAL_COUNT" -gt "$MAX_COMMITS" ]; then
               CHANGELOG="${CHANGELOG}"$'\n'"- ...还有 $((TOTAL_COUNT - MAX_COMMITS)) 条更早的更新"
             fi
           else
-            # 没有上一个 Release,只取最近 10 条
             CHANGELOG=$(git log --pretty=format:"- %s" -10 | grep -v "^- Merge" || true)
-            echo "未找到上一个 Release, 只显示最近 10 条"
           fi
 
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="- 无代码变更(重新构建)"
           fi
 
-          echo "本次更新内容:"
-          echo "$CHANGELOG"
-
-          # 获取构建时间
           BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')
-
-          # 从 APK 提取版本信息(versionCode 递增,支持覆盖安装)
           APK_INFO=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep -E "versionCode|versionName" | head -1 || echo "")
-          echo "APK 版本信息: ${APK_INFO:-未知}"
 
-          # 生成 Release 说明
           cat > /tmp/release_notes.md << EOF
           ## 构建信息
           - 构建时间: ${BUILD_TIME}

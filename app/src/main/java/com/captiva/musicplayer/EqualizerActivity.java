@@ -175,8 +175,9 @@ public class EqualizerActivity extends AppCompatActivity {
         Button btn = new Button(this);
         btn.setText(preset);
         btn.setMinWidth(96);
-        btn.setMinHeight(48);
+        btn.setMinHeight(52);
         btn.setPadding(32, 16, 32, 16);
+        btn.setTextSize(20f);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -259,7 +260,7 @@ public class EqualizerActivity extends AppCompatActivity {
             TextView tvFreq = new TextView(this);
             tvFreq.setText(freqText);
             tvFreq.setTextColor(0xFF9A9AA0);
-            tvFreq.setTextSize(14f);
+            tvFreq.setTextSize(18f);
             tvFreq.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams freqLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -315,7 +316,7 @@ public class EqualizerActivity extends AppCompatActivity {
             tvValue.setTag("value");
             tvValue.setText(formatLevel(currentLevel));
             tvValue.setTextColor(0xFF4FC3F7);
-            tvValue.setTextSize(13f);
+            tvValue.setTextSize(18f);
             tvValue.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams valLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
