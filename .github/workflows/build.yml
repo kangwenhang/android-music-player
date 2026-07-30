@@ -4,6 +4,7 @@ on:
   # 推送即触发自动构建
   push:
     branches:
+      - main
       - local-test
   # 保留手动触发
   workflow_dispatch:
