@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 弹窗关闭按钮背景(半透明圆) -->
+<!-- 弹窗关闭按钮背景(深色半透明圆) -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="oval">
-            <solid android:color="#40FFFFFF" />
+            <solid android:color="#40404A" />
             <size android:width="52dp" android:height="52dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
-            <solid android:color="#33FFFFFF" />
+            <solid android:color="#2A2A34" />
             <size android:width="52dp" android:height="52dp" />
         </shape>
     </item>

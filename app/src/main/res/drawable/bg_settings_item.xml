@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置菜单列表项背景(按压变色) -->
+<!-- 设置菜单列表项背景(低饱和深色,按压微亮) -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
@@ -9,9 +9,9 @@
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#252530" />
+            <solid android:color="#222230" />
             <corners android:radius="10dp" />
-            <stroke android:width="1dp" android:color="#2E2E38" />
+            <stroke android:width="1dp" android:color="#2A2A34" />
         </shape>
     </item>
 </selector>

@@ -510,8 +510,17 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout buttons;
     }
 
+    /** 强制 Dialog 窗口全屏(在 show() 后调用) */
+    private void forceFullScreen(AlertDialog dialog) {
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
+        }
+    }
+
     /**
-     * 创建全屏设置子弹窗:渐变头部 + 关闭按钮 + 内容区 + 按钮区
+     * 创建全屏设置子弹窗:深色头部 + 关闭按钮 + 内容区 + 按钮区
      * 性能说明:纯 XML 布局 + Drawable 渲染,系统缓存,零额外开销
      */
     private SubDialog createSubDialog(String icon, String title) {
@@ -525,6 +534,13 @@ public class MainActivity extends AppCompatActivity {
                 .setView(view)
                 .create();
         final AlertDialog d = sd.dialog;
+        // show 后强制全屏
+        d.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface di) {
+                forceFullScreen((AlertDialog) di);
+            }
+        });
         view.findViewById(R.id.btn_dialog_close).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) { d.dismiss(); }
@@ -532,11 +548,12 @@ public class MainActivity extends AppCompatActivity {
         return sd;
     }
 
-    /** 创建美化按钮(正面=蓝渐变,负面=深灰) */
+    /** 创建美化按钮(正面=深蓝调+亮字,负面=深灰) */
     private Button createDialogButton(String text, boolean positive) {
         Button btn = new Button(this);
         btn.setText(text);
-        btn.setTextColor(0xFFFFFFFF);
+        btn.setTextColor(positive
+                ? getResources().getColor(R.color.accent) : 0xFFC0C0C5);
         btn.setTextSize(16);
         btn.setMinWidth(0);
         btn.setMinimumWidth(0);
@@ -603,6 +620,13 @@ public class MainActivity extends AppCompatActivity {
         AlertDialog dialog = new AlertDialog.Builder(this, R.style.Theme_CaptivaDialog)
                 .setView(dialogView)
                 .create();
+        // show 后强制全屏
+        dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+            @Override
+            public void onShow(DialogInterface di) {
+                forceFullScreen((AlertDialog) di);
+            }
+        });
 
         lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
             @Override
