@@ -57,9 +57,31 @@ jobs:
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
 
-          # 预发布用递增版本号 v1.0.<commit数>,保证新版本排在最上面
+          # 查询最新正式版(prerelease=false)的 tag 作为基础版本
+          LATEST_STABLE=""
+          ALL_RELEASES=$(gh api "repos/${{ github.repository }}/releases?per_page=30" 2>/dev/null || echo "[]")
+          LATEST_STABLE=$(echo "$ALL_RELEASES" | python3 -c "
+          import sys, json
+          try:
+            data = json.load(sys.stdin)
+            for r in data:
+                if not r.get('prerelease', False):
+                    print(r.get('tag_name', ''))
+                    break
+          except:
+            pass
+          " 2>/dev/null || echo "")
+          echo "最新正式版: ${LATEST_STABLE:-无}"
+
+          # 基于最新正式版生成预发布版本号
+          # 去掉 v 前缀,取主版本号(如 2.0),加上 commit 数作为补丁号
+          if [ -n "$LATEST_STABLE" ]; then
+            BASE_VER=$(echo "$LATEST_STABLE" | sed 's/^v//' | cut -d. -f1-2)
+          else
+            BASE_VER="1.0"
+          fi
           COMMIT_COUNT=$(git rev-list --count HEAD)
-          TAG="v1.0.${COMMIT_COUNT}-pre"
+          TAG="v${BASE_VER}.${COMMIT_COUNT}-pre"
           echo "预发布版本标签: ${TAG}"
 
           # 获取上一个 Release 的 tag(用于 changelog)
@@ -94,6 +116,7 @@ jobs:
 
           - 构建时间: ${BUILD_TIME}
           - 版本标签: ${TAG}
+          - 基于正式版: ${LATEST_STABLE:-无}
           - 分支: local-test
           - 版本信息: ${APK_INFO}
 

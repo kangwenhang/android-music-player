@@ -8,6 +8,9 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -28,6 +31,14 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -487,9 +498,9 @@ public class MainActivity extends AppCompatActivity {
 
     // ==================== 设置菜单 ====================
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 屏幕信息 / 清除缓存 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 屏幕信息 / 清除缓存 / 关于 */
     private void showSettingsMenu() {
-        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存"};
+        final String[] items = {"均衡器", "服务器设置", "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"), "时长过滤设置", "屏幕分辨率与DPI", "清除网络缓存", "关于"};
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this, R.layout.dialog_settings_item, items);
 
@@ -517,6 +528,9 @@ public class MainActivity extends AppCompatActivity {
                 } else if (which == 5) {
                     // 清除网络缓存
                     showClearCacheDialog();
+                } else if (which == 6) {
+                    // 关于
+                    showAboutDialog();
                 }
             }
         });
@@ -683,6 +697,249 @@ public class MainActivity extends AppCompatActivity {
     /** 打开均衡器(无需播放状态,支持静默调节) */
     private void openEqualizer() {
         startActivity(new Intent(this, EqualizerActivity.class));
+    }
+
+    // ==================== 关于与检测更新 ====================
+
+    /** 关于对话框 */
+    private void showAboutDialog() {
+        String verName = "1.0";
+        int verCode = 1;
+        try {
+            PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            verName = pi.versionName;
+            verCode = pi.versionCode;
+        } catch (PackageManager.NameNotFoundException e) {
+            // ignore
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("科帕奇音乐播放器\n\n");
+        sb.append("版本: ").append(verName).append(" (").append(verCode).append(")\n");
+        sb.append("适配: 安卓 4.2.2+ 车机\n");
+        sb.append("分辨率: 1024×600 横屏\n\n");
+        sb.append("功能:\n");
+        sb.append("• 本地/Navidrome 网络双模式播放\n");
+        sb.append("• 歌词叠加封面显示\n");
+        sb.append("• 均衡器(预设/自定义/单曲绑定)\n");
+        sb.append("• 收藏夹 / 搜索 / 自动播放\n\n");
+        sb.append("GitHub:\n");
+        sb.append("kangwenhang/android-music-player");
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("关于");
+        builder.setMessage(sb.toString());
+        builder.setPositiveButton("检测更新", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                checkForUpdate();
+            }
+        });
+        builder.setNegativeButton("关闭", null);
+        builder.show();
+    }
+
+    /** GitHub 仓库信息 */
+    private static final String GITHUB_OWNER = "kangwenhang";
+    private static final String GITHUB_REPO = "android-music-player";
+
+    /**
+     * 检测更新:查询 GitHub Releases API,只获取正式版(非 prerelease)
+     * 对比当前版本与最新正式版,弹窗提示下载
+     */
+    private void checkForUpdate() {
+        Toast.makeText(this, "正在检查更新...", Toast.LENGTH_SHORT).show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                HttpURLConnection conn = null;
+                try {
+                    URL url = new URL("https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30");
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setRequestProperty("Accept", "application/vnd.github+json");
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(15000);
+                    conn.connect();
+
+                    int code = conn.getResponseCode();
+                    if (code != 200) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(MainActivity.this, "检查更新失败: 网络错误(" + code + ")",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                        return;
+                    }
+
+                    InputStream is = conn.getInputStream();
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        sb.append(line);
+                    }
+                    reader.close();
+
+                    JSONArray releases = new JSONArray(sb.toString());
+
+                    // 只找正式版(prerelease=false),取第一个(最新)
+                    JSONObject latestRelease = null;
+                    for (int i = 0; i < releases.length(); i++) {
+                        JSONObject r = releases.getJSONObject(i);
+                        if (!r.optBoolean("prerelease", false)) {
+                            latestRelease = r;
+                            break;
+                        }
+                    }
+
+                    if (latestRelease == null) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(MainActivity.this, "暂无正式版本可用",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                        return;
+                    }
+
+                    final String latestTag = latestRelease.optString("tag_name", "");
+                    final String releaseName = latestRelease.optString("name", latestTag);
+                    final String releaseUrl = latestRelease.optString("html_url", "");
+                    final String releaseBody = latestRelease.optString("body", "");
+
+                    // 获取 APK 下载地址
+                    String apkUrl = "";
+                    JSONArray assets = latestRelease.optJSONArray("assets");
+                    if (assets != null && assets.length() > 0) {
+                        for (int i = 0; i < assets.length(); i++) {
+                            JSONObject asset = assets.getJSONObject(i);
+                            String name = asset.optString("name", "");
+                            if (name.endsWith(".apk")) {
+                                apkUrl = asset.optString("browser_download_url", "");
+                                break;
+                            }
+                        }
+                    }
+
+                    // 获取当前版本
+                    String currentVer = "1.0";
+                    try {
+                        PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+                        currentVer = pi.versionName;
+                    } catch (Exception e) {
+                        // ignore
+                    }
+
+                    // 比较版本(去除 v 前缀)
+                    String currentClean = currentVer.replaceFirst("^v", "");
+                    String latestClean = latestTag.replaceFirst("^v", "");
+                    final boolean hasUpdate = compareVersion(latestClean, currentClean) > 0;
+
+                    final String finalApkUrl = apkUrl;
+                    final String currentVerFinal = currentVer;
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (hasUpdate) {
+                                showUpdateDialog(latestTag, releaseName, releaseBody,
+                                        releaseUrl, finalApkUrl, currentVerFinal);
+                            } else {
+                                Toast.makeText(MainActivity.this,
+                                        "已是最新版本 (" + currentVerFinal + ")",
+                                        Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                    });
+
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(MainActivity.this,
+                                    "检查更新失败: " + e.getMessage(),
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } finally {
+                    if (conn != null) conn.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    /** 版本号比较:返回 >0 表示 v2 大于 v1 */
+    private int compareVersion(String v1, String v2) {
+        String[] parts1 = v1.split("[.\\-]");
+        String[] parts2 = v2.split("[.\\-]");
+        int len = Math.max(parts1.length, parts2.length);
+        for (int i = 0; i < len; i++) {
+            int n1 = 0, n2 = 0;
+            try { n1 = Integer.parseInt(parts1[i]); } catch (Exception e) { }
+            try { n2 = Integer.parseInt(parts2[i]); } catch (Exception e) { }
+            if (n1 != n2) return n1 - n2;
+        }
+        return 0;
+    }
+
+    /** 显示有新版本的更新对话框 */
+    private void showUpdateDialog(final String tag, String name, String body,
+                                  final String releaseUrl, final String apkUrl,
+                                  String currentVer) {
+        StringBuilder msg = new StringBuilder();
+        msg.append("发现新版本!\n\n");
+        msg.append("当前版本: ").append(currentVer).append("\n");
+        msg.append("最新版本: ").append(tag).append("\n");
+        if (name != null && !name.isEmpty() && !name.equals(tag)) {
+            msg.append("版本名称: ").append(name).append("\n");
+        }
+        msg.append("\n更新内容:\n");
+        if (body != null && !body.isEmpty()) {
+            // 截取前 500 字符,避免太长
+            String preview = body.length() > 500 ? body.substring(0, 500) + "..." : body;
+            msg.append(preview);
+        } else {
+            msg.append("详见 GitHub Release 页面");
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("检测到更新");
+        builder.setMessage(msg.toString());
+
+        if (apkUrl != null && !apkUrl.isEmpty()) {
+            // 有 APK 直链,可直接下载
+            builder.setPositiveButton("下载APK", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
+                    startActivity(browserIntent);
+                }
+            });
+            builder.setNeutralButton("查看详情", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
+                    startActivity(browserIntent);
+                }
+            });
+        } else {
+            // 无 APK,跳转到 Release 页面
+            builder.setPositiveButton("查看详情", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
+                    startActivity(browserIntent);
+                }
+            });
+        }
+        builder.setNegativeButton("以后再说", null);
+        builder.show();
     }
 
     // ==================== 均衡器快捷切换 ====================
