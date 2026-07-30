@@ -106,6 +106,15 @@ public class EqualizerActivity extends AppCompatActivity {
         // 返回时刷新预设按钮(可能在其他地方添加了自定义预设)
         buildPresetButtons();
         updateSongBindingStatus();
+        hideSystemUI();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            hideSystemUI();
+        }
     }
 
     /** 更新提示文字 */

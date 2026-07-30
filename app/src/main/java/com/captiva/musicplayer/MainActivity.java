@@ -1672,6 +1672,15 @@ public class MainActivity extends AppCompatActivity {
         handler.removeCallbacks(progressTask);
     }
 
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 窗口重新获得焦点时(如关闭弹窗后)重新隐藏系统UI,保持全屏
+        if (hasFocus) {
+            hideSystemUI();
+        }
+    }
+
     /** 上次按返回键的时间戳,用于双击退出判断 */
     private long lastBackPressTime = 0;
 

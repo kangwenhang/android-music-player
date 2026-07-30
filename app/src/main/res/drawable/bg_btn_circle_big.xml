@@ -1,15 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 圆形播放按钮背景(大) - 车机电阻屏优化,含按下反馈 -->
+<!-- 圆形播放按钮背景(大,蓝色渐变) - 含按下反馈 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="oval">
-            <solid android:color="#81D4FA" />
+            <gradient
+                android:angle="135"
+                android:startColor="#81D4FA"
+                android:endColor="#29B6F6" />
+            <stroke android:width="1dp" android:color="#B3E5FC" />
             <size android:width="80dp" android:height="80dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
-            <solid android:color="#4FC3F7" />
+            <gradient
+                android:angle="135"
+                android:startColor="#4FC3F7"
+                android:endColor="#0288D1" />
+            <stroke android:width="1dp" android:color="#81D4FA" />
             <size android:width="80dp" android:height="80dp" />
         </shape>
     </item>

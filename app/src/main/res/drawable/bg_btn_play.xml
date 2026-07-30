@@ -1,15 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 播放按钮背景:强调色 + 按压反馈(兼容 API 14) -->
+<!-- 播放按钮背景:蓝色渐变 + 按压反馈(兼容 API 14) -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="#29B6F6" />
+            <gradient
+                android:angle="135"
+                android:startColor="#29B6F6"
+                android:endColor="#01579B" />
             <corners android:radius="14dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/btn_play_bg" />
+            <gradient
+                android:angle="135"
+                android:startColor="#4FC3F7"
+                android:endColor="#0288D1" />
             <corners android:radius="14dp" />
         </shape>
     </item>

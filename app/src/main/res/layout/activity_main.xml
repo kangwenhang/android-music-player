@@ -185,8 +185,8 @@
                 android:maxHeight="32dp"
                 android:paddingTop="4dp"
                 android:paddingBottom="4dp"
-                android:progressTint="@color/accent"
-                android:thumbTint="@color/accent" />
+                android:progressDrawable="@drawable/seekbar_progress"
+                android:thumb="@drawable/seekbar_thumb" />
 
             <TextView
                 android:id="@+id/tv_total_time"

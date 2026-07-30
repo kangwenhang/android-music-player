@@ -1,15 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 圆形播放按钮背景:暂停中(红色) - 含按下反馈 -->
+<!-- 圆形播放按钮背景:暂停中(红色渐变) - 含按下反馈 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="oval">
-            <solid android:color="#FF5252" />
+            <gradient
+                android:angle="135"
+                android:startColor="#FF5252"
+                android:endColor="#C62828" />
+            <stroke android:width="1dp" android:color="#FF8A80" />
             <size android:width="80dp" android:height="80dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
-            <solid android:color="#E53935" />
+            <gradient
+                android:angle="135"
+                android:startColor="#E53935"
+                android:endColor="#B71C1C" />
+            <stroke android:width="1dp" android:color="#EF5350" />
             <size android:width="80dp" android:height="80dp" />
         </shape>
     </item>
