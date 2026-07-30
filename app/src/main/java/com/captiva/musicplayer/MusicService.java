@@ -556,6 +556,8 @@ public class MusicService extends Service {
         if (bean == null) {
             return;
         }
+        // 更新全局当前播放歌曲(供 EqualizerActivity 等获取)
+        MusicDataHolder.getInstance().setCurrentPlayingMusic(bean);
         // 增加 token:每次切歌都递增,旧请求自动作废
         final int token = ++playToken;
         
@@ -592,6 +594,8 @@ public class MusicService extends Service {
                         try {
                             int sessionId = mp.getAudioSessionId();
                             equalizerManager.init(sessionId);
+                            // 切歌时应用单曲绑定的EQ(有绑定则用绑定的预设,无则恢复全局设置)
+                            equalizerManager.applySongEq(currentBean);
                         } catch (Exception e) {
                             Log.w(TAG, "equalizer init failed", e);
                         }
@@ -738,6 +742,10 @@ public class MusicService extends Service {
         i.putExtra("playing", isPlaying());
         i.putExtra("playMode", playMode.getValue());
         i.putExtra("hasLrc", currentLrc != null && !currentLrc.isEmpty());
+        // 附带当前生效的EQ模式名(供主界面EQ按钮显示)
+        if (equalizerManager != null) {
+            i.putExtra("eqPreset", equalizerManager.getActivePreset());
+        }
         sendBroadcast(i);
     }
 
