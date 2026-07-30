@@ -17,6 +17,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -62,6 +63,7 @@ import java.util.List;
  */
 public class MainActivity extends AppCompatActivity {
 
+    private static final String TAG = "MainActivity";
     private static final int REQ_STORAGE = 100;
 
     // UI - 列表区
@@ -1413,9 +1415,31 @@ public class MainActivity extends AppCompatActivity {
                             if (downloadDialog != null && downloadDialog.isShowing()) {
                                 downloadDialog.dismiss();
                             }
+                            // Activity 已销毁则不继续
+                            if (isFinishing() || isDestroyed()) {
+                                return;
+                            }
+                            // 验证文件完整性
+                            if (apkFile == null || !apkFile.exists()) {
+                                Toast.makeText(MainActivity.this, "下载文件不存在,安装失败",
+                                        Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            if (!apkFile.canRead()) {
+                                apkFile.setReadable(true, false);
+                            }
+                            Log.d(TAG, "下载完成: " + apkFile.getAbsolutePath()
+                                    + " 大小: " + apkFile.length() + " bytes");
                             Toast.makeText(MainActivity.this, "下载完成,正在安装...",
                                     Toast.LENGTH_SHORT).show();
-                            installApk(apkFile);
+                            try {
+                                installApk(apkFile);
+                            } catch (Exception e) {
+                                Log.e(TAG, "安装失败: " + e.getMessage(), e);
+                                Toast.makeText(MainActivity.this,
+                                        "自动安装失败,请手动安装\n文件: " + apkFile.getAbsolutePath(),
+                                        Toast.LENGTH_LONG).show();
+                            }
                         }
                     });
 
@@ -1442,9 +1466,16 @@ public class MainActivity extends AppCompatActivity {
 
     /** 弹出系统安装器安装 APK(安卓 4.2.2 兼容) */
     private void installApk(File apkFile) {
+        Log.d(TAG, "开始安装 APK: " + apkFile.getAbsolutePath()
+                + " (" + apkFile.length() + " bytes)");
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        // 检查系统是否有安装器能处理此 Intent
+        if (intent.resolveActivity(getPackageManager()) == null) {
+            Log.e(TAG, "系统未找到 APK 安装器");
+            throw new RuntimeException("系统未找到 APK 安装器");
+        }
         startActivity(intent);
     }
 
