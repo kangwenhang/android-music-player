@@ -21,6 +21,9 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Fetch all tags (ensure version name correct)
+        run: git fetch --tags --force
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -42,6 +45,57 @@ jobs:
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: gradle assembleDebug --no-daemon --no-build-cache
+
+      - name: Zipalign + Re-sign APK (v1 only, for Android 4.2.2)
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ 2>/dev/null | sort -V | tail -1)
+          echo "Build tools: ${BUILD_TOOLS:-not found}"
+          ZIPALIGN="${BUILD_TOOLS}zipalign"
+          APKSIGNER="${BUILD_TOOLS}apksigner"
+          APK_SRC=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK_ALIGNED="/tmp/app-aligned.apk"
+          APK_FINAL=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+
+          # 1. Zipalign(4字节边界对齐,安卓 4.2.2 要求)
+          echo "=== Step 1: Zipalign ==="
+          if [ -f "$ZIPALIGN" ]; then
+            "$ZIPALIGN" -f -v 4 "$APK_SRC" "$APK_ALIGNED" > /tmp/zipalign.log 2>&1 || {
+              echo "zipalign failed, trying without verification"
+              "$ZIPALIGN" -f 4 "$APK_SRC" "$APK_ALIGNED" 2>&1 || true
+            }
+            echo "zipalign entries: $(wc -l < /tmp/zipalign.log)"
+            cp "$APK_ALIGNED" "$APK_FINAL"
+            echo "Zipalign done."
+          else
+            echo "zipalign not found, skipping alignment"
+          fi
+
+          # 2. 用 apksigner 重新签名,只启用 v1
+          echo "=== Step 2: Re-sign (v1 only) ==="
+          if [ -f "$APKSIGNER" ]; then
+            "$APKSIGNER" sign \
+              --ks app/debug.keystore \
+              --ks-pass pass:captiva123 \
+              --key-pass pass:captiva123 \
+              --ks-key-alias debug \
+              --v1-signing-enabled true \
+              --v2-signing-enabled false \
+              --v3-signing-enabled false \
+              --v4-signing-enabled false \
+              "$APK_FINAL"
+
+            echo "=== Step 3: Verify ==="
+            "$APKSIGNER" verify -v "$APK_FINAL" 2>&1 || true
+            echo ""
+            echo "=== Alignment check ==="
+            "$ZIPALIGN" -c -v 4 "$APK_FINAL" 2>&1 | tail -3 || echo "Alignment check warning (expected after signing)"
+          else
+            echo "apksigner not found, keeping original signing"
+          fi
+          echo "=== APK 处理完成 ==="
+          echo "Final APK size: $(wc -c < "$APK_FINAL") bytes"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

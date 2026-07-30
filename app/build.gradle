@@ -23,12 +23,45 @@ static int getGitVersionCode() {
 }
 
 /**
- * 版本名:1.0.<commit数>(<短hash>)
- * 方便用户识别具体版本
+ * 版本名:优先使用最近 git tag(如 v3.0),无 tag 时用 dev.<commit数>
+ * 正式构建:打 tag 后版本名 = tag(如 3.0)
+ * 调试构建:无 tag 时版本名 = dev.148(94912c0)
  */
 static String getGitVersionName() {
-    String base = "1.0"
     try {
+        // 先尝试获取当前 HEAD 上的 tag(精确匹配)
+        def tagProc = "git describe --tags --exact-match HEAD".execute()
+        tagProc.waitFor()
+        if (tagProc.exitValue() == 0) {
+            String tag = tagProc.text.trim()
+            // 去掉 v 前缀
+            if (tag.startsWith("v")) {
+                return tag.substring(1)
+            }
+            return tag
+        }
+
+        // 没有精确 tag,尝试 describe(最近 tag + commit 数)
+        def descProc = "git describe --tags --long".execute()
+        descProc.waitFor()
+        if (descProc.exitValue() == 0) {
+            String desc = descProc.text.trim()
+            // 格式: v3.0-5-g94912c0 或 v3.0-0-g94912c0
+            // 0 表示正好在 tag 上,>0 表示 tag 之后有新提交
+            def parts = desc.split("-")
+            if (parts.length >= 3) {
+                String tag = parts[0]
+                int ahead = parts[1].toInteger()
+                String hash = parts[2]
+                if (tag.startsWith("v")) tag = tag.substring(1)
+                if (ahead == 0) {
+                    return tag
+                }
+                return "${tag}.dev${ahead}(${hash})"
+            }
+        }
+
+        // 完全没有 tag,用 dev 格式
         def countProc = "git rev-list --count HEAD".execute()
         countProc.waitFor()
         def hashProc = "git rev-parse --short HEAD".execute()
@@ -36,11 +69,11 @@ static String getGitVersionName() {
         if (countProc.exitValue() == 0 && hashProc.exitValue() == 0) {
             String count = countProc.text.trim()
             String hash = hashProc.text.trim()
-            return "${base}.${count}(${hash})"
+            return "dev.${count}(${hash})"
         }
     } catch (Exception ignored) {
     }
-    return base
+    return "dev"
 }
 
 android {
@@ -54,8 +87,10 @@ android {
             storePassword 'captiva123'
             keyAlias 'debug'
             keyPassword 'captiva123'
-            // 安卓 4.2.2 只支持 v1(JAR)签名,v2/v3/v4 是 Android 7.0+ 才支持
-            // 必须禁用 v2+,否则旧系统安装时报"安装包解析失败"
+            // 安卓 4.2.2 只支持 v1(JAR)签名
+            // v2(APK Signature Scheme v2,Android 7.0+)必须禁用
+            // v3 依赖 v2,v2 禁用后 v3 不会生效
+            // v4 仅用于增量安装(adb --incremental),不影响 APK 文件本身
             v1SigningEnabled true
             v2SigningEnabled false
         }
