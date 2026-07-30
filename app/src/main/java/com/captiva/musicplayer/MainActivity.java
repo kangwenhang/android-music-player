@@ -1027,6 +1027,14 @@ public class MainActivity extends AppCompatActivity {
     private static final String GITHUB_OWNER = "kangwenhang";
     private static final String GITHUB_REPO = "android-music-player";
 
+    /** GitHub 下载代理镜像(国内网络 github.com 经常连不上) */
+    private static final String[] GITHUB_DL_MIRRORS = {
+        "",                          // 直连(优先)
+        "https://ghproxy.net/",      // 镜像1
+        "https://gh-proxy.com/",     // 镜像2
+        "https://mirror.ghproxy.com/", // 镜像3
+    };
+
     /**
      * 检测更新:查询 GitHub Releases API,只获取正式版(非 prerelease)
      * 对比当前版本与最新正式版,弹窗提示下载
@@ -1039,35 +1047,66 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 HttpURLConnection conn = null;
                 try {
-                    URL url = new URL("https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
-                            + "/releases?per_page=30");
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setRequestProperty("Accept", "application/vnd.github+json");
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
-                    conn.connect();
+                    // 尝试多个 API 地址(直连 + 镜像)
+                    String[] apiUrls = {
+                        "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "https://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "https://gh-proxy.com/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                    };
 
-                    int code = conn.getResponseCode();
+                    int code = -1;
+                    InputStream is = null;
+                    Exception lastErr = null;
+                    StringBuilder sb = new StringBuilder();
+
+                    for (String apiUrl : apiUrls) {
+                        try {
+                            conn = (HttpURLConnection) new URL(apiUrl).openConnection();
+                            conn.setRequestMethod("GET");
+                            conn.setRequestProperty("Accept", "application/vnd.github+json");
+                            conn.setConnectTimeout(15000);
+                            conn.setReadTimeout(15000);
+                            conn.connect();
+                            code = conn.getResponseCode();
+                            if (code == 200) {
+                                is = conn.getInputStream();
+                                BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                                String line;
+                                while ((line = reader.readLine()) != null) {
+                                    sb.append(line);
+                                }
+                                reader.close();
+                                break; // 成功,跳出
+                            }
+                        } catch (Exception e) {
+                            lastErr = e;
+                            Log.w(TAG, "API 请求失败(" + apiUrl + "): " + e.getMessage());
+                        } finally {
+                            if (conn != null) { conn.disconnect(); conn = null; }
+                        }
+                    }
+
+                    final int finalCode = code;
                     if (code != 200) {
+                        final Exception finalErr = lastErr;
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                Toast.makeText(MainActivity.this, "检查更新失败: 网络错误(" + code + ")",
-                                        Toast.LENGTH_SHORT).show();
+                                if (finalErr != null) {
+                                    Toast.makeText(MainActivity.this,
+                                            "检查更新失败: 网络无法连接GitHub\n" + finalErr.getMessage(),
+                                            Toast.LENGTH_LONG).show();
+                                } else {
+                                    Toast.makeText(MainActivity.this, "检查更新失败: 服务器错误(" + finalCode + ")",
+                                            Toast.LENGTH_SHORT).show();
+                                }
                             }
                         });
                         return;
                     }
-
-                    InputStream is = conn.getInputStream();
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        sb.append(line);
-                    }
-                    reader.close();
 
                     JSONArray releases = new JSONArray(sb.toString());
 
@@ -1326,141 +1365,187 @@ public class MainActivity extends AppCompatActivity {
         downloadThread = new Thread(new Runnable() {
             @Override
             public void run() {
-                HttpURLConnection conn = null;
-                InputStream is = null;
-                java.io.FileOutputStream fos = null;
-                try {
-                    URL url = new URL(apkUrl);
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setRequestProperty("Accept", "application/octet-stream");
-                    conn.setConnectTimeout(30000);
-                    conn.setReadTimeout(30000);
-                    conn.connect();
+                // 构建下载地址列表: 直连 + 镜像
+                String[] urls = new String[GITHUB_DL_MIRRORS.length];
+                for (int i = 0; i < GITHUB_DL_MIRRORS.length; i++) {
+                    urls[i] = GITHUB_DL_MIRRORS[i] + apkUrl;
+                }
 
-                    int responseCode = conn.getResponseCode();
-                    if (responseCode != 200) {
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (downloadDialog != null && downloadDialog.isShowing()) {
-                                    downloadDialog.dismiss();
-                                }
-                                Toast.makeText(MainActivity.this, "下载失败: 服务器错误(" + responseCode + ")",
-                                        Toast.LENGTH_SHORT).show();
+                final File apkFile;
+                Exception lastError = null;
+                boolean downloadSuccess = false;
+
+                // 保存到外部存储(安卓 4.2.2 兼容)
+                File downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS);
+                if (!downloadDir.exists()) {
+                    downloadDir.mkdirs();
+                }
+                String fileName = "captiva-music-" + versionTag + ".apk";
+                apkFile = new File(downloadDir, fileName);
+
+                // 逐个尝试下载地址
+                for (int mirrorIdx = 0; mirrorIdx < urls.length; mirrorIdx++) {
+                    if (downloadCancelled) break;
+
+                    final String tryUrl = urls[mirrorIdx];
+                    final String sourceName = mirrorIdx == 0 ? "直连" : ("镜像" + mirrorIdx);
+
+                    // 更新状态文字
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (downloadStatus != null) {
+                                downloadStatus.setText("正在连接(" + sourceName + ")...");
                             }
-                        });
-                        return;
-                    }
+                            if (downloadProgress != null) {
+                                downloadProgress.setProgress(0);
+                            }
+                            if (downloadPercent != null) {
+                                downloadPercent.setText("0%");
+                            }
+                        }
+                    });
 
-                    final int totalSize = conn.getContentLength();
-                    is = conn.getInputStream();
+                    HttpURLConnection conn = null;
+                    InputStream is = null;
+                    java.io.FileOutputStream fos = null;
+                    try {
+                        Log.d(TAG, "尝试下载(" + sourceName + "): " + tryUrl);
+                        URL url = new URL(tryUrl);
+                        conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setRequestProperty("Accept", "application/octet-stream");
+                        conn.setConnectTimeout(30000);
+                        conn.setReadTimeout(30000);
+                        conn.setInstanceFollowRedirects(true);
+                        conn.connect();
 
-                    // 保存到外部存储(安卓 4.2.2 兼容)
-                    File downloadDir = android.os.Environment.getExternalStoragePublicDirectory(
-                            android.os.Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloadDir.exists()) {
-                        downloadDir.mkdirs();
-                    }
-                    String fileName = "captiva-music-" + versionTag + ".apk";
-                    final File apkFile = new File(downloadDir, fileName);
-                    fos = new java.io.FileOutputStream(apkFile);
+                        final int responseCode = conn.getResponseCode();
+                        if (responseCode != 200) {
+                            Log.w(TAG, sourceName + " 服务器错误: " + responseCode);
+                            lastError = new Exception("服务器错误(" + responseCode + ")");
+                            continue; // 试下一个镜像
+                        }
 
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    long totalRead = 0;
-                    int lastPercent = -1;
+                        final int totalSize = conn.getContentLength();
+                        is = conn.getInputStream();
+                        fos = new java.io.FileOutputStream(apkFile);
 
-                    while ((bytesRead = is.read(buffer)) != -1) {
-                        if (downloadCancelled) {
-                            fos.close();
-                            fos = null;
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        long totalRead = 0;
+                        int lastPercent = -1;
+
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            if (downloadCancelled) {
+                                fos.close();
+                                fos = null;
+                                apkFile.delete();
+                                return;
+                            }
+                            fos.write(buffer, 0, bytesRead);
+                            totalRead += bytesRead;
+
+                            if (totalSize > 0) {
+                                final int percent = (int) (totalRead * 100 / totalSize);
+                                if (percent != lastPercent) {
+                                    lastPercent = percent;
+                                    final long currentRead = totalRead;
+                                    runOnUiThread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            if (downloadProgress != null) {
+                                                downloadProgress.setProgress(percent);
+                                            }
+                                            if (downloadPercent != null) {
+                                                downloadPercent.setText(percent + "%");
+                                            }
+                                            if (downloadStatus != null) {
+                                                String sizeStr = formatSize(currentRead) + " / " + formatSize(totalSize);
+                                                downloadStatus.setText("正在下载(" + sourceName + "): " + sizeStr);
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+
+                        fos.flush();
+                        fos.close();
+                        fos = null;
+
+                        Log.d(TAG, sourceName + " 下载成功: " + apkFile.length() + " bytes");
+                        downloadSuccess = true;
+                        break; // 成功,不再试其他镜像
+
+                    } catch (Exception e) {
+                        Log.w(TAG, sourceName + " 下载失败: " + e.getMessage());
+                        lastError = e;
+                        // 删除可能的不完整文件
+                        if (apkFile.exists()) {
                             apkFile.delete();
+                        }
+                    } finally {
+                        if (fos != null) { try { fos.close(); } catch (Exception e) {} }
+                        if (is != null) { try { is.close(); } catch (Exception e) {} }
+                        if (conn != null) conn.disconnect();
+                    }
+                }
+
+                if (downloadCancelled) return;
+
+                if (!downloadSuccess) {
+                    final Exception finalErr = lastError;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (downloadDialog != null && downloadDialog.isShowing()) {
+                                downloadDialog.dismiss();
+                            }
+                            String msg = finalErr != null ? finalErr.getMessage() : "未知错误";
+                            Toast.makeText(MainActivity.this,
+                                    "下载失败(所有镜像均不可用):\n" + msg,
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                    return;
+                }
+
+                // 下载完成,关闭进度对话框,弹出安装
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (downloadDialog != null && downloadDialog.isShowing()) {
+                            downloadDialog.dismiss();
+                        }
+                        // Activity 已销毁则不继续
+                        if (isFinishing() || isDestroyed()) {
                             return;
                         }
-                        fos.write(buffer, 0, bytesRead);
-                        totalRead += bytesRead;
-
-                        if (totalSize > 0) {
-                            final int percent = (int) (totalRead * 100 / totalSize);
-                            if (percent != lastPercent) {
-                                lastPercent = percent;
-                                // 捕获当前已下载字节数(匿名类只能引用final变量)
-                                final long currentRead = totalRead;
-                                runOnUiThread(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        if (downloadProgress != null) {
-                                            downloadProgress.setProgress(percent);
-                                        }
-                                        if (downloadPercent != null) {
-                                            downloadPercent.setText(percent + "%");
-                                        }
-                                        if (downloadStatus != null) {
-                                            String sizeStr = formatSize(currentRead) + " / " + formatSize(totalSize);
-                                            downloadStatus.setText("正在下载: " + sizeStr);
-                                        }
-                                    }
-                                });
-                            }
+                        // 验证文件完整性
+                        if (apkFile == null || !apkFile.exists()) {
+                            Toast.makeText(MainActivity.this, "下载文件不存在,安装失败",
+                                    Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (!apkFile.canRead()) {
+                            apkFile.setReadable(true, false);
+                        }
+                        Log.d(TAG, "下载完成: " + apkFile.getAbsolutePath()
+                                + " 大小: " + apkFile.length() + " bytes");
+                        Toast.makeText(MainActivity.this, "下载完成,正在安装...",
+                                Toast.LENGTH_SHORT).show();
+                        try {
+                            installApk(apkFile);
+                        } catch (Exception e) {
+                            Log.e(TAG, "安装失败: " + e.getMessage(), e);
+                            Toast.makeText(MainActivity.this,
+                                    "自动安装失败,请手动安装\n文件: " + apkFile.getAbsolutePath(),
+                                    Toast.LENGTH_LONG).show();
                         }
                     }
-
-                    fos.flush();
-                    fos.close();
-                    fos = null;
-
-                    // 下载完成,关闭进度对话框,弹出安装
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (downloadDialog != null && downloadDialog.isShowing()) {
-                                downloadDialog.dismiss();
-                            }
-                            // Activity 已销毁则不继续
-                            if (isFinishing() || isDestroyed()) {
-                                return;
-                            }
-                            // 验证文件完整性
-                            if (apkFile == null || !apkFile.exists()) {
-                                Toast.makeText(MainActivity.this, "下载文件不存在,安装失败",
-                                        Toast.LENGTH_SHORT).show();
-                                return;
-                            }
-                            if (!apkFile.canRead()) {
-                                apkFile.setReadable(true, false);
-                            }
-                            Log.d(TAG, "下载完成: " + apkFile.getAbsolutePath()
-                                    + " 大小: " + apkFile.length() + " bytes");
-                            Toast.makeText(MainActivity.this, "下载完成,正在安装...",
-                                    Toast.LENGTH_SHORT).show();
-                            try {
-                                installApk(apkFile);
-                            } catch (Exception e) {
-                                Log.e(TAG, "安装失败: " + e.getMessage(), e);
-                                Toast.makeText(MainActivity.this,
-                                        "自动安装失败,请手动安装\n文件: " + apkFile.getAbsolutePath(),
-                                        Toast.LENGTH_LONG).show();
-                            }
-                        }
-                    });
-
-                } catch (final Exception e) {
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (downloadDialog != null && downloadDialog.isShowing()) {
-                                downloadDialog.dismiss();
-                            }
-                            Toast.makeText(MainActivity.this, "下载失败: " + e.getMessage(),
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                } finally {
-                    if (fos != null) { try { fos.close(); } catch (Exception e) {} }
-                    if (is != null) { try { is.close(); } catch (Exception e) {} }
-                    if (conn != null) conn.disconnect();
-                }
+                });
             }
         }, "ApkDownload");
         downloadThread.start();
