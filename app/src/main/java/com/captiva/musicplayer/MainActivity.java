@@ -298,9 +298,16 @@ public class MainActivity extends AppCompatActivity {
         tvTotalTime = findViewById(R.id.tv_total_time);
         sbProgress = findViewById(R.id.sb_progress);
 
-        // 修复安卓4.x进度条圆圈黑块:用代码设置thumb,确保透明背景
-        android.graphics.drawable.Drawable thumbDrawable = getResources().getDrawable(R.drawable.seekbar_thumb);
-        sbProgress.setThumb(thumbDrawable);
+        // 修复安卓4.x进度条圆圈黑块:
+        // XML shape/layer-list 的透明区域在4.x上会渲染成黑块
+        // 改用 GradientDrawable 代码创建,只绘制圆形不填充矩形边界
+        int thumbSize = (int) (16 * getResources().getDisplayMetrics().density);
+        android.graphics.drawable.GradientDrawable thumb = new android.graphics.drawable.GradientDrawable();
+        thumb.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        thumb.setColor(0xFFFFFFFF);
+        thumb.setStroke((int) (3 * getResources().getDisplayMetrics().density), 0xFF4FC3F7);
+        thumb.setSize(thumbSize, thumbSize);
+        sbProgress.setThumb(thumb);
 
         btnPrev = findViewById(R.id.btn_prev);
         btnPlay = findViewById(R.id.btn_play);

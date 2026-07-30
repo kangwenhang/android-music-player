@@ -185,8 +185,7 @@
                 android:maxHeight="32dp"
                 android:paddingTop="4dp"
                 android:paddingBottom="4dp"
-                android:progressDrawable="@drawable/seekbar_progress"
-                android:thumb="@drawable/seekbar_thumb" />
+                android:progressDrawable="@drawable/seekbar_progress" />
 
             <TextView
                 android:id="@+id/tv_total_time"
