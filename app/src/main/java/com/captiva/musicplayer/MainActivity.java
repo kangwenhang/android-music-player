@@ -297,6 +297,11 @@ public class MainActivity extends AppCompatActivity {
         tvCurrentTime = findViewById(R.id.tv_current_time);
         tvTotalTime = findViewById(R.id.tv_total_time);
         sbProgress = findViewById(R.id.sb_progress);
+
+        // 修复安卓4.x进度条圆圈黑块:用代码设置thumb,确保透明背景
+        android.graphics.drawable.Drawable thumbDrawable = getResources().getDrawable(R.drawable.seekbar_thumb);
+        sbProgress.setThumb(thumbDrawable);
+
         btnPrev = findViewById(R.id.btn_prev);
         btnPlay = findViewById(R.id.btn_play);
         btnNext = findViewById(R.id.btn_next);

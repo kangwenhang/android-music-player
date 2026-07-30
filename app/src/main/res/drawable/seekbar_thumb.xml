@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 进度条手柄(蓝色圆环+白色内圆) -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#FFFFFF" />
-    <stroke android:width="3dp" android:color="#4FC3F7" />
-    <size android:width="16dp" android:height="16dp" />
-</shape>
+<!-- 进度条手柄(蓝色圆环+白色内圆)
+     安卓4.x bug:纯oval shape的透明区域会渲染成黑块
+     解决:用layer-list,外层透明矩形(与thumb同尺寸)填充整个边界,内层用inset居中oval -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 外层:透明矩形,覆盖整个thumb区域(消除黑块) -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+            <size android:width="22dp" android:height="22dp" />
+        </shape>
+    </item>
+    <!-- 内层:蓝色圆环(用inset居中,兼容安卓4.x) -->
+    <item android:left="3dp" android:top="3dp" android:right="3dp" android:bottom="3dp">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF" />
+            <stroke android:width="3dp" android:color="#4FC3F7" />
+        </shape>
+    </item>
+</layer-list>
