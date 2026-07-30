@@ -37,11 +37,11 @@ public class LrcView extends View {
     private final Paint scrimPaint = new Paint();
 
     /** 行间距(每行歌词之间的间距,px) */
-    private float lineSpacing = 10f;
+    private float lineSpacing = 12f;
     /** 当前行字体大小 */
-    private float currentTextSize = 20f;
+    private float currentTextSize = 28f;
     /** 其他行字体大小 */
-    private float normalTextSize = 15f;
+    private float normalTextSize = 22f;
     /** 最多显示行数(含当前行,上下各3行) */
     private static final int MAX_VISIBLE_LINES = 7;
     /** 歌词左右边距 */

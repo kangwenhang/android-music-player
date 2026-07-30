@@ -951,6 +951,8 @@ public class MainActivity extends AppCompatActivity {
                             public void run() {
                                 isAutoSyncing = false;
                                 refreshSyncList();
+                                // 同步完成:清除无封面黑名单,允许重新尝试(新文件可能带封面)
+                                CoverLoader.getInstance().clearNoCoverCache();
                                 if (downloaded > 0) {
                                     tvSyncStatus.setText("已同步 +" + downloaded + " 首");
                                 } else {

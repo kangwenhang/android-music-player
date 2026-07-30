@@ -122,6 +122,18 @@ public class CoverLoader {
     }
 
     /**
+     * 清除无封面缓存(黑名单)
+     * 当所有数据加载完成后调用,允许重新尝试加载封面
+     * (新同步的文件可能带了封面,之前扫描时还没有)
+     */
+    public void clearNoCoverCache() {
+        if (!noCoverSet.isEmpty()) {
+            Log.d(TAG, "清除无封面缓存(" + noCoverSet.size() + "项),允许重新尝试");
+            noCoverSet.clear();
+        }
+    }
+
+    /**
      * 异步加载封面并设置到 ImageView
      * @param bean  歌曲信息
      * @param iv    目标 ImageView
