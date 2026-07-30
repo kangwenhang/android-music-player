@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 外部存储 Download 目录(APK 下载保存位置) -->
+    <external-path name="external_download" path="Download" />
+    <!-- 外部存储根目录(兼容其他下载位置) -->
+    <external-path name="external_root" path="." />
+</paths>
