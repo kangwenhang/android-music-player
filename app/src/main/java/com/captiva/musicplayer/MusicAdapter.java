@@ -379,6 +379,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
+        long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         // 安全检查:防止 position 越界
         if (position < 0 || position >= data.size()) {
             return;
@@ -409,6 +410,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
         // 检查是否需要加载更多(用 post 延迟执行,避免在 onBindViewHolder 布局计算时调用 notifyItemRangeInserted 抛出 IllegalStateException)
         holder.itemView.post(() -> checkLoadMore(position));
+
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("onBind", System.currentTimeMillis() - t0);
+        }
     }
 
     @Override

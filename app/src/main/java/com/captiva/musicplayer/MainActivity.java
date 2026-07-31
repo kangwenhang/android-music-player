@@ -41,6 +41,8 @@ import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import android.view.Choreographer;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -190,6 +192,24 @@ public class MainActivity extends AppCompatActivity {
 
     /** 列表正在滑动(暂停歌词/进度刷新,避免抢主线程导致卡顿) */
     private volatile boolean listScrolling = false;
+
+    /** Choreographer 帧回调(性能监控:检测掉帧) */
+    private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameTimeNanos) {
+            PerfLogger.onFrame(frameTimeNanos);
+            Choreographer.getInstance().postFrameCallback(this);
+        }
+    };
+
+    /** 定时刷新日志到U盘(每10秒) */
+    private final Runnable logFlushTask = new Runnable() {
+        @Override
+        public void run() {
+            PerfLogger.dump();
+            handler.postDelayed(this, 10000);
+        }
+    };
 
     // 播放状态广播接收
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
@@ -434,12 +454,14 @@ public class MainActivity extends AppCompatActivity {
                     listScrolling = true;
                     CoverLoader.getInstance().setCacheOnlyMode(true);
                     lrcView.setSkipDraw(true);
+                    PerfLogger.setScrolling(true);
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     // 停止滑动:恢复一切
                     listScrolling = false;
                     CoverLoader.getInstance().setCacheOnlyMode(false);
                     // 恢复歌词渲染(setSkipDraw(false) 会触发一次重绘)
                     lrcView.setSkipDraw(false);
+                    PerfLogger.setScrolling(false);
                     // 立即补一次进度和歌词(补偿滑动期间跳过的更新)
                     updateProgress();
                     updateLrc();
@@ -1868,6 +1890,14 @@ public class MainActivity extends AppCompatActivity {
             CoverLoader.getInstance().setDiskCacheDir(usbCoverCacheDir);
         }
 
+        // 初始化性能日志(写入U盘 perf_log.txt)
+        PerfLogger.init(syncPath);
+        // 启动帧率监控(检测掉帧)
+        Choreographer.getInstance().postFrameCallback(frameCallback);
+        // 启动定时日志刷新
+        handler.post(logFlushTask);
+        PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
+
         // 0. 优先从本地缓存加载(秒开,完全不读U盘)
         //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
         //    新增/删除歌曲需手动"刷新列表"(设置菜单)
@@ -2656,6 +2686,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // 停止帧率监控和日志刷新
+        Choreographer.getInstance().removeFrameCallback(frameCallback);
+        handler.removeCallbacks(logFlushTask);
+        PerfLogger.shutdown();
         // 取消自动同步
         cancelAutoSync();
         // 停止服务器状态监控

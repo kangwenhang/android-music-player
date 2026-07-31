@@ -341,6 +341,7 @@ public class LrcView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         super.onDraw(canvas);
 
         int vw = getWidth();
@@ -429,6 +430,10 @@ public class LrcView extends View {
             cachedDownLayouts[i].draw(canvas);
             canvas.restore();
             drawY += h + lineSpacing;
+        }
+
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("LrcDraw", System.currentTimeMillis() - t0);
         }
     }
 }

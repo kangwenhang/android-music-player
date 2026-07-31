@@ -284,6 +284,9 @@ public class CoverLoader {
                 Log.d(TAG, "预提取封面完成: 共" + total + "首, 新提取" + cached
                         + ", 已缓存" + alreadyCached + ", 无封面" + noCover
                         + ", 耗时" + elapsed + "ms");
+                PerfLogger.log("CoverPreload", "完成: 共" + total + "首, 新提取" + cached
+                        + ", 已缓存" + alreadyCached + ", 无封面" + noCover
+                        + ", 耗时" + elapsed + "ms");
                 preloading = false;
             }
         }, "CoverPreload").start();
@@ -330,7 +333,11 @@ public class CoverLoader {
             @Override
             public void run() {
                 // 先查磁盘缓存
+                long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
                 Bitmap diskCached = loadFromDiskCache(key, size, false);
+                if (PerfLogger.isEnabled()) {
+                    PerfLogger.log("CoverDisk", System.currentTimeMillis() - t0);
+                }
                 if (diskCached != null) {
                     cache.put(key, diskCached);
                     mainHandler.post(new Runnable() {
@@ -352,7 +359,11 @@ public class CoverLoader {
                 }
 
                 // 非 cacheOnlyMode:从U盘/网络加载
+                long t1 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
                 final Bitmap bmp = loadBitmap(bean, key, size, false);
+                if (PerfLogger.isEnabled()) {
+                    PerfLogger.log("CoverUSB", System.currentTimeMillis() - t1);
+                }
                 if (bmp != null) {
                     cache.put(key, bmp);
                     mainHandler.post(new Runnable() {
