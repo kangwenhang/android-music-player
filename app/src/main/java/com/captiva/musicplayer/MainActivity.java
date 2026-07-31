@@ -50,8 +50,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * 主界面
@@ -67,6 +74,49 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private static final int REQ_STORAGE = 100;
+
+    /** TLS 1.2 SSLSocketFactory(安卓 4.2 默认禁用 TLS 1.2,需要手动启用) */
+    private SSLSocketFactory tls12Factory;
+
+    /**
+     * 创建 HTTPS 连接,安卓 4.2 及以下强制启用 TLS 1.2
+     * GitHub 及其镜像现在要求 TLS 1.2+,旧系统 SSL 握手会失败
+     */
+    private HttpURLConnection createConnection(String urlStr) throws Exception {
+        URL url = new URL(urlStr);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        if (conn instanceof HttpsURLConnection && Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            // 安卓 4.x 默认禁用 TLS 1.2,但底层 OpenSSL 支持,手动启用
+            if (tls12Factory == null) {
+                try {
+                    SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
+                    // 使用系统默认信任管理器
+                    sslContext.init(null, null, null);
+                    tls12Factory = sslContext.getSocketFactory();
+                    Log.d(TAG, "TLS 1.2 已启用");
+                } catch (Exception e) {
+                    Log.w(TAG, "TLS 1.2 启用失败,使用系统默认: " + e.getMessage());
+                }
+            }
+            if (tls12Factory != null) {
+                ((HttpsURLConnection) conn).setSSLSocketFactory(tls12Factory);
+            }
+        }
+        return conn;
+    }
+
+    /** 判断异常是否是 SSL/TLS 协议错误 */
+    private boolean isSslError(Throwable e) {
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) msg = "";
+        return e instanceof javax.net.ssl.SSLException
+                || msg.contains("SSL")
+                || msg.contains("TLS")
+                || msg.contains("handshake")
+                || msg.contains("unsupported protocol")
+                || msg.contains("SSLProtocolException");
+    }
 
     // UI - 列表区
     private RecyclerView rvList;
@@ -1064,7 +1114,7 @@ public class MainActivity extends AppCompatActivity {
 
                     for (String apiUrl : apiUrls) {
                         try {
-                            conn = (HttpURLConnection) new URL(apiUrl).openConnection();
+                            conn = createConnection(apiUrl);
                             conn.setRequestMethod("GET");
                             conn.setRequestProperty("Accept", "application/vnd.github+json");
                             conn.setConnectTimeout(15000);
@@ -1095,7 +1145,11 @@ public class MainActivity extends AppCompatActivity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                if (finalErr != null) {
+                                if (finalErr != null && isSslError(finalErr)) {
+                                    Toast.makeText(MainActivity.this,
+                                            "检查更新失败: 系统 SSL/TLS 版本过旧\n无法连接 GitHub,请手动下载更新",
+                                            Toast.LENGTH_LONG).show();
+                                } else if (finalErr != null) {
                                     Toast.makeText(MainActivity.this,
                                             "检查更新失败: 网络无法连接GitHub\n" + finalErr.getMessage(),
                                             Toast.LENGTH_LONG).show();
@@ -1412,8 +1466,7 @@ public class MainActivity extends AppCompatActivity {
                     java.io.FileOutputStream fos = null;
                     try {
                         Log.d(TAG, "尝试下载(" + sourceName + "): " + tryUrl);
-                        URL url = new URL(tryUrl);
-                        conn = (HttpURLConnection) url.openConnection();
+                        conn = createConnection(tryUrl);
                         conn.setRequestMethod("GET");
                         conn.setRequestProperty("Accept", "application/octet-stream");
                         conn.setConnectTimeout(30000);
@@ -1504,9 +1557,15 @@ public class MainActivity extends AppCompatActivity {
                                 downloadDialog.dismiss();
                             }
                             String msg = finalErr != null ? finalErr.getMessage() : "未知错误";
-                            Toast.makeText(MainActivity.this,
-                                    "下载失败(所有镜像均不可用):\n" + msg,
-                                    Toast.LENGTH_LONG).show();
+                            if (finalErr != null && isSslError(finalErr)) {
+                                Toast.makeText(MainActivity.this,
+                                        "下载失败: 系统 SSL/TLS 版本过旧\n无法连接 GitHub,请手动下载更新",
+                                        Toast.LENGTH_LONG).show();
+                            } else {
+                                Toast.makeText(MainActivity.this,
+                                        "下载失败(所有镜像均不可用):\n" + msg,
+                                        Toast.LENGTH_LONG).show();
+                            }
                         }
                     });
                     return;
