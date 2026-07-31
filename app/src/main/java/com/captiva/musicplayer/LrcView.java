@@ -41,6 +41,15 @@ public class LrcView extends View {
     private final Paint coverPaint = new Paint();
     private final Paint scrimPaint = new Paint();
 
+    // 预计算颜色常量(避免 onDraw 中每次调用 Color.parseColor → 解析开销)
+    private static final int COLOR_BG_DARK = Color.parseColor("#1A1A1E");
+    private static final int COLOR_NO_LRC = Color.parseColor("#99FFFFFF");
+    private static final int COLOR_CURRENT = Color.parseColor("#FFFFFF");
+    private static final int COLOR_NORMAL = Color.parseColor("#CCFFFFFF");
+    private static final int COLOR_SHADOW_CURRENT = Color.parseColor("#AA000000");
+    private static final int COLOR_SHADOW_NORMAL = Color.parseColor("#80000000");
+    private static final int COLOR_SCRIM = Color.parseColor("#99000000");
+
     /** 行间距(每行歌词之间的间距,px) */
     private float lineSpacing = 12f;
     /** 当前行字体大小 */
@@ -149,26 +158,26 @@ public class LrcView extends View {
 
     private void init() {
         // 当前行:亮色高亮
-        currentPaint.setColor(Color.parseColor("#FFFFFF"));
+        currentPaint.setColor(COLOR_CURRENT);
         currentPaint.setTextSize(currentTextSize);
         currentPaint.setAntiAlias(true);
         // StaticLayout.ALIGN_CENTER 负责居中,Paint 用 LEFT 避免冲突
         currentPaint.setTextAlign(Paint.Align.LEFT);
-        currentPaint.setShadowLayer(6f, 2f, 2f, Color.parseColor("#AA000000"));
+        currentPaint.setShadowLayer(6f, 2f, 2f, COLOR_SHADOW_CURRENT);
 
         // 其他行:半透明灰
-        normalPaint.setColor(Color.parseColor("#CCFFFFFF"));
+        normalPaint.setColor(COLOR_NORMAL);
         normalPaint.setTextSize(normalTextSize);
         normalPaint.setAntiAlias(true);
         normalPaint.setTextAlign(Paint.Align.LEFT);
-        normalPaint.setShadowLayer(4f, 1f, 1f, Color.parseColor("#80000000"));
+        normalPaint.setShadowLayer(4f, 1f, 1f, COLOR_SHADOW_NORMAL);
 
         // 封面绘制
         coverPaint.setAntiAlias(true);
         coverPaint.setFilterBitmap(true);
 
         // 暗化遮罩,让歌词更清晰
-        scrimPaint.setColor(Color.parseColor("#99000000"));
+        scrimPaint.setColor(COLOR_SCRIM);
     }
 
     /** 设置封面背景 Bitmap */
@@ -359,16 +368,16 @@ public class LrcView extends View {
             canvas.drawRect(0, 0, vw, vh, scrimPaint);
         } else {
             // 无封面时用纯色背景
-            canvas.drawColor(Color.parseColor("#1A1A1E"));
+            canvas.drawColor(COLOR_BG_DARK);
             canvas.drawRect(0, 0, vw, vh, scrimPaint);
         }
 
         // 2. 绘制歌词
         if (lrcList == null || lrcList.isEmpty()) {
             currentPaint.setTextSize(normalTextSize);
-            currentPaint.setColor(Color.parseColor("#99FFFFFF"));
+            currentPaint.setColor(COLOR_NO_LRC);
             canvas.drawText("暂无歌词", vw / 2f, vh / 2f, currentPaint);
-            currentPaint.setColor(Color.parseColor("#FFFFFF"));
+            currentPaint.setColor(COLOR_CURRENT);
             return;
         }
 

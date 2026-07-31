@@ -131,11 +131,18 @@ public class MusicBean {
 
     /**
      * 格式化时长 mm:ss
+     * 手动拼接避免 String.format 创建 Formatter 对象(减少 GC)
      */
     public static String formatDuration(long ms) {
         long total = ms / 1000;
         long m = total / 60;
         long s = total % 60;
-        return String.format("%02d:%02d", m, s);
+        // 手动格式化,避免 String.format 的 Formatter 分配
+        StringBuilder sb = new StringBuilder(5);
+        if (m < 10) sb.append('0');
+        sb.append(m).append(':');
+        if (s < 10) sb.append('0');
+        sb.append(s);
+        return sb.toString();
     }
 }

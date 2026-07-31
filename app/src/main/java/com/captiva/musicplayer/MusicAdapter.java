@@ -352,6 +352,28 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return filteredData.get(position);
     }
 
+    /**
+     * 刷新指定范围内 item 的封面(不触发 onBindViewHolder,直接查找 ImageView)
+     * 停止滑动后调用,避免 notifyItemRangeChanged 导致全部可见项重新绑定(46ms 尖峰)
+     * @param rv RecyclerView(用于查找持有者)
+     * @param start 起始位置
+     * @param end 结束位置(含)
+     * @param coverSize 封面尺寸
+     */
+    public void refreshCovers(RecyclerView rv, int start, int end, int coverSize) {
+        if (rv == null) return;
+        for (int i = start; i <= end; i++) {
+            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(i);
+            if (vh instanceof VH) {
+                VH holder = (VH) vh;
+                if (i >= 0 && i < data.size()) {
+                    MusicBean bean = data.get(i);
+                    CoverLoader.getInstance().load(bean, holder.ivCover, coverSize);
+                }
+            }
+        }
+    }
+
     public void setOnItemClickListener(OnItemClickListener l) {
         this.listener = l;
     }

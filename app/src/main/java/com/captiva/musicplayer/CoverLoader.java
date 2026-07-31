@@ -515,20 +515,18 @@ public class CoverLoader {
     /** 从磁盘缓存加载(使用采样率+RGB_565,避免解码全尺寸大图) */
     private Bitmap loadFromDiskCache(String key, int targetSize, boolean fullRes) {
         if (diskCacheDir == null) return null;
-        FileInputStream fis = null;
         try {
             String fileName = md5(key) + ".cover";
             File file = new File(diskCacheDir, fileName);
             if (!file.exists()) return null;
 
-            fis = new FileInputStream(file);
-            // 先获取图片尺寸
+            // 单次读取:先 inJustDecodeBounds 获取尺寸,再用同一 Options 解码
+            // (旧方案读两次文件,U盘上浪费 7-50ms)
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
-            BitmapFactory.decodeStream(fis, null, opts);
-            // 关闭后重新打开(Stream不能重用)
-            fis.close();
-            fis = new FileInputStream(file);
+            BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) return null;
 
             // 计算采样率(列表缩略图限制200px,全分辨率用传入尺寸)
             int actualTarget = fullRes ? targetSize : Math.min(targetSize, 200);
@@ -536,15 +534,12 @@ public class CoverLoader {
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
             opts.inPurgeable = true;
+            // 提供 inTempStorage 缓冲区,避免 BitmapFactory 内部频繁分配(减少 GC)
+            opts.inTempStorage = new byte[8 * 1024];
 
-            Bitmap bmp = BitmapFactory.decodeStream(fis, null, opts);
-            return bmp;
+            return BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
         } catch (Exception e) {
             return null;
-        } finally {
-            if (fis != null) {
-                try { fis.close(); } catch (Exception ignored) {}
-            }
         }
     }
 
@@ -602,15 +597,20 @@ public class CoverLoader {
     }
 
     /** MD5 哈希(用于磁盘缓存文件名) */
+    /** 预分配的 MD5 十六进制查找表(避免 String.format 逐字节格式化) */
+    private static final char[] HEX_CHARS = "0123456789abcdef".toCharArray();
+
     private String md5(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] digest = md.digest(input.getBytes("UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) {
-                sb.append(String.format("%02x", b & 0xFF));
+            char[] hex = new char[digest.length * 2];
+            for (int i = 0; i < digest.length; i++) {
+                int v = digest[i] & 0xFF;
+                hex[i * 2] = HEX_CHARS[v >>> 4];
+                hex[i * 2 + 1] = HEX_CHARS[v & 0x0F];
             }
-            return sb.toString();
+            return new String(hex);
         } catch (Exception e) {
             return String.valueOf(input.hashCode());
         }

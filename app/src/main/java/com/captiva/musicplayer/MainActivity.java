@@ -474,14 +474,14 @@ public class MainActivity extends AppCompatActivity {
                     int lastVisible = lm.findLastVisibleItemPosition();
                     if (firstVisible < 0 || lastVisible < 0) return;
 
-                    // 刷新当前可见项(触发封面重新加载)
-                    adapter.notifyItemRangeChanged(firstVisible, lastVisible - firstVisible + 1);
+                    // 刷新可见项封面(直接查找 ImageView,不触发 onBindViewHolder → 消除 46ms 尖峰)
+                    int coverSizePx = (int) getResources().getDimension(R.dimen.cover_size_list);
+                    adapter.refreshCovers(rvList, firstVisible, lastVisible, coverSizePx);
 
-                    // 预加载上下各 10 个 item 的封面
+                    // 预加载上下各 10 个 item 的封面(后台线程,不影响主线程)
                     int preloadRange = 10;
                     int preloadStart = Math.max(0, firstVisible - preloadRange);
                     int preloadEnd = Math.min(adapter.getItemCount() - 1, lastVisible + preloadRange);
-                    int coverSizePx = (int) getResources().getDimension(R.dimen.cover_size_list);
                     for (int i = preloadStart; i <= preloadEnd; i++) {
                         MusicBean bean = adapter.getFilteredItem(i);
                         if (bean != null) {
