@@ -172,8 +172,11 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable progressTask = new Runnable() {
         @Override
         public void run() {
-            updateProgress();
-            updateLrc();
+            // 列表滑动时跳过进度/歌词更新(避免与列表渲染抢主线程)
+            if (!listScrolling) {
+                updateProgress();
+                updateLrc();
+            }
             // 根据播放状态调整刷新频率
             boolean playing = service != null && service.isPlaying();
             handler.postDelayed(this, playing ? 100 : 2000);
@@ -182,6 +185,9 @@ public class MainActivity extends AppCompatActivity {
 
     /** 当前搜索关键词 */
     private String currentSearchQuery = "";
+
+    /** 列表正在滑动(暂停歌词/进度刷新,避免抢主线程导致卡顿) */
+    private volatile boolean listScrolling = false;
 
     // 播放状态广播接收
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
@@ -422,11 +428,16 @@ public class MainActivity extends AppCompatActivity {
             public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
                 if (newState == RecyclerView.SCROLL_STATE_DRAGGING
                         || newState == RecyclerView.SCROLL_STATE_SETTLING) {
-                    // 滑动中:只从内部存储读封面,不碰U盘
+                    // 滑动中:暂停封面U盘读取 + 暂停歌词/进度更新(避免抢主线程)
+                    listScrolling = true;
                     CoverLoader.getInstance().setCacheOnlyMode(true);
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    // 停止滑动:允许从U盘补加载缺失封面
+                    // 停止滑动:恢复一切
+                    listScrolling = false;
                     CoverLoader.getInstance().setCacheOnlyMode(false);
+                    // 立即补一次进度和歌词(补偿滑动期间跳过的更新)
+                    updateProgress();
+                    updateLrc();
                     LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
                     if (lm == null) return;
                     int firstVisible = lm.findFirstVisibleItemPosition();

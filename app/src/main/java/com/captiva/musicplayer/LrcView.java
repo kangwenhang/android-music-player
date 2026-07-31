@@ -47,6 +47,12 @@ public class LrcView extends View {
     /** 歌词左右边距 */
     private float lrcPadding = 24f;
 
+    /** 缓存的 StaticLayout(避免每次 onDraw 都重新创建,大幅减少 CPU 开销) */
+    private StaticLayout cachedCurrentLayout;
+    private int cachedCurrentIndex = -2;
+    private String cachedCurrentText;
+    private int cachedTextWidth = -1;
+
     public LrcView(Context context) {
         super(context);
         init();
@@ -142,6 +148,8 @@ public class LrcView extends View {
             lrcList = list;
         }
         currentIndex = -1;
+        cachedCurrentLayout = null;
+        cachedCurrentIndex = -2;
         invalidate();
     }
 
@@ -245,10 +253,19 @@ public class LrcView extends View {
         // 需 translate 到 cx - textWidth/2
         float layoutX = cx - textWidth / 2f;
 
-        // 计算当前行的高度(可能换行)
+        // 计算当前行的高度(可能换行) — 使用缓存避免每次 onDraw 重建
         String currentText = lrcList.get(currentIndex).getText();
         currentPaint.setTextSize(currentTextSize);
-        StaticLayout currentLayout = createTextLayout(currentText, currentPaint, textWidth);
+        if (cachedCurrentLayout == null
+                || cachedCurrentIndex != currentIndex
+                || (cachedCurrentText != null && !cachedCurrentText.equals(currentText))
+                || cachedTextWidth != textWidth) {
+            cachedCurrentLayout = createTextLayout(currentText, currentPaint, textWidth);
+            cachedCurrentIndex = currentIndex;
+            cachedCurrentText = currentText;
+            cachedTextWidth = textWidth;
+        }
+        StaticLayout currentLayout = cachedCurrentLayout;
         float currentHeight = currentLayout.getHeight();
 
         // 当前行垂直居中:当前行的中心在 cy
