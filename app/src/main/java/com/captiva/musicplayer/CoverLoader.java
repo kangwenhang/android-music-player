@@ -91,7 +91,10 @@ public class CoverLoader {
         return instance;
     }
 
-    /** 初始化磁盘缓存目录(需在 Application 或 Activity 中调用) */
+    /**
+     * 初始化磁盘缓存目录(需在 Application 或 Activity 中调用)
+     * 默认使用内部存储 cacheDir,启动时立即可用
+     */
     public void initDiskCache(Context context) {
         if (context == null) return;
         try {
@@ -100,11 +103,35 @@ public class CoverLoader {
             if (!diskCacheDir.exists()) {
                 diskCacheDir.mkdirs();
             }
-            // 无封面黑名单持久化文件
+            // 无封面黑名单持久化文件(小文件,保持在内部存储)
             noCoverFile = new File(cacheDir, "no_cover_list.txt");
             loadNoCoverSet();
         } catch (Exception e) {
             Log.w(TAG, "initDiskCache failed", e);
+        }
+    }
+
+    /**
+     * 切换磁盘缓存目录到U盘(车机内部eMMC比U盘慢时调用)
+     * 在 loadMusic() 获取到 syncPath 后调用
+     * 切换后:新提取的封面写入U盘,读取也从U盘读(比内部eMMC快)
+     *
+     * @param dir U盘上的缓存目录(如 /storage/XXXX/CaptivaMusic/.cover_cache)
+     */
+    public void setDiskCacheDir(File dir) {
+        if (dir == null) return;
+        try {
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            if (dir.canWrite()) {
+                diskCacheDir = dir;
+                Log.d(TAG, "磁盘缓存切换到U盘: " + dir.getAbsolutePath());
+            } else {
+                Log.w(TAG, "U盘缓存目录不可写,保持内部存储: " + dir.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "setDiskCacheDir failed", e);
         }
     }
 

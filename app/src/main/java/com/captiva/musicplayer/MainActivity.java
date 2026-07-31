@@ -1862,6 +1862,12 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
+        // 封面磁盘缓存切换到U盘(车机内部eMMC比U盘慢)
+        if (syncPath != null && !syncPath.isEmpty()) {
+            File usbCoverCacheDir = new File(syncPath, ".cover_cache");
+            CoverLoader.getInstance().setDiskCacheDir(usbCoverCacheDir);
+        }
+
         // 0. 优先从本地缓存加载(秒开,完全不读U盘)
         //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
         //    新增/删除歌曲需手动"刷新列表"(设置菜单)
@@ -1893,7 +1899,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             // 缓存路径不扫描U盘(用户要求:点击歌曲才读U盘)
-            // 后台预提取所有封面到内部存储(后续滚动只读内部缓存)
+            // 后台预提取所有封面到U盘缓存(车机eMMC比U盘慢,缓存放U盘更快)
             int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
             CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
             // 仅启动后台服务器同步(如果配置了Navidrome)
