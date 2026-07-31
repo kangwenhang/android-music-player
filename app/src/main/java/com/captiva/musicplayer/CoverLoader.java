@@ -10,16 +10,17 @@ import android.util.Log;
 import android.util.LruCache;
 import android.widget.ImageView;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -27,44 +28,42 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 封面图异步加载器(优化版)
- * - 三级缓存:内存LruCache → 磁盘缓存 → 网络/文件加载
- * - 本地歌曲:从嵌入式专辑封面提取(MediaMetadataRetriever)
- * - Navidrome 歌曲:从 getCoverArt URL 下载
- * - 磁盘缓存避免重复网络请求,大幅提升二次加载速度
  *
- * 滑动性能优化:
- * - 使用 ThreadPoolExecutor 管理队列,滑动时自动清理积压请求
- * - 磁盘缓存解码使用采样率+RGB_565,避免解码全尺寸大图
- * - 支持暂停/恢复加载(快速滑动时暂停,停止后恢复)
- * - 清理磁盘缓存降频,避免每次保存都遍历文件
+ * 核心优化:预提取封面到内部存储,滚动时只读内部缓存
+ * - 同步/扫描后调用 preloadAllCovers() 将U盘封面提取到内部磁盘缓存
+ * - 滚动时开启 cacheOnlyMode,只从内存/磁盘缓存读,不碰U盘
+ * - 停止滚动后关闭 cacheOnlyMode,补加载缺失封面
+ * - 无封面黑名单持久化,避免重启后重复读U盘
+ *
+ * 三级缓存:内存LruCache → 磁盘缓存(内部存储) → 网络/U盘加载
  */
 public class CoverLoader {
 
     private static final String TAG = "CoverLoader";
     private static final int CACHE_SIZE = 4 * 1024 * 1024; // 4MB内存缓存(车机内存小)
     private static final String DISK_CACHE_DIR = "cover_cache";
-    private static final long DISK_CACHE_MAX_SIZE = 30 * 1024 * 1024; // 30MB磁盘缓存
+    private static final long DISK_CACHE_MAX_SIZE = 50 * 1024 * 1024; // 50MB磁盘缓存(预提取需要更大)
 
-    /** 队列积压超过此数量时,清空旧请求(避免卡顿) */
-    private static final int MAX_QUEUE_SIZE = 15;
     /** 每隔多少次保存才检查一次磁盘缓存大小 */
     private static final int CLEAN_INTERVAL = 10;
 
     private static CoverLoader instance;
 
     private final LruCache<String, Bitmap> cache;
-    /** 正在加载中的回调集合,防止重复请求 */
-    private final Map<String, BitmapCallback> pendingCallbacks = new HashMap<>();
     private final ThreadPoolExecutor executor;
     private final Handler mainHandler;
     private File diskCacheDir;
 
-    /** 是否暂停加载(快速滑动时暂停,减少IO压力) */
-    private volatile boolean paused = false;
+    /** 仅缓存模式:只从内存/磁盘缓存读,不读U盘/网络(滚动时开启) */
+    private volatile boolean cacheOnlyMode = false;
     /** 保存计数器(降频清理磁盘缓存) */
     private int saveCount = 0;
     /** 已确认无封面的歌曲 key 集合,避免重复尝试 MediaMetadataRetriever(U盘IO极慢) */
     private final Set<String> noCoverSet = new HashSet<>();
+    /** 无封面黑名单文件(持久化,避免重启后重复读U盘) */
+    private File noCoverFile;
+    /** 预提取是否正在运行 */
+    private volatile boolean preloading = false;
 
     private CoverLoader() {
         cache = new LruCache<String, Bitmap>(CACHE_SIZE) {
@@ -79,7 +78,6 @@ public class CoverLoader {
             }
         };
         // 车机性能弱,只用1个线程加载封面,避免OOM
-        // 使用 ThreadPoolExecutor 以便管理队列(清理积压请求)
         executor = new ThreadPoolExecutor(
                 1, 1, 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<Runnable>());
@@ -102,42 +100,173 @@ public class CoverLoader {
             if (!diskCacheDir.exists()) {
                 diskCacheDir.mkdirs();
             }
+            // 无封面黑名单持久化文件
+            noCoverFile = new File(cacheDir, "no_cover_list.txt");
+            loadNoCoverSet();
         } catch (Exception e) {
             Log.w(TAG, "initDiskCache failed", e);
         }
     }
 
+    // ==================== 无封面黑名单持久化 ====================
+
+    /** 从磁盘加载无封面黑名单 */
+    private void loadNoCoverSet() {
+        if (noCoverFile == null || !noCoverFile.exists()) return;
+        BufferedReader reader = null;
+        try {
+            reader = new BufferedReader(new InputStreamReader(new FileInputStream(noCoverFile), "UTF-8"));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (!line.isEmpty()) {
+                    noCoverSet.add(line);
+                }
+            }
+            Log.d(TAG, "加载无封面黑名单: " + noCoverSet.size() + " 项");
+        } catch (Exception e) {
+            Log.w(TAG, "loadNoCoverSet failed", e);
+        } finally {
+            if (reader != null) { try { reader.close(); } catch (Exception ignored) {} }
+        }
+    }
+
+    /** 保存无封面黑名单到磁盘 */
+    private synchronized void saveNoCoverSet() {
+        if (noCoverFile == null) return;
+        FileOutputStream fos = null;
+        try {
+            fos = new FileOutputStream(noCoverFile);
+            StringBuilder sb = new StringBuilder();
+            for (String key : noCoverSet) {
+                sb.append(key).append('\n');
+            }
+            fos.write(sb.toString().getBytes("UTF-8"));
+            fos.flush();
+        } catch (Exception e) {
+            Log.w(TAG, "saveNoCoverSet failed", e);
+        } finally {
+            if (fos != null) { try { fos.close(); } catch (Exception ignored) {} }
+        }
+    }
+
+    // ==================== 模式控制 ====================
+
     /**
-     * 设置暂停/恢复加载
-     * 快速滑动时暂停,停止滑动后恢复
-     * 暂停时清空积压队列,恢复时只加载当前可见项
+     * 设置仅缓存模式(滚动时开启)
+     * 开启后:只从内存/磁盘缓存读封面,不触发U盘/网络IO
+     * 关闭后:恢复正常加载(可从U盘/网络读取)
      */
-    public void setPaused(boolean paused) {
-        this.paused = paused;
-        if (paused) {
-            // 暂停时清空积压队列(这些请求对应的item可能已经滑出屏幕)
+    public void setCacheOnlyMode(boolean cacheOnly) {
+        this.cacheOnlyMode = cacheOnly;
+        if (cacheOnly) {
+            // 清空积压队列(避免之前的U盘读取请求继续执行)
             executor.getQueue().clear();
-            Log.d(TAG, "封面加载已暂停,清空积压队列(" + executor.getQueue().size() + "项)");
         }
     }
 
     /**
      * 清除无封面缓存(黑名单)
-     * 当所有数据加载完成后调用,允许重新尝试加载封面
-     * (新同步的文件可能带了封面,之前扫描时还没有)
+     * 同步新文件后调用,允许重新尝试加载封面
      */
     public void clearNoCoverCache() {
         if (!noCoverSet.isEmpty()) {
             Log.d(TAG, "清除无封面缓存(" + noCoverSet.size() + "项),允许重新尝试");
             noCoverSet.clear();
+            saveNoCoverSet();
         }
     }
 
+    // ==================== 预提取所有封面到内部存储 ====================
+
+    /**
+     * 后台预提取所有歌曲封面到内部磁盘缓存
+     * 在同步/扫描完成后调用,后续滚动列表时只从内部存储读取
+     *
+     * @param songs 歌曲列表
+     * @param coverSize 列表封面尺寸(px)
+     */
+    public void preloadAllCovers(final List<MusicBean> songs, final int coverSize) {
+        if (songs == null || songs.isEmpty()) return;
+        if (preloading) {
+            Log.d(TAG, "预提取已在进行中,跳过");
+            return;
+        }
+        preloading = true;
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int total = songs.size();
+                int cached = 0;
+                int noCover = 0;
+                int alreadyCached = 0;
+                long startTime = System.currentTimeMillis();
+
+                for (int i = 0; i < total; i++) {
+                    MusicBean bean = songs.get(i);
+                    String key = getCacheKey(bean);
+                    if (key == null) continue;
+
+                    // 已在内存缓存
+                    if (cache.get(key) != null) {
+                        alreadyCached++;
+                        continue;
+                    }
+
+                    // 已在磁盘缓存
+                    String fileName = md5(key) + ".cover";
+                    File diskFile = new File(diskCacheDir, fileName);
+                    if (diskFile.exists()) {
+                        alreadyCached++;
+                        continue;
+                    }
+
+                    // 已确认无封面
+                    if (noCoverSet.contains(key)) {
+                        noCover++;
+                        continue;
+                    }
+
+                    // 从U盘/网络提取封面,写入磁盘缓存
+                    Bitmap bmp;
+                    if (bean.isNetwork()) {
+                        bmp = loadNetworkCover(bean, coverSize, false);
+                    } else {
+                        bmp = loadLocalCover(bean, coverSize, false);
+                    }
+
+                    if (bmp != null) {
+                        saveToDiskCache(key, bmp);
+                        // 同时放入内存缓存(列表可见时直接命中)
+                        cache.put(key, bmp);
+                        cached++;
+                    } else {
+                        // 确认无封面,加入黑名单
+                        noCoverSet.add(key);
+                        noCover++;
+                    }
+                }
+
+                // 持久化无封面黑名单
+                if (noCover > 0) {
+                    saveNoCoverSet();
+                }
+
+                long elapsed = System.currentTimeMillis() - startTime;
+                Log.d(TAG, "预提取封面完成: 共" + total + "首, 新提取" + cached
+                        + ", 已缓存" + alreadyCached + ", 无封面" + noCover
+                        + ", 耗时" + elapsed + "ms");
+                preloading = false;
+            }
+        }, "CoverPreload").start();
+    }
+
+    // ==================== 封面加载 ====================
+
     /**
      * 异步加载封面并设置到 ImageView
-     * @param bean  歌曲信息
-     * @param iv    目标 ImageView
-     * @param size  期望尺寸(px),用于缩放
+     * cacheOnlyMode 开启时:只从内存/磁盘缓存读,不碰U盘/网络
      */
     public void load(MusicBean bean, final ImageView iv, final int size) {
         if (bean == null || iv == null) {
@@ -169,27 +298,39 @@ public class CoverLoader {
         iv.setBackgroundResource(R.drawable.bg_cover_placeholder);
         iv.setTag(key);
 
-        // 2. 暂停模式下不提交新请求(等待滑动停止后由RecyclerView重新绑定触发)
-        if (paused) {
-            return;
-        }
-
-        // 3. 队列积压过多时,清空旧请求(这些大概率是滑出屏幕的item)
-        if (executor.getQueue().size() > MAX_QUEUE_SIZE) {
-            executor.getQueue().clear();
-            Log.d(TAG, "队列积压过多,清空旧请求");
-        }
-
+        // 2. cacheOnlyMode:只从磁盘缓存读,不碰U盘
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                // 先查磁盘缓存
+                Bitmap diskCached = loadFromDiskCache(key, size, false);
+                if (diskCached != null) {
+                    cache.put(key, diskCached);
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            Object tag = iv.getTag();
+                            if (tag != null && tag.equals(key)) {
+                                iv.setBackgroundResource(0);
+                                iv.setImageBitmap(cache.get(key));
+                            }
+                        }
+                    });
+                    return;
+                }
+
+                // cacheOnlyMode:磁盘缓存没有就显示占位图,不读U盘
+                if (cacheOnlyMode) {
+                    return;
+                }
+
+                // 非 cacheOnlyMode:从U盘/网络加载
                 final Bitmap bmp = loadBitmap(bean, key, size, false);
                 if (bmp != null) {
                     cache.put(key, bmp);
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            // tag 校验:确保 ImageView 还在显示同一首歌
                             Object tag = iv.getTag();
                             if (tag != null && tag.equals(key)) {
                                 iv.setBackgroundResource(0);
@@ -204,17 +345,27 @@ public class CoverLoader {
 
     /**
      * 预加载封面到内存缓存(不绑定 ImageView)
-     * 用于滑动停止后提前加载即将可见的封面,减少后续滚动时的U盘IO
+     * 滑动停止后提前加载即将可见的封面
+     * cacheOnlyMode 时只从磁盘缓存读
      */
     public void preload(MusicBean bean, int size) {
         if (bean == null) return;
         final String key = getCacheKey(bean);
         if (key == null || noCoverSet.contains(key)) return;
         if (cache.get(key) != null) return; // 已在内存缓存中
-        if (paused) return;
+
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                // 先查磁盘缓存
+                Bitmap diskCached = loadFromDiskCache(key, size, false);
+                if (diskCached != null) {
+                    cache.put(key, diskCached);
+                    return;
+                }
+                // cacheOnlyMode:不读U盘
+                if (cacheOnlyMode) return;
+                // 正常模式:从U盘/网络加载
                 final Bitmap bmp = loadBitmap(bean, key, size, false);
                 if (bmp != null) {
                     cache.put(key, bmp);
@@ -224,10 +375,8 @@ public class CoverLoader {
     }
 
     /**
-     * 异步加载封面 Bitmap(不绑定 ImageView)
-     * @param bean     歌曲信息
-     * @param size     期望尺寸
-     * @param callback 回调
+     * 异步加载封面 Bitmap(不绑定 ImageView,用于歌词背景等)
+     * 不受 cacheOnlyMode 限制(需要完整封面)
      */
     public void loadBitmap(MusicBean bean, final int size, final BitmapCallback callback) {
         loadBitmapInternal(bean, size, callback, false);
@@ -235,9 +384,6 @@ public class CoverLoader {
 
     /**
      * 异步加载封面 Bitmap(全分辨率,不限制200px,用于歌词背景)
-     * @param bean     歌曲信息
-     * @param size     期望尺寸
-     * @param callback 回调
      */
     public void loadBitmapFull(MusicBean bean, final int size, final BitmapCallback callback) {
         loadBitmapInternal(bean, size, callback, true);
@@ -297,7 +443,7 @@ public class CoverLoader {
         return null;
     }
 
-    /** 实际加载 Bitmap */
+    /** 实际加载 Bitmap(内存→磁盘→U盘/网络) */
     private Bitmap loadBitmap(MusicBean bean, String key, int size, boolean fullRes) {
         // 先查磁盘缓存
         Bitmap diskCached = loadFromDiskCache(key, size, fullRes);
@@ -311,7 +457,7 @@ public class CoverLoader {
             bmp = loadLocalCover(bean, size, fullRes);
         }
         if (bmp != null) {
-            // 写入磁盘缓存(后台线程,不阻塞UI)
+            // 写入磁盘缓存
             saveToDiskCache(key, bmp);
         } else {
             // 确认无封面,加入黑名单避免重复尝试(U盘IO极慢)
@@ -453,7 +599,6 @@ public class CoverLoader {
             return null;
         } catch (OutOfMemoryError e) {
             Log.e(TAG, "loadLocalCover OOM: " + bean.getData(), e);
-            // 清理内存缓存
             cache.evictAll();
             return null;
         } finally {
@@ -500,7 +645,6 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
-            // 全分辨率模式不限制尺寸;列表缩略图限制200px
             int targetSize = fullRes ? size : Math.min(size, 200);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;

@@ -366,17 +366,17 @@ public class MainActivity extends AppCompatActivity {
         // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
         rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
-        // 滑动状态监听:快速滑动(惯性)时暂停封面加载,停止后恢复
-        // 避免大量 MediaMetadataRetriever 调用阻塞单线程,导致卡顿
+        // 滑动状态监听:拖拽和惯性滑动时开启cacheOnlyMode(只读内部缓存),停止后关闭
         rvList.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
-                if (newState == RecyclerView.SCROLL_STATE_SETTLING) {
-                    // 惯性滑动中:暂停封面加载,清空积压队列
-                    CoverLoader.getInstance().setPaused(true);
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING
+                        || newState == RecyclerView.SCROLL_STATE_SETTLING) {
+                    // 滑动中:只从内部存储读封面,不碰U盘
+                    CoverLoader.getInstance().setCacheOnlyMode(true);
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    // 停止滑动:恢复加载,刷新当前可见项并预加载附近封面
-                    CoverLoader.getInstance().setPaused(false);
+                    // 停止滑动:允许从U盘补加载缺失封面
+                    CoverLoader.getInstance().setCacheOnlyMode(false);
                     LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
                     if (lm == null) return;
                     int firstVisible = lm.findFirstVisibleItemPosition();
@@ -386,7 +386,7 @@ public class MainActivity extends AppCompatActivity {
                     // 刷新当前可见项(触发封面重新加载)
                     adapter.notifyItemRangeChanged(firstVisible, lastVisible - firstVisible + 1);
 
-                    // 预加载上下各 10 个 item 的封面(U盘场景下提前缓存,减少后续滚动IO)
+                    // 预加载上下各 10 个 item 的封面
                     int preloadRange = 10;
                     int preloadStart = Math.max(0, firstVisible - preloadRange);
                     int preloadEnd = Math.min(adapter.getItemCount() - 1, lastVisible + preloadRange);
@@ -1791,6 +1791,9 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             // 缓存路径不扫描U盘(用户要求:点击歌曲才读U盘)
+            // 后台预提取所有封面到内部存储(后续滚动只读内部缓存)
+            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
             // 仅启动后台服务器同步(如果配置了Navidrome)
             startBackgroundSync();
             return;
@@ -1899,6 +1902,12 @@ public class MainActivity extends AppCompatActivity {
 
                         // 保存到缓存(下次秒开) — 强制保存(内容可能变化但数量不变)
                         localMusicCache.forceSaveAsync(musicList);
+
+                        // 清除无封面黑名单(重新扫描后可能有新封面)
+                        CoverLoader.getInstance().clearNoCoverCache();
+                        // 预提取所有封面到内部存储
+                        int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                        CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
 
                         int diff = fullList.size() - oldCount;
                         String msg;
@@ -2029,6 +2038,9 @@ public class MainActivity extends AppCompatActivity {
 
                         // 保存缓存(下次秒开) — 强制保存(扫描后内容可能变化)
                         localMusicCache.forceSaveAsync(musicList);
+                        // 扫描后预提取新歌曲的封面到内部存储
+                        int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                        CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
                     }
                 });
 
@@ -2169,6 +2181,9 @@ public class MainActivity extends AppCompatActivity {
                                 refreshSyncList();
                                 // 同步完成:清除无封面黑名单,允许重新尝试(新文件可能带封面)
                                 CoverLoader.getInstance().clearNoCoverCache();
+                                // 预提取新同步歌曲的封面到内部存储
+                                int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                                CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
                                 if (downloaded > 0) {
                                     tvSyncStatus.setText("已同步 +" + downloaded + " 首");
                                 } else {
