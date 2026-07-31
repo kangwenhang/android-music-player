@@ -1887,11 +1887,11 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 封面磁盘缓存切换到U盘(车机内部eMMC比U盘慢)
-        if (syncPath != null && !syncPath.isEmpty()) {
-            File usbCoverCacheDir = new File(syncPath, ".cover_cache");
-            CoverLoader.getInstance().setDiskCacheDir(usbCoverCacheDir);
-        }
+        // 封面磁盘缓存:使用内部存储(eMMC)
+        // v3.0优化后滑动时不读磁盘(cacheOnlyMode),磁盘速度只影响停止滑动后补加载
+        // 内部eMMC延迟更稳定,避免USB偶发100-190ms尖峰
+        // (之前切U盘是因为滑动时还在读磁盘,现在滑动时零磁盘读取)
+        // CoverLoader.initDiskCache() 已默认使用 context.getCacheDir(),无需切换
 
         // 初始化性能日志(写入U盘 perf_log.txt)
         PerfLogger.init(syncPath);
