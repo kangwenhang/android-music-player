@@ -1887,17 +1887,16 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 封面磁盘缓存切换到U盘(车机内部eMMC比U盘慢)
-        if (syncPath != null && !syncPath.isEmpty()) {
-            File usbCoverCacheDir = new File(syncPath, ".cover_cache");
-            CoverLoader.getInstance().setDiskCacheDir(usbCoverCacheDir);
-        }
+        // 封面磁盘缓存:使用内部存储(eMMC)
+        // v3.0优化后滑动时不读磁盘(cacheOnlyMode),磁盘速度只影响停止滑动后补加载
+        // 内部eMMC延迟更稳定,避免USB偶发100-190ms尖峰
+        // (之前切U盘是因为滑动时还在读磁盘,现在滑动时零磁盘读取)
+        // CoverLoader.initDiskCache() 已默认使用 context.getCacheDir(),无需切换
 
-        // 初始化性能日志(写入U盘 perf_log.txt)
-        PerfLogger.init(syncPath);
-        // 启动定时日志刷新(帧率监控仅滑动时启用,减少2核设备开销)
-        handler.post(logFlushTask);
-        PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
+        // 性能日志已关闭(正式版无需日志,需要调试时取消注释下行)
+        // PerfLogger.init(syncPath);
+        // handler.post(logFlushTask);
+        // PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
 
         // 0. 优先从本地缓存加载(秒开,完全不读U盘)
         //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
