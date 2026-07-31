@@ -374,8 +374,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = LayoutInflater.from(parent.getContext())
                 .inflate(R.layout.item_music, parent, false);
-        return new VH(v);
+        return new VH(v, this);
     }
+
+    /** 复用的 StringBuilder(避免每次 onBind 创建新 String 对象,减少 GC) */
+    private final StringBuilder bindBuffer = new StringBuilder(64);
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
@@ -386,7 +389,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         MusicBean bean = data.get(position);
         holder.tvTitle.setText(bean.getTitle());
-        holder.tvArtist.setText(bean.getArtist() + " · " + MusicBean.formatDuration(bean.getDuration()));
+
+        // 复用 StringBuilder 拼接副标题(避免 String + 创建临时对象)
+        bindBuffer.setLength(0);
+        bindBuffer.append(bean.getArtist())
+                  .append(" · ")
+                  .append(MusicBean.formatDuration(bean.getDuration()));
+        holder.tvArtist.setText(bindBuffer);
         holder.tvIndex.setText(String.valueOf(position + 1));
 
         // 使用缓存的颜色(避免每次 bind 调用 ContextCompat.getColor)
@@ -399,17 +408,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 使用缓存的封面尺寸
         CoverLoader.getInstance().load(bean, holder.ivCover, coverSizeList);
 
-        holder.itemView.setOnClickListener(v -> {
-            if (listener != null) {
-                int pos = holder.getAdapterPosition();
-                if (pos >= 0 && pos < data.size()) {
-                    listener.onItemClick(pos, data.get(pos));
-                }
-            }
-        });
+        // 点击监听器在 VH 构造时设置,这里不需要重复创建(减少 GC)
 
-        // 检查是否需要加载更多(用 post 延迟执行,避免在 onBindViewHolder 布局计算时调用 notifyItemRangeInserted 抛出 IllegalStateException)
-        holder.itemView.post(() -> checkLoadMore(position));
+        // 检查是否需要加载更多(用 holder 的 post,Runnable 在 VH 中复用)
+        holder.postCheckLoadMore();
 
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("onBind", System.currentTimeMillis() - t0);
@@ -427,14 +429,44 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         TextView tvTitle;
         TextView tvArtist;
         View vSource;
+        MusicAdapter adapter;
 
-        VH(@NonNull View itemView) {
+        VH(@NonNull View itemView, MusicAdapter adapter) {
             super(itemView);
+            this.adapter = adapter;
             tvIndex = itemView.findViewById(R.id.tv_index);
             ivCover = itemView.findViewById(R.id.iv_cover);
             tvTitle = itemView.findViewById(R.id.tv_title);
             tvArtist = itemView.findViewById(R.id.tv_artist);
             vSource = itemView.findViewById(R.id.v_source);
+
+            // 点击监听器只创建一次(避免每次 onBindViewHolder 创建新 lambda → GC)
+            itemView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (adapter.listener != null) {
+                        int pos = getAdapterPosition();
+                        if (pos >= 0 && pos < adapter.data.size()) {
+                            adapter.listener.onItemClick(pos, adapter.data.get(pos));
+                        }
+                    }
+                }
+            });
+        }
+
+        /** 复用的 checkLoadMore Runnable(避免每次 post 创建新对象 → GC) */
+        private final Runnable loadMoreRunnable = new Runnable() {
+            @Override
+            public void run() {
+                int pos = getAdapterPosition();
+                if (pos >= 0) {
+                    adapter.checkLoadMore(pos);
+                }
+            }
+        };
+
+        void postCheckLoadMore() {
+            itemView.post(loadMoreRunnable);
         }
     }
 }
