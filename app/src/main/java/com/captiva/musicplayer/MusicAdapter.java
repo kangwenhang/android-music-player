@@ -352,6 +352,28 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return filteredData.get(position);
     }
 
+    /**
+     * 刷新指定范围内 item 的封面(不触发 onBindViewHolder,直接查找 ImageView)
+     * 停止滑动后调用,避免 notifyItemRangeChanged 导致全部可见项重新绑定(46ms 尖峰)
+     * @param rv RecyclerView(用于查找持有者)
+     * @param start 起始位置
+     * @param end 结束位置(含)
+     * @param coverSize 封面尺寸
+     */
+    public void refreshCovers(RecyclerView rv, int start, int end, int coverSize) {
+        if (rv == null) return;
+        for (int i = start; i <= end; i++) {
+            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(i);
+            if (vh instanceof VH) {
+                VH holder = (VH) vh;
+                if (i >= 0 && i < data.size()) {
+                    MusicBean bean = data.get(i);
+                    CoverLoader.getInstance().load(bean, holder.ivCover, coverSize);
+                }
+            }
+        }
+    }
+
     public void setOnItemClickListener(OnItemClickListener l) {
         this.listener = l;
     }
@@ -374,18 +396,28 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = LayoutInflater.from(parent.getContext())
                 .inflate(R.layout.item_music, parent, false);
-        return new VH(v);
+        return new VH(v, this);
     }
+
+    /** 复用的 StringBuilder(避免每次 onBind 创建新 String 对象,减少 GC) */
+    private final StringBuilder bindBuffer = new StringBuilder(64);
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
+        long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         // 安全检查:防止 position 越界
         if (position < 0 || position >= data.size()) {
             return;
         }
         MusicBean bean = data.get(position);
         holder.tvTitle.setText(bean.getTitle());
-        holder.tvArtist.setText(bean.getArtist() + " · " + MusicBean.formatDuration(bean.getDuration()));
+
+        // 复用 StringBuilder 拼接副标题(避免 String + 创建临时对象)
+        bindBuffer.setLength(0);
+        bindBuffer.append(bean.getArtist())
+                  .append(" · ")
+                  .append(MusicBean.formatDuration(bean.getDuration()));
+        holder.tvArtist.setText(bindBuffer);
         holder.tvIndex.setText(String.valueOf(position + 1));
 
         // 使用缓存的颜色(避免每次 bind 调用 ContextCompat.getColor)
@@ -398,17 +430,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 使用缓存的封面尺寸
         CoverLoader.getInstance().load(bean, holder.ivCover, coverSizeList);
 
-        holder.itemView.setOnClickListener(v -> {
-            if (listener != null) {
-                int pos = holder.getAdapterPosition();
-                if (pos >= 0 && pos < data.size()) {
-                    listener.onItemClick(pos, data.get(pos));
-                }
-            }
-        });
+        // 点击监听器在 VH 构造时设置,这里不需要重复创建(减少 GC)
 
-        // 检查是否需要加载更多(用 post 延迟执行,避免在 onBindViewHolder 布局计算时调用 notifyItemRangeInserted 抛出 IllegalStateException)
-        holder.itemView.post(() -> checkLoadMore(position));
+        // 检查是否需要加载更多(用 holder 的 post,Runnable 在 VH 中复用)
+        holder.postCheckLoadMore();
+
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("onBind", System.currentTimeMillis() - t0);
+        }
     }
 
     @Override
@@ -422,14 +451,44 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         TextView tvTitle;
         TextView tvArtist;
         View vSource;
+        MusicAdapter adapter;
 
-        VH(@NonNull View itemView) {
+        VH(@NonNull View itemView, MusicAdapter adapter) {
             super(itemView);
+            this.adapter = adapter;
             tvIndex = itemView.findViewById(R.id.tv_index);
             ivCover = itemView.findViewById(R.id.iv_cover);
             tvTitle = itemView.findViewById(R.id.tv_title);
             tvArtist = itemView.findViewById(R.id.tv_artist);
             vSource = itemView.findViewById(R.id.v_source);
+
+            // 点击监听器只创建一次(避免每次 onBindViewHolder 创建新 lambda → GC)
+            itemView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (adapter.listener != null) {
+                        int pos = getAdapterPosition();
+                        if (pos >= 0 && pos < adapter.data.size()) {
+                            adapter.listener.onItemClick(pos, adapter.data.get(pos));
+                        }
+                    }
+                }
+            });
+        }
+
+        /** 复用的 checkLoadMore Runnable(避免每次 post 创建新对象 → GC) */
+        private final Runnable loadMoreRunnable = new Runnable() {
+            @Override
+            public void run() {
+                int pos = getAdapterPosition();
+                if (pos >= 0) {
+                    adapter.checkLoadMore(pos);
+                }
+            }
+        };
+
+        void postCheckLoadMore() {
+            itemView.post(loadMoreRunnable);
         }
     }
 }

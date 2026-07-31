@@ -41,6 +41,8 @@ import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import android.view.Choreographer;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -50,8 +52,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * 主界面
@@ -67,6 +76,49 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private static final int REQ_STORAGE = 100;
+
+    /** TLS 1.2 SSLSocketFactory(安卓 4.2 默认禁用 TLS 1.2,需要手动启用) */
+    private SSLSocketFactory tls12Factory;
+
+    /**
+     * 创建 HTTPS 连接,安卓 4.2 及以下强制启用 TLS 1.2
+     * GitHub 及其镜像现在要求 TLS 1.2+,旧系统 SSL 握手会失败
+     */
+    private HttpURLConnection createConnection(String urlStr) throws Exception {
+        URL url = new URL(urlStr);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        if (conn instanceof HttpsURLConnection && Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            // 安卓 4.x 默认禁用 TLS 1.2,但底层 OpenSSL 支持,手动启用
+            if (tls12Factory == null) {
+                try {
+                    SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
+                    // 使用系统默认信任管理器
+                    sslContext.init(null, null, null);
+                    tls12Factory = sslContext.getSocketFactory();
+                    Log.d(TAG, "TLS 1.2 已启用");
+                } catch (Exception e) {
+                    Log.w(TAG, "TLS 1.2 启用失败,使用系统默认: " + e.getMessage());
+                }
+            }
+            if (tls12Factory != null) {
+                ((HttpsURLConnection) conn).setSSLSocketFactory(tls12Factory);
+            }
+        }
+        return conn;
+    }
+
+    /** 判断异常是否是 SSL/TLS 协议错误 */
+    private boolean isSslError(Throwable e) {
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) msg = "";
+        return e instanceof javax.net.ssl.SSLException
+                || msg.contains("SSL")
+                || msg.contains("TLS")
+                || msg.contains("handshake")
+                || msg.contains("unsupported protocol")
+                || msg.contains("SSLProtocolException");
+    }
 
     // UI - 列表区
     private RecyclerView rvList;
@@ -117,21 +169,50 @@ public class MainActivity extends AppCompatActivity {
     private int pendingSyncRefresh = 0;
     private static final int REFRESH_BATCH_SIZE = 5;
 
-    // 进度刷新(动态频率:播放时100ms高精度歌词同步,空闲时2000ms)
+    // 进度刷新(三档频率:播放200ms / 滑动500ms / 空闲2000ms)
     private final Handler handler = new Handler();
     private final Runnable progressTask = new Runnable() {
         @Override
         public void run() {
-            updateProgress();
-            updateLrc();
-            // 根据播放状态调整刷新频率
-            boolean playing = service != null && service.isPlaying();
-            handler.postDelayed(this, playing ? 100 : 2000);
+            if (!listScrolling) {
+                // 非滑动:正常更新进度和歌词
+                updateProgress();
+                updateLrc();
+                boolean playing = service != null && service.isPlaying();
+                handler.postDelayed(this, playing ? 200 : 2000);
+            } else {
+                // 滑动中:不更新内容,降低轮询频率(减少主线程消息队列压力)
+                handler.postDelayed(this, 500);
+            }
         }
     };
 
     /** 当前搜索关键词 */
     private String currentSearchQuery = "";
+
+    /** 列表正在滑动(暂停歌词/进度刷新,避免抢主线程导致卡顿) */
+    private volatile boolean listScrolling = false;
+
+    /** Choreographer 帧回调(性能监控:仅滑动时启用,减少非滑动时的开销) */
+    private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameTimeNanos) {
+            PerfLogger.onFrame(frameTimeNanos);
+            // 仅滑动时持续回调,停止滑动后自动停止(减少2核设备的帧回调开销)
+            if (listScrolling) {
+                Choreographer.getInstance().postFrameCallback(this);
+            }
+        }
+    };
+
+    /** 定时刷新日志到U盘(每10秒) */
+    private final Runnable logFlushTask = new Runnable() {
+        @Override
+        public void run() {
+            PerfLogger.dump();
+            handler.postDelayed(this, 10000);
+        }
+    };
 
     // 播放状态广播接收
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
@@ -366,31 +447,41 @@ public class MainActivity extends AppCompatActivity {
         // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
         rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
-        // 滑动状态监听:快速滑动(惯性)时暂停封面加载,停止后恢复
-        // 避免大量 MediaMetadataRetriever 调用阻塞单线程,导致卡顿
+        // 滑动状态监听:拖拽和惯性滑动时开启cacheOnlyMode(只读内部缓存),停止后关闭
         rvList.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
-                if (newState == RecyclerView.SCROLL_STATE_SETTLING) {
-                    // 惯性滑动中:暂停封面加载,清空积压队列
-                    CoverLoader.getInstance().setPaused(true);
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING
+                        || newState == RecyclerView.SCROLL_STATE_SETTLING) {
+                    // 滑动中:暂停封面U盘读取 + 暂停歌词渲染 + 暂停进度更新
+                    listScrolling = true;
+                    CoverLoader.getInstance().setCacheOnlyMode(true);
+                    lrcView.setSkipDraw(true);
+                    PerfLogger.setScrolling(true);
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
-                    // 停止滑动:恢复加载,刷新当前可见项并预加载附近封面
-                    CoverLoader.getInstance().setPaused(false);
+                    // 停止滑动:恢复一切
+                    listScrolling = false;
+                    CoverLoader.getInstance().setCacheOnlyMode(false);
+                    // 恢复歌词渲染(setSkipDraw(false) 会触发一次重绘)
+                    lrcView.setSkipDraw(false);
+                    PerfLogger.setScrolling(false);
+                    // 立即补一次进度和歌词(补偿滑动期间跳过的更新)
+                    updateProgress();
+                    updateLrc();
                     LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
                     if (lm == null) return;
                     int firstVisible = lm.findFirstVisibleItemPosition();
                     int lastVisible = lm.findLastVisibleItemPosition();
                     if (firstVisible < 0 || lastVisible < 0) return;
 
-                    // 刷新当前可见项(触发封面重新加载)
-                    adapter.notifyItemRangeChanged(firstVisible, lastVisible - firstVisible + 1);
+                    // 刷新可见项封面(直接查找 ImageView,不触发 onBindViewHolder → 消除 46ms 尖峰)
+                    int coverSizePx = (int) getResources().getDimension(R.dimen.cover_size_list);
+                    adapter.refreshCovers(rvList, firstVisible, lastVisible, coverSizePx);
 
-                    // 预加载上下各 10 个 item 的封面(U盘场景下提前缓存,减少后续滚动IO)
+                    // 预加载上下各 10 个 item 的封面(后台线程,不影响主线程)
                     int preloadRange = 10;
                     int preloadStart = Math.max(0, firstVisible - preloadRange);
                     int preloadEnd = Math.min(adapter.getItemCount() - 1, lastVisible + preloadRange);
-                    int coverSizePx = (int) getResources().getDimension(R.dimen.cover_size_list);
                     for (int i = preloadStart; i <= preloadEnd; i++) {
                         MusicBean bean = adapter.getFilteredItem(i);
                         if (bean != null) {
@@ -1029,7 +1120,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** GitHub 下载代理镜像(国内网络 github.com 经常连不上) */
     private static final String[] GITHUB_DL_MIRRORS = {
-        "",                          // 直连(优先)
+        "",                          // 直连 HTTPS(优先)
+        "http://ghproxy.net/",       // HTTP 镜像(SSL旧系统fallback)
         "https://ghproxy.net/",      // 镜像1
         "https://gh-proxy.com/",     // 镜像2
         "https://mirror.ghproxy.com/", // 镜像3
@@ -1047,9 +1139,11 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 HttpURLConnection conn = null;
                 try {
-                    // 尝试多个 API 地址(直连 + 镜像)
+                    // 尝试多个 API 地址(直连 + 镜像 + HTTP fallback)
                     String[] apiUrls = {
                         "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "http://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                         "https://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
@@ -1064,7 +1158,7 @@ public class MainActivity extends AppCompatActivity {
 
                     for (String apiUrl : apiUrls) {
                         try {
-                            conn = (HttpURLConnection) new URL(apiUrl).openConnection();
+                            conn = createConnection(apiUrl);
                             conn.setRequestMethod("GET");
                             conn.setRequestProperty("Accept", "application/vnd.github+json");
                             conn.setConnectTimeout(15000);
@@ -1095,7 +1189,11 @@ public class MainActivity extends AppCompatActivity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                if (finalErr != null) {
+                                if (finalErr != null && isSslError(finalErr)) {
+                                    Toast.makeText(MainActivity.this,
+                                            "检查更新失败: 系统 SSL/TLS 版本过旧\n无法连接 GitHub,请手动下载更新",
+                                            Toast.LENGTH_LONG).show();
+                                } else if (finalErr != null) {
                                     Toast.makeText(MainActivity.this,
                                             "检查更新失败: 网络无法连接GitHub\n" + finalErr.getMessage(),
                                             Toast.LENGTH_LONG).show();
@@ -1235,8 +1333,8 @@ public class MainActivity extends AppCompatActivity {
         sd.body.addView(createInfoCard(msg.toString()));
 
         if (apkUrl != null && !apkUrl.isEmpty()) {
-            // 有 APK 直链,应用内下载并显示进度条
-            Button btnDownload = createDialogButton("下载更新", true);
+            // 有 APK 直链:应用内下载 + 浏览器下载备选
+            Button btnDownload = createDialogButton("自动下载", true);
             btnDownload.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -1246,15 +1344,23 @@ public class MainActivity extends AppCompatActivity {
             });
             sd.buttons.addView(btnDownload);
 
-            Button btnDetails = createDialogButton("查看详情", false);
-            btnDetails.setOnClickListener(new View.OnClickListener() {
+            Button btnBrowser = createDialogButton("浏览器下载", false);
+            btnBrowser.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
-                    startActivity(browserIntent);
+                    dRef[0].dismiss();
+                    // 尝试直接打开 APK 下载链接,浏览器通常有更好的证书支持
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
+                    try {
+                        startActivity(browserIntent);
+                    } catch (Exception e) {
+                        // 如果打不开 APK 链接,打开 Release 页面
+                        Intent releaseIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
+                        startActivity(releaseIntent);
+                    }
                 }
             });
-            sd.buttons.addView(btnDetails);
+            sd.buttons.addView(btnBrowser);
         } else {
             // 无 APK 直链,跳转到 Release 页面
             Button btnDetails = createDialogButton("查看详情", true);
@@ -1412,8 +1518,7 @@ public class MainActivity extends AppCompatActivity {
                     java.io.FileOutputStream fos = null;
                     try {
                         Log.d(TAG, "尝试下载(" + sourceName + "): " + tryUrl);
-                        URL url = new URL(tryUrl);
-                        conn = (HttpURLConnection) url.openConnection();
+                        conn = createConnection(tryUrl);
                         conn.setRequestMethod("GET");
                         conn.setRequestProperty("Accept", "application/octet-stream");
                         conn.setConnectTimeout(30000);
@@ -1504,9 +1609,31 @@ public class MainActivity extends AppCompatActivity {
                                 downloadDialog.dismiss();
                             }
                             String msg = finalErr != null ? finalErr.getMessage() : "未知错误";
-                            Toast.makeText(MainActivity.this,
-                                    "下载失败(所有镜像均不可用):\n" + msg,
-                                    Toast.LENGTH_LONG).show();
+                            if (finalErr != null && isSslError(finalErr)) {
+                                // SSL 错误:提示用浏览器下载(浏览器证书通常更新)
+                                new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("自动下载失败")
+                                        .setMessage("系统 SSL/TLS 版本过旧,无法连接 GitHub。\n\n建议:点击「浏览器下载」用系统浏览器打开下载链接,浏览器通常有更好的证书支持。")
+                                        .setPositiveButton("浏览器下载", new DialogInterface.OnClickListener() {
+                                            @Override
+                                            public void onClick(DialogInterface dialog, int which) {
+                                                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
+                                                try {
+                                                    startActivity(browserIntent);
+                                                } catch (Exception e) {
+                                                    Toast.makeText(MainActivity.this,
+                                                            "无法打开浏览器: " + e.getMessage(),
+                                                            Toast.LENGTH_SHORT).show();
+                                                }
+                                            }
+                                        })
+                                        .setNegativeButton("取消", null)
+                                        .show();
+                            } else {
+                                Toast.makeText(MainActivity.this,
+                                        "下载失败(所有镜像均不可用):\n" + msg,
+                                        Toast.LENGTH_LONG).show();
+                            }
                         }
                     });
                     return;
@@ -1760,6 +1887,18 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
+        // 封面磁盘缓存切换到U盘(车机内部eMMC比U盘慢)
+        if (syncPath != null && !syncPath.isEmpty()) {
+            File usbCoverCacheDir = new File(syncPath, ".cover_cache");
+            CoverLoader.getInstance().setDiskCacheDir(usbCoverCacheDir);
+        }
+
+        // 初始化性能日志(写入U盘 perf_log.txt)
+        PerfLogger.init(syncPath);
+        // 启动定时日志刷新(帧率监控仅滑动时启用,减少2核设备开销)
+        handler.post(logFlushTask);
+        PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
+
         // 0. 优先从本地缓存加载(秒开,完全不读U盘)
         //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
         //    新增/删除歌曲需手动"刷新列表"(设置菜单)
@@ -1791,6 +1930,9 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             // 缓存路径不扫描U盘(用户要求:点击歌曲才读U盘)
+            // 后台预提取所有封面到U盘缓存(车机eMMC比U盘慢,缓存放U盘更快)
+            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
             // 仅启动后台服务器同步(如果配置了Navidrome)
             startBackgroundSync();
             return;
@@ -1899,6 +2041,12 @@ public class MainActivity extends AppCompatActivity {
 
                         // 保存到缓存(下次秒开) — 强制保存(内容可能变化但数量不变)
                         localMusicCache.forceSaveAsync(musicList);
+
+                        // 清除无封面黑名单(重新扫描后可能有新封面)
+                        CoverLoader.getInstance().clearNoCoverCache();
+                        // 预提取所有封面到内部存储
+                        int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                        CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
 
                         int diff = fullList.size() - oldCount;
                         String msg;
@@ -2029,6 +2177,9 @@ public class MainActivity extends AppCompatActivity {
 
                         // 保存缓存(下次秒开) — 强制保存(扫描后内容可能变化)
                         localMusicCache.forceSaveAsync(musicList);
+                        // 扫描后预提取新歌曲的封面到内部存储
+                        int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                        CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
                     }
                 });
 
@@ -2169,6 +2320,9 @@ public class MainActivity extends AppCompatActivity {
                                 refreshSyncList();
                                 // 同步完成:清除无封面黑名单,允许重新尝试(新文件可能带封面)
                                 CoverLoader.getInstance().clearNoCoverCache();
+                                // 预提取新同步歌曲的封面到内部存储
+                                int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                                CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
                                 if (downloaded > 0) {
                                     tvSyncStatus.setText("已同步 +" + downloaded + " 首");
                                 } else {
@@ -2533,6 +2687,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // 停止帧率监控和日志刷新
+        Choreographer.getInstance().removeFrameCallback(frameCallback);
+        handler.removeCallbacks(logFlushTask);
+        PerfLogger.shutdown();
         // 取消自动同步
         cancelAutoSync();
         // 停止服务器状态监控
