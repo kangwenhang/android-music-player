@@ -16,11 +16,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 歌词显示控件
+ * 歌词显示控件(性能优化版)
  * - 封面作为底色背景(放大+模糊+暗化)
  * - 歌词叠加在封面之上
  * - 当前行高亮居中,上下行渐淡
  * - 支持自动换行(长歌词不截断)
+ *
+ * 性能优化:
+ * 1. skipInvalidate: 列表滑动时完全跳过重绘,保留上一帧(零 CPU 开销)
+ * 2. 全量布局缓存: 当前行+上下行所有 StaticLayout 缓存,避免每次 onDraw 重建
+ * 3. 零分配 onDraw: 用预分配数组替代 ArrayList,消除 GC 压力
  */
 public class LrcView extends View {
 
@@ -44,14 +49,88 @@ public class LrcView extends View {
     private float normalTextSize = 22f;
     /** 最多显示行数(含当前行,上下各3行) */
     private static final int MAX_VISIBLE_LINES = 7;
+    /** 上方/下方最多显示行数 */
+    private static final int HALF_LINES = MAX_VISIBLE_LINES / 2;
     /** 歌词左右边距 */
     private float lrcPadding = 24f;
 
-    /** 缓存的 StaticLayout(避免每次 onDraw 都重新创建,大幅减少 CPU 开销) */
+    // ==================== 性能优化: skipInvalidate ====================
+
+    /** 列表滑动时设为 true,跳过所有 invalidate 调用,保留上一帧(零开销) */
+    private volatile boolean skipInvalidate = false;
+
+    /**
+     * 设置是否跳过重绘(列表滑动时调用)
+     * 开启后: 所有 invalidate 被忽略,View 保留最后一帧,零 CPU 开销
+     * 关闭后: 立即 invalidate 一次,恢复实时更新
+     */
+    public void setSkipDraw(boolean skip) {
+        if (this.skipInvalidate != skip) {
+            this.skipInvalidate = skip;
+            if (!skip) {
+                // 恢复时:如果有封面但未创建模糊版本(滑动期间 setCoverBitmap 被调用),现在创建
+                if (coverBitmap != null && blurredBitmap == null) {
+                    try {
+                        blurredBitmap = createScaledBitmap(coverBitmap);
+                    } catch (OutOfMemoryError e) {
+                        blurredBitmap = null;
+                    }
+                }
+                // 强制重绘一次(补偿滑动期间跳过的所有更新)
+                superInvalidate();
+            }
+        }
+    }
+
+    /** 内部使用的 invalidate(不受 skipInvalidate 影响) */
+    private void superInvalidate() {
+        super.invalidate();
+    }
+
+    @Override
+    public void invalidate() {
+        if (skipInvalidate) return;
+        super.invalidate();
+    }
+
+    @Override
+    public void invalidate(Rect rect) {
+        if (skipInvalidate) return;
+        super.invalidate(rect);
+    }
+
+    @Override
+    public void invalidate(int l, int t, int r, int b) {
+        if (skipInvalidate) return;
+        super.invalidate(l, t, r, b);
+    }
+
+    // ==================== 性能优化: 全量布局缓存 ====================
+
+    /** 缓存所有可见行的 StaticLayout(避免每次 onDraw 创建) */
+    private final StaticLayout[] cachedUpLayouts = new StaticLayout[HALF_LINES];
+    private final float[] cachedUpHeights = new float[HALF_LINES];
+    private final StaticLayout[] cachedDownLayouts = new StaticLayout[HALF_LINES];
+    private final float[] cachedDownHeights = new float[HALF_LINES];
     private StaticLayout cachedCurrentLayout;
-    private int cachedCurrentIndex = -2;
-    private String cachedCurrentText;
-    private int cachedTextWidth = -1;
+    private float cachedCurrentHeight;
+
+    /** 缓存有效性检查: 当这些值变化时重建所有布局 */
+    private int cacheValidIndex = -2;
+    private int cacheValidWidth = -1;
+    private int cacheValidLrcSize = -1;
+
+    /** 使布局缓存失效 */
+    private void invalidateLayoutCache() {
+        cacheValidIndex = -2;
+        cacheValidWidth = -1;
+        cacheValidLrcSize = -1;
+        cachedCurrentLayout = null;
+        for (int i = 0; i < HALF_LINES; i++) {
+            cachedUpLayouts[i] = null;
+            cachedDownLayouts[i] = null;
+        }
+    }
 
     public LrcView(Context context) {
         super(context);
@@ -98,17 +177,22 @@ public class LrcView extends View {
             return;
         }
         coverBitmap = bmp;
-        // 生成放大模糊版本
+        // 回收旧的模糊封面
         if (blurredBitmap != null) {
             blurredBitmap.recycle();
             blurredBitmap = null;
         }
         if (coverBitmap != null) {
-            try {
-                blurredBitmap = createScaledBitmap(coverBitmap);
-            } catch (OutOfMemoryError e) {
-                // 车机内存不足时,直接用原图,不模糊
-                blurredBitmap = null;
+            if (skipInvalidate) {
+                // 滑动中:跳过 createScaledBitmap(耗时操作,会导致主线程卡顿)
+                // blurredBitmap 保持 null,setSkipDraw(false) 恢复时会补创建
+            } else {
+                try {
+                    blurredBitmap = createScaledBitmap(coverBitmap);
+                } catch (OutOfMemoryError e) {
+                    // 车机内存不足时,直接用原图,不模糊
+                    blurredBitmap = null;
+                }
             }
         }
         invalidate();
@@ -148,8 +232,7 @@ public class LrcView extends View {
             lrcList = list;
         }
         currentIndex = -1;
-        cachedCurrentLayout = null;
-        cachedCurrentIndex = -2;
+        invalidateLayoutCache();
         invalidate();
     }
 
@@ -174,6 +257,7 @@ public class LrcView extends View {
                 blurredBitmap = null;
             }
             blurredBitmap = createScaledBitmap(coverBitmap);
+            invalidateLayoutCache();
             invalidate();
         }
     }
@@ -202,6 +286,57 @@ public class LrcView extends View {
                 1.0f,
                 0f,
                 false);
+    }
+
+    /**
+     * 重建所有可见行的布局缓存
+     * 只在 currentIndex 或 textWidth 或 lrcList 变化时调用
+     */
+    private void rebuildLayoutCache(int textWidth) {
+        if (lrcList == null || lrcList.isEmpty()) {
+            invalidateLayoutCache();
+            return;
+        }
+
+        // 当前行
+        if (currentIndex < 0 || currentIndex >= lrcList.size()) {
+            currentIndex = 0;
+        }
+        String currentText = lrcList.get(currentIndex).getText();
+        currentPaint.setTextSize(currentTextSize);
+        cachedCurrentLayout = createTextLayout(currentText, currentPaint, textWidth);
+        cachedCurrentHeight = cachedCurrentLayout.getHeight();
+
+        // 上方行
+        normalPaint.setTextSize(normalTextSize);
+        int upCount = 0;
+        for (int i = currentIndex - 1; i >= 0 && upCount < HALF_LINES; i--) {
+            StaticLayout layout = createTextLayout(lrcList.get(i).getText(), normalPaint, textWidth);
+            cachedUpLayouts[upCount] = layout;
+            cachedUpHeights[upCount] = layout.getHeight();
+            upCount++;
+        }
+        // 清空多余的槽位
+        for (int i = upCount; i < HALF_LINES; i++) {
+            cachedUpLayouts[i] = null;
+        }
+
+        // 下方行
+        int downCount = 0;
+        for (int i = currentIndex + 1; i < lrcList.size() && downCount < HALF_LINES; i++) {
+            StaticLayout layout = createTextLayout(lrcList.get(i).getText(), normalPaint, textWidth);
+            cachedDownLayouts[downCount] = layout;
+            cachedDownHeights[downCount] = layout.getHeight();
+            downCount++;
+        }
+        // 清空多余的槽位
+        for (int i = downCount; i < HALF_LINES; i++) {
+            cachedDownLayouts[i] = null;
+        }
+
+        cacheValidIndex = currentIndex;
+        cacheValidWidth = textWidth;
+        cacheValidLrcSize = lrcList.size();
     }
 
     @Override
@@ -248,83 +383,50 @@ public class LrcView extends View {
         int textWidth = vw - (int)(lrcPadding * 2);
         if (textWidth <= 0) textWidth = vw;
 
+        // 检查缓存是否有效,无效则重建(避免每次 onDraw 都创建 StaticLayout)
+        if (cacheValidIndex != currentIndex
+                || cacheValidWidth != textWidth
+                || cacheValidLrcSize != lrcList.size()
+                || cachedCurrentLayout == null) {
+            rebuildLayoutCache(textWidth);
+        }
+
         // StaticLayout 从 x=0 开始绘制, ALIGN_CENTER 使文字在 [0, textWidth] 内居中
         // 所以文字中心在 textWidth/2 处, 要让文字中心对齐屏幕中心 cx,
         // 需 translate 到 cx - textWidth/2
         float layoutX = cx - textWidth / 2f;
 
-        // 计算当前行的高度(可能换行) — 使用缓存避免每次 onDraw 重建
-        String currentText = lrcList.get(currentIndex).getText();
-        currentPaint.setTextSize(currentTextSize);
-        if (cachedCurrentLayout == null
-                || cachedCurrentIndex != currentIndex
-                || (cachedCurrentText != null && !cachedCurrentText.equals(currentText))
-                || cachedTextWidth != textWidth) {
-            cachedCurrentLayout = createTextLayout(currentText, currentPaint, textWidth);
-            cachedCurrentIndex = currentIndex;
-            cachedCurrentText = currentText;
-            cachedTextWidth = textWidth;
-        }
-        StaticLayout currentLayout = cachedCurrentLayout;
-        float currentHeight = currentLayout.getHeight();
-
         // 当前行垂直居中:当前行的中心在 cy
-        // 当前行顶部在 cy - currentHeight/2
-        float currentTop = cy - currentHeight / 2f;
-
-        // 收集上方行(最多2行)
-        List<StaticLayout> upLayouts = new ArrayList<>();
-        List<Float> upHeights = new ArrayList<>();
-        normalPaint.setTextSize(normalTextSize);
-        int upCount = 0;
-        int upLimit = MAX_VISIBLE_LINES / 2;
-        for (int i = currentIndex - 1; i >= 0 && upCount < upLimit; i--) {
-            StaticLayout layout = createTextLayout(lrcList.get(i).getText(), normalPaint, textWidth);
-            upLayouts.add(layout);
-            upHeights.add((float) layout.getHeight());
-            upCount++;
-        }
-
-        // 收集下方行(最多2行)
-        List<StaticLayout> downLayouts = new ArrayList<>();
-        List<Float> downHeights = new ArrayList<>();
-        int downCount = 0;
-        int downLimit = MAX_VISIBLE_LINES / 2;
-        for (int i = currentIndex + 1; i < lrcList.size() && downCount < downLimit; i++) {
-            StaticLayout layout = createTextLayout(lrcList.get(i).getText(), normalPaint, textWidth);
-            downLayouts.add(layout);
-            downHeights.add((float) layout.getHeight());
-            downCount++;
-        }
+        float currentTop = cy - cachedCurrentHeight / 2f;
 
         // 从下往上绘制上方行(离当前行最近的先算位置)
         float drawY = currentTop;
-        for (int i = upLayouts.size() - 1; i >= 0; i--) {
-            float h = upHeights.get(i);
+        for (int i = 0; i < HALF_LINES; i++) {
+            if (cachedUpLayouts[i] == null) break;
+            float h = cachedUpHeights[i];
             drawY -= h + lineSpacing;
             if (drawY < -h) break; // 超出屏幕顶部
-            StaticLayout layout = upLayouts.get(i);
             canvas.save();
             canvas.translate(layoutX, drawY);
-            layout.draw(canvas);
+            cachedUpLayouts[i].draw(canvas);
             canvas.restore();
         }
 
         // 绘制当前行
         canvas.save();
         canvas.translate(layoutX, currentTop);
-        currentLayout.draw(canvas);
+        cachedCurrentLayout.draw(canvas);
         canvas.restore();
 
         // 绘制下方行
-        drawY = currentTop + currentHeight + lineSpacing;
-        for (int i = 0; i < downLayouts.size(); i++) {
-            float h = downHeights.get(i);
+        drawY = currentTop + cachedCurrentHeight + lineSpacing;
+        for (int i = 0; i < HALF_LINES; i++) {
+            if (cachedDownLayouts[i] == null) break;
+            float h = cachedDownHeights[i];
             if (drawY > vh) break; // 超出屏幕底部
-            StaticLayout layout = downLayouts.get(i);
             canvas.save();
             canvas.translate(layoutX, drawY);
-            layout.draw(canvas);
+            cachedDownLayouts[i].draw(canvas);
             canvas.restore();
             drawY += h + lineSpacing;
         }

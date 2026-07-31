@@ -167,19 +167,21 @@ public class MainActivity extends AppCompatActivity {
     private int pendingSyncRefresh = 0;
     private static final int REFRESH_BATCH_SIZE = 5;
 
-    // 进度刷新(动态频率:播放时100ms高精度歌词同步,空闲时2000ms)
+    // 进度刷新(三档频率:播放200ms / 滑动500ms / 空闲2000ms)
     private final Handler handler = new Handler();
     private final Runnable progressTask = new Runnable() {
         @Override
         public void run() {
-            // 列表滑动时跳过进度/歌词更新(避免与列表渲染抢主线程)
             if (!listScrolling) {
+                // 非滑动:正常更新进度和歌词
                 updateProgress();
                 updateLrc();
+                boolean playing = service != null && service.isPlaying();
+                handler.postDelayed(this, playing ? 200 : 2000);
+            } else {
+                // 滑动中:不更新内容,降低轮询频率(减少主线程消息队列压力)
+                handler.postDelayed(this, 500);
             }
-            // 根据播放状态调整刷新频率
-            boolean playing = service != null && service.isPlaying();
-            handler.postDelayed(this, playing ? 100 : 2000);
         }
     };
 
@@ -428,13 +430,16 @@ public class MainActivity extends AppCompatActivity {
             public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
                 if (newState == RecyclerView.SCROLL_STATE_DRAGGING
                         || newState == RecyclerView.SCROLL_STATE_SETTLING) {
-                    // 滑动中:暂停封面U盘读取 + 暂停歌词/进度更新(避免抢主线程)
+                    // 滑动中:暂停封面U盘读取 + 暂停歌词渲染 + 暂停进度更新
                     listScrolling = true;
                     CoverLoader.getInstance().setCacheOnlyMode(true);
+                    lrcView.setSkipDraw(true);
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     // 停止滑动:恢复一切
                     listScrolling = false;
                     CoverLoader.getInstance().setCacheOnlyMode(false);
+                    // 恢复歌词渲染(setSkipDraw(false) 会触发一次重绘)
+                    lrcView.setSkipDraw(false);
                     // 立即补一次进度和歌词(补偿滑动期间跳过的更新)
                     updateProgress();
                     updateLrc();
