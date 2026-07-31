@@ -193,12 +193,15 @@ public class MainActivity extends AppCompatActivity {
     /** 列表正在滑动(暂停歌词/进度刷新,避免抢主线程导致卡顿) */
     private volatile boolean listScrolling = false;
 
-    /** Choreographer 帧回调(性能监控:检测掉帧) */
+    /** Choreographer 帧回调(性能监控:仅滑动时启用,减少非滑动时的开销) */
     private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
         @Override
         public void doFrame(long frameTimeNanos) {
             PerfLogger.onFrame(frameTimeNanos);
-            Choreographer.getInstance().postFrameCallback(this);
+            // 仅滑动时持续回调,停止滑动后自动停止(减少2核设备的帧回调开销)
+            if (listScrolling) {
+                Choreographer.getInstance().postFrameCallback(this);
+            }
         }
     };
 
@@ -1892,9 +1895,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 初始化性能日志(写入U盘 perf_log.txt)
         PerfLogger.init(syncPath);
-        // 启动帧率监控(检测掉帧)
-        Choreographer.getInstance().postFrameCallback(frameCallback);
-        // 启动定时日志刷新
+        // 启动定时日志刷新(帧率监控仅滑动时启用,减少2核设备开销)
         handler.post(logFlushTask);
         PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
 

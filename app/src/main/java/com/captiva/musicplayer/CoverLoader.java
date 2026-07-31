@@ -40,7 +40,8 @@ import java.util.concurrent.TimeUnit;
 public class CoverLoader {
 
     private static final String TAG = "CoverLoader";
-    private static final int CACHE_SIZE = 4 * 1024 * 1024; // 4MB内存缓存(车机内存小)
+    // 内存缓存:256MB设备用12MB(约150张封面),够覆盖一轮滑动的可见+预加载范围
+    private static final int CACHE_SIZE = 12 * 1024 * 1024; // 12MB内存缓存
     private static final String DISK_CACHE_DIR = "cover_cache";
     private static final long DISK_CACHE_MAX_SIZE = 50 * 1024 * 1024; // 50MB磁盘缓存(预提取需要更大)
 
@@ -181,13 +182,13 @@ public class CoverLoader {
 
     /**
      * 设置仅缓存模式(滚动时开启)
-     * 开启后:只从内存/磁盘缓存读封面,不触发U盘/网络IO
-     * 关闭后:恢复正常加载(可从U盘/网络读取)
+     * 开启后:只从内存缓存读封面,内存miss直接显示占位图(不读磁盘/不读U盘)
+     * 关闭后:恢复正常加载(从磁盘缓存/U盘/网络读取)
      */
     public void setCacheOnlyMode(boolean cacheOnly) {
         this.cacheOnlyMode = cacheOnly;
         if (cacheOnly) {
-            // 清空积压队列(避免之前的U盘读取请求继续执行)
+            // 清空积压队列(避免之前的磁盘/U盘读取请求继续执行,减少主线程回调堆积)
             executor.getQueue().clear();
         }
     }
@@ -328,7 +329,14 @@ public class CoverLoader {
         iv.setBackgroundResource(R.drawable.bg_cover_placeholder);
         iv.setTag(key);
 
-        // 2. cacheOnlyMode:只从磁盘缓存读,不碰U盘
+        // 2. cacheOnlyMode(滑动中):内存缓存miss → 直接显示占位图,不提交磁盘读取
+        //    磁盘读取在2核车机上耗时7-300ms,大量回调堆积会抢主线程导致掉帧
+        //    停止滑动后会重新触发可见项的封面加载
+        if (cacheOnlyMode) {
+            return;
+        }
+
+        // 3. 非滑动:从磁盘缓存/U盘/网络加载
         executor.execute(new Runnable() {
             @Override
             public void run() {
