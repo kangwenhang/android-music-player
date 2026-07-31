@@ -1079,7 +1079,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** GitHub 下载代理镜像(国内网络 github.com 经常连不上) */
     private static final String[] GITHUB_DL_MIRRORS = {
-        "",                          // 直连(优先)
+        "",                          // 直连 HTTPS(优先)
+        "http://ghproxy.net/",       // HTTP 镜像(SSL旧系统fallback)
         "https://ghproxy.net/",      // 镜像1
         "https://gh-proxy.com/",     // 镜像2
         "https://mirror.ghproxy.com/", // 镜像3
@@ -1097,9 +1098,11 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 HttpURLConnection conn = null;
                 try {
-                    // 尝试多个 API 地址(直连 + 镜像)
+                    // 尝试多个 API 地址(直连 + 镜像 + HTTP fallback)
                     String[] apiUrls = {
                         "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "http://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                         "https://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
@@ -1289,8 +1292,8 @@ public class MainActivity extends AppCompatActivity {
         sd.body.addView(createInfoCard(msg.toString()));
 
         if (apkUrl != null && !apkUrl.isEmpty()) {
-            // 有 APK 直链,应用内下载并显示进度条
-            Button btnDownload = createDialogButton("下载更新", true);
+            // 有 APK 直链:应用内下载 + 浏览器下载备选
+            Button btnDownload = createDialogButton("自动下载", true);
             btnDownload.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
@@ -1300,15 +1303,23 @@ public class MainActivity extends AppCompatActivity {
             });
             sd.buttons.addView(btnDownload);
 
-            Button btnDetails = createDialogButton("查看详情", false);
-            btnDetails.setOnClickListener(new View.OnClickListener() {
+            Button btnBrowser = createDialogButton("浏览器下载", false);
+            btnBrowser.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
-                    startActivity(browserIntent);
+                    dRef[0].dismiss();
+                    // 尝试直接打开 APK 下载链接,浏览器通常有更好的证书支持
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
+                    try {
+                        startActivity(browserIntent);
+                    } catch (Exception e) {
+                        // 如果打不开 APK 链接,打开 Release 页面
+                        Intent releaseIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(releaseUrl));
+                        startActivity(releaseIntent);
+                    }
                 }
             });
-            sd.buttons.addView(btnDetails);
+            sd.buttons.addView(btnBrowser);
         } else {
             // 无 APK 直链,跳转到 Release 页面
             Button btnDetails = createDialogButton("查看详情", true);
@@ -1558,9 +1569,25 @@ public class MainActivity extends AppCompatActivity {
                             }
                             String msg = finalErr != null ? finalErr.getMessage() : "未知错误";
                             if (finalErr != null && isSslError(finalErr)) {
-                                Toast.makeText(MainActivity.this,
-                                        "下载失败: 系统 SSL/TLS 版本过旧\n无法连接 GitHub,请手动下载更新",
-                                        Toast.LENGTH_LONG).show();
+                                // SSL 错误:提示用浏览器下载(浏览器证书通常更新)
+                                new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("自动下载失败")
+                                        .setMessage("系统 SSL/TLS 版本过旧,无法连接 GitHub。\n\n建议:点击「浏览器下载」用系统浏览器打开下载链接,浏览器通常有更好的证书支持。")
+                                        .setPositiveButton("浏览器下载", new DialogInterface.OnClickListener() {
+                                            @Override
+                                            public void onClick(DialogInterface dialog, int which) {
+                                                Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
+                                                try {
+                                                    startActivity(browserIntent);
+                                                } catch (Exception e) {
+                                                    Toast.makeText(MainActivity.this,
+                                                            "无法打开浏览器: " + e.getMessage(),
+                                                            Toast.LENGTH_SHORT).show();
+                                                }
+                                            }
+                                        })
+                                        .setNegativeButton("取消", null)
+                                        .show();
                             } else {
                                 Toast.makeText(MainActivity.this,
                                         "下载失败(所有镜像均不可用):\n" + msg,
