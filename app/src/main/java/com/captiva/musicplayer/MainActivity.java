@@ -2138,10 +2138,10 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 性能日志已关闭(正式版无需日志,需要调试时取消注释下行)
-        // PerfLogger.init(syncPath);
-        // handler.post(logFlushTask);
-        // PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
+        // 性能日志:输出到音乐同步目录下的 perf_log.txt
+        PerfLogger.init(syncPath);
+        handler.post(logFlushTask);
+        PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
 
         // 显示加载中提示
         tvEmpty.setText("正在加载音乐...");
