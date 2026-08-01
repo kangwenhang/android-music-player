@@ -179,6 +179,8 @@ public class MainActivity extends AppCompatActivity {
     private LocalMusicCache localMusicCache;
     /** 收藏管理器 */
     private FavoriteManager favoriteManager;
+    /** 歌词偏移管理器(每首歌可手动调整歌词同步偏移) */
+    private LyricOffsetManager lyricOffsetManager;
     /** 是否正在只显示收藏(收藏夹模式) */
     private boolean favoritesOnly = false;
     /** 从设置页返回时需重新加载 */
@@ -332,6 +334,7 @@ public class MainActivity extends AppCompatActivity {
         songCache = new SongCache(this);
         localMusicCache = new LocalMusicCache(this);
         favoriteManager = new FavoriteManager(this);
+        lyricOffsetManager = new LyricOffsetManager(this);
 
         // 初始化 NavidromeApi(如果已配置)
         if (navidromeConfig.isConfigured()) {
@@ -642,6 +645,106 @@ public class MainActivity extends AppCompatActivity {
             }
             Toast.makeText(this, nowFav ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
         });
+
+        // 长按歌词区:调整歌词偏移(校正个别歌曲歌词不同步)
+        lrcView.setOnLongClickListener(v -> {
+            showLyricOffsetDialog();
+            return true;
+        });
+    }
+
+    /**
+     * 歌词偏移调整对话框
+     * 长按歌词区弹出,可微调当前歌曲的歌词同步偏移
+     * 正值=歌词延后显示,负值=歌词提前显示
+     */
+    private void showLyricOffsetDialog() {
+        if (service == null || !bound) {
+            Toast.makeText(this, "未在播放", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final MusicBean current = service.getCurrentMusic();
+        if (current == null) {
+            Toast.makeText(this, "未在播放", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final long[] offset = {lyricOffsetManager.getOffset(current)};
+
+        SubDialog sd = createSubDialog("🎵", "歌词偏移调整");
+
+        // 歌曲名
+        TextView tvSong = new TextView(this);
+        tvSong.setText(current.getTitle());
+        tvSong.setTextSize(14);
+        tvSong.setGravity(Gravity.CENTER);
+        tvSong.setTextColor(0xFF888888);
+        tvSong.setPadding(0, 0, 0, dp(15));
+        sd.body.addView(tvSong);
+
+        // 当前偏移值显示
+        final TextView tvOffset = new TextView(this);
+        tvOffset.setTextSize(28);
+        tvOffset.setGravity(Gravity.CENTER);
+        tvOffset.setPadding(0, dp(10), 0, dp(10));
+        String offsetText = offset[0] == 0 ? "0 ms (默认)" : (offset[0] > 0 ? "+" : "") + offset[0] + " ms";
+        tvOffset.setText(offsetText);
+        sd.body.addView(tvOffset);
+
+        // 说明文字
+        TextView tvHint = new TextView(this);
+        tvHint.setText("正值=歌词延后显示(歌词快了)\n负值=歌词提前显示(歌词慢了)\n每步 200ms");
+        tvHint.setTextSize(13);
+        tvHint.setGravity(Gravity.CENTER);
+        tvHint.setTextColor(0xFF999999);
+        tvHint.setPadding(0, dp(5), 0, dp(15));
+        sd.body.addView(tvHint);
+
+        // 按钮行:提前 / 重置 / 延后
+        LinearLayout llBtns = new LinearLayout(this);
+        llBtns.setOrientation(LinearLayout.HORIZONTAL);
+        llBtns.setGravity(Gravity.CENTER);
+        llBtns.setPadding(0, dp(5), 0, dp(10));
+
+        Button btnEarlier = createDialogButton("◀ 提前", false);
+        Button btnReset = createDialogButton("重置", false);
+        Button btnLater = createDialogButton("延后 ▶", true);
+
+        llBtns.addView(btnEarlier);
+        llBtns.addView(btnReset);
+        llBtns.addView(btnLater);
+        sd.body.addView(llBtns);
+
+        // 更新偏移显示
+        final Runnable updateOffsetText = () -> {
+            String text = offset[0] == 0 ? "0 ms (默认)" : (offset[0] > 0 ? "+" : "") + offset[0] + " ms";
+            tvOffset.setText(text);
+        };
+
+        btnEarlier.setOnClickListener(v -> {
+            offset[0] -= 200;
+            lyricOffsetManager.setOffset(current, offset[0]);
+            updateOffsetText.run();
+        });
+
+        btnLater.setOnClickListener(v -> {
+            offset[0] += 200;
+            lyricOffsetManager.setOffset(current, offset[0]);
+            updateOffsetText.run();
+        });
+
+        btnReset.setOnClickListener(v -> {
+            offset[0] = 0;
+            lyricOffsetManager.setOffset(current, 0);
+            updateOffsetText.run();
+        });
+
+        // 底部关闭按钮
+        Button btnClose = createDialogButton("关闭", true);
+        sd.buttons.addView(btnClose);
+        btnClose.setOnClickListener(v -> sd.dialog.dismiss());
+
+        showDialogFull(sd.dialog);
     }
 
     // ==================== 搜索 ====================
@@ -690,6 +793,11 @@ public class MainActivity extends AppCompatActivity {
         Dialog dialog;
         LinearLayout body;
         LinearLayout buttons;
+    }
+
+    /** dp 转 px */
+    private int dp(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     /**
@@ -2714,6 +2822,10 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         int pos = adapter.findPositionByBean(current);
+        if (pos >= 0) {
+            // 确保该位置数据已加载(搜索清空后当前歌曲可能在分批加载范围之外)
+            adapter.ensureLoaded(pos);
+        }
         adapter.setPlayingIndex(pos);
     }
 
@@ -2755,6 +2867,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         int pos = service.getCurrentPosition();
+        // 应用每歌曲手动歌词偏移(校正个别歌曲歌词不同步)
+        MusicBean current = service.getCurrentMusic();
+        if (current != null && lyricOffsetManager != null) {
+            long offset = lyricOffsetManager.getOffset(current);
+            pos += (int) offset;
+        }
         int idx = LrcParser.findLrcIndex(lrc, pos);
         lrcView.setCurrentIndex(idx);
     }
