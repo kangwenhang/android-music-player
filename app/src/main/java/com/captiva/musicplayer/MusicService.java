@@ -58,6 +58,15 @@ public class MusicService extends Service {
     private int currentIndex = -1;
     private boolean isPrepared = false;
 
+    /** 混合位置追踪:用系统时钟校正 VBR MP3 位置偏差(安卓4.x老设备常见问题) */
+    private long posTrackRealtime = 0;   // 播放开始时的 SystemClock.elapsedRealtime()
+    private int posTrackStartPos = 0;     // 播放开始时的位置(ms)
+    private boolean posTrackingActive = false;
+    /** 上次与 MediaPlayer 同步的时间,定期校正时钟漂移 */
+    private long lastSyncRealtime = 0;
+    private static final long SYNC_INTERVAL_MS = 10000; // 每10秒同步一次
+    private static final int VBR_DRIFT_THRESHOLD = 1500; // 偏差超过1.5秒认为是VBR问题
+
     private RemoteControlClient remoteControlClient;
     private AudioManager audioManager;
 
@@ -146,6 +155,7 @@ public class MusicService extends Service {
                         if (player != null && isPrepared && player.isPlaying()) {
                             pausedByFocusLoss = true;
                             player.pause();
+                            stopPosTracking();
                             updateRemoteControlPlayState(false);
                             notifyState();
                         }
@@ -164,6 +174,7 @@ public class MusicService extends Service {
                             pausedByFocusLoss = false;
                             if (player != null && isPrepared && !player.isPlaying()) {
                                 player.start();
+                                startPosTracking(player.getCurrentPosition());
                                 updateRemoteControlPlayState(true);
                                 notifyState();
                             }
@@ -176,6 +187,7 @@ public class MusicService extends Service {
                         ducked = false;
                         if (player != null && isPrepared && player.isPlaying()) {
                             player.pause();
+                            stopPosTracking();
                             updateRemoteControlPlayState(false);
                             notifyState();
                             updateNotification();
@@ -268,7 +280,34 @@ public class MusicService extends Service {
     public int getCurrentPosition() {
         if (player != null && isPrepared) {
             try {
-                return player.getCurrentPosition();
+                int playerPos = player.getCurrentPosition();
+
+                // 混合位置追踪:播放中用系统时钟估算,校正 VBR MP3 位置偏差
+                // (安卓4.x 老设备 MediaPlayer 对 VBR 文件位置报告不准,歌词会不同步)
+                if (posTrackingActive && posTrackRealtime > 0) {
+                    long elapsed = android.os.SystemClock.elapsedRealtime() - posTrackRealtime;
+                    int estimatedPos = posTrackStartPos + (int) elapsed;
+
+                    // 定期与 MediaPlayer 同步(校正时钟漂移,但不同步到 VBR 错误位置)
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (now - lastSyncRealtime > SYNC_INTERVAL_MS) {
+                        lastSyncRealtime = now;
+                        // 如果 MediaPlayer 位置与估算接近,以 MediaPlayer 为准(消除时钟漂移)
+                        if (Math.abs(playerPos - estimatedPos) < VBR_DRIFT_THRESHOLD) {
+                            posTrackRealtime = now;
+                            posTrackStartPos = playerPos;
+                        }
+                        // 如果差异大(VBR 偏差),保持估算位置不做同步
+                    }
+
+                    // 差异超过阈值:VBR 偏差,用估算位置(更准确)
+                    if (Math.abs(playerPos - estimatedPos) > VBR_DRIFT_THRESHOLD) {
+                        return estimatedPos;
+                    }
+                    // 差异小:用 MediaPlayer 位置(CBR 更精确)
+                    return playerPos;
+                }
+                return playerPos;
             } catch (Exception e) {
                 return 0;
             }
@@ -291,10 +330,29 @@ public class MusicService extends Service {
         if (player != null && isPrepared) {
             try {
                 player.seekTo(msec);
+                // 拖动进度条后重置位置追踪起点
+                if (posTrackingActive) {
+                    posTrackRealtime = android.os.SystemClock.elapsedRealtime();
+                    posTrackStartPos = msec;
+                    lastSyncRealtime = posTrackRealtime;
+                }
             } catch (Exception e) {
                 Log.w(TAG, "seekTo failed", e);
             }
         }
+    }
+
+    /** 开始位置追踪(播放开始/恢复时调用) */
+    private void startPosTracking(int startPosition) {
+        posTrackRealtime = android.os.SystemClock.elapsedRealtime();
+        posTrackStartPos = startPosition;
+        posTrackingActive = true;
+        lastSyncRealtime = posTrackRealtime;
+    }
+
+    /** 停止位置追踪(暂停/切歌时调用) */
+    private void stopPosTracking() {
+        posTrackingActive = false;
     }
 
     /** 播放指定索引 */
@@ -333,6 +391,8 @@ public class MusicService extends Service {
     public void resume() {
         if (player != null && isPrepared && !player.isPlaying()) {
             player.start();
+            // 恢复位置追踪(从当前播放位置开始计时)
+            startPosTracking(player.getCurrentPosition());
             updateRemoteControlPlayState(true);
             notifyState();
             updateNotification();
@@ -342,6 +402,8 @@ public class MusicService extends Service {
     public void pause() {
         if (player != null && isPrepared && player.isPlaying()) {
             player.pause();
+            // 停止位置追踪
+            stopPosTracking();
             updateRemoteControlPlayState(false);
             notifyState();
             updateNotification();
@@ -717,7 +779,12 @@ public class MusicService extends Service {
                             } catch (Exception e) {
                                 Log.w(TAG, "seekTo failed", e);
                             }
+                            // 位置追踪从恢复的进度开始(VBR 校正)
+                            startPosTracking(pendingSeekPosition);
                             pendingSeekPosition = 0;
+                        } else {
+                            // 从头播放,位置追踪从 0 开始
+                            startPosTracking(0);
                         }
                         // 加载歌词
                         loadLyrics(currentBean);
@@ -773,6 +840,7 @@ public class MusicService extends Service {
     }
 
     private void resetPlayer() {
+        stopPosTracking();
         if (player == null) {
             player = new MediaPlayer();
         } else {
