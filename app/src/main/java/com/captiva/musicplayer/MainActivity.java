@@ -2888,30 +2888,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 更新播放模式按钮图标(顺序/随机/单曲循环) */
+    /** 更新播放模式按钮文字(顺/随/单) */
     private void updatePlayModeIcon(PlayMode mode) {
-        btnMode.setText("");
-        int iconRes;
-        switch (mode) {
-            case SHUFFLE:
-                iconRes = R.drawable.ic_play_shuffle;
-                break;
-            case REPEAT_ONE:
-                iconRes = R.drawable.ic_play_repeat_one;
-                break;
-            case SEQUENCE:
-            default:
-                iconRes = R.drawable.ic_play_sequence;
-                break;
-        }
-        // 用 compound drawable 居中显示图标
-        android.graphics.drawable.Drawable icon = ContextCompat.getDrawable(this, iconRes);
-        if (icon != null) {
-            // 缩放到合适尺寸(按钮约48dp,图标用24dp)
-            int iconSize = (int) (24 * getResources().getDisplayMetrics().density);
-            icon.setBounds(0, 0, iconSize, iconSize);
-            btnMode.setCompoundDrawables(icon, null, null, null);
-        }
+        btnMode.setText(mode.getShortLabel());
+        btnMode.setCompoundDrawables(null, null, null, null);
     }
 
     private void updateProgress() {
