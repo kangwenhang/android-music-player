@@ -197,6 +197,9 @@ public class MainActivity extends AppCompatActivity {
     private int pendingSyncRefresh = 0;
     private static final int REFRESH_BATCH_SIZE = 5;
 
+    /** 封面加载代次(每次 updateNowPlaying 递增,旧回调自动作废,避免暂停/恢复后封面错乱) */
+    private int coverLoadToken = 0;
+
     // 进度刷新(三档频率:播放200ms / 滑动500ms / 空闲2000ms)
     private final Handler handler = new Handler();
     private final Runnable progressTask = new Runnable() {
@@ -254,7 +257,7 @@ public class MainActivity extends AppCompatActivity {
 
                 updateNowPlaying(index);
                 updatePlayButton(playing);
-                btnMode.setText(mode.getShortLabel());
+                updatePlayModeIcon(mode);
                 if (service != null) {
                     lrcView.setLrcList(service.getCurrentLrc());
                 }
@@ -284,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
             updatePlayButton(service.isPlaying());
-            btnMode.setText(service.getPlayMode().getShortLabel());
+            updatePlayModeIcon(service.getPlayMode());
             lrcView.setLrcList(service.getCurrentLrc());
             // 更新EQ按钮显示
             updateEqButtonText(null);
@@ -621,7 +624,7 @@ public class MainActivity extends AppCompatActivity {
         btnMode.setOnClickListener(v -> {
             if (service != null) {
                 PlayMode mode = service.cyclePlayMode();
-                btnMode.setText(mode.getShortLabel());
+                updatePlayModeIcon(mode);
                 Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
             }
         });
@@ -2747,12 +2750,17 @@ public class MainActivity extends AppCompatActivity {
         updateFavoriteButton(bean);
 
         // 加载封面到歌词区作为背景(高清大图,全分辨率)
+        // 使用 token 防止旧回调覆盖:多次暂停/恢复会产生多个异步封面加载请求
+        // 只允许最新一次请求的回调设置封面,避免封面错乱
+        final int token = ++coverLoadToken;
         int coverSize = 1024; // 背景封面尺寸
         CoverLoader.getInstance().loadBitmapFull(bean, coverSize,
                 new CoverLoader.BitmapCallback() {
                     @Override
                     public void onBitmapLoaded(android.graphics.Bitmap bitmap) {
-                        lrcView.setCoverBitmap(bitmap);
+                        if (token == coverLoadToken) {
+                            lrcView.setCoverBitmap(bitmap);
+                        }
                     }
                 });
     }
@@ -2842,6 +2850,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** 更新播放模式按钮文字(顺序/随机/单曲循环) */
+    private void updatePlayModeIcon(PlayMode mode) {
+        btnMode.setText(mode.getShortLabel());
+        btnMode.setCompoundDrawables(null, null, null, null);
+    }
+
     private void updateProgress() {
         if (service == null || !bound) {
             return;
@@ -2908,7 +2922,7 @@ public class MainActivity extends AppCompatActivity {
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
             updatePlayButton(service.isPlaying());
-            btnMode.setText(service.getPlayMode().getShortLabel());
+            updatePlayModeIcon(service.getPlayMode());
             lrcView.setLrcList(service.getCurrentLrc());
             // 更新列表高亮和滚动位置到当前播放歌曲
             scrollToCurrentSong();

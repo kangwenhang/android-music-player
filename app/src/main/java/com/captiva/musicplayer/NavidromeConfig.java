@@ -20,6 +20,7 @@ public class NavidromeConfig {
     private static final String KEY_AUTO_PLAY = "auto_play"; // 打开软件自动播放
     private static final String KEY_LAST_INDEX = "last_play_index"; // 上次播放索引
     private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)
+    private static final String KEY_PLAY_MODE = "play_mode"; // 播放模式(0=顺序,1=单曲循环,2=随机)
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -144,5 +145,15 @@ public class NavidromeConfig {
     /** 保存上次播放进度(ms) */
     public void setLastPlayPosition(int position) {
         prefs.edit().putInt(KEY_LAST_POSITION, position).apply();
+    }
+
+    /** 获取播放模式(0=顺序,1=单曲循环,2=随机) */
+    public int getPlayMode() {
+        return prefs.getInt(KEY_PLAY_MODE, 0);
+    }
+
+    /** 保存播放模式 */
+    public void setPlayMode(int mode) {
+        prefs.edit().putInt(KEY_PLAY_MODE, mode).apply();
     }
 }
