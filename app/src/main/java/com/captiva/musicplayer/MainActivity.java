@@ -622,11 +622,18 @@ public class MainActivity extends AppCompatActivity {
                 if (!musicList.isEmpty()) {
                     tvEmpty.setVisibility(View.GONE);
                 }
-                // 更新高亮:切回全部歌曲后重新定位当前播放歌曲
-                long t2 = System.currentTimeMillis();
-                updatePlayingHighlight();
-                Log.i(TAG, "[FavToggle] highlight=" + (System.currentTimeMillis() - t2) + "ms"
-                        + " 总=" + (System.currentTimeMillis() - t0) + "ms");
+                // 延迟更新高亮:避免 filter 的 notifyDataSetChanged + highlight 的
+                // findPositionByBean(5000遍历) + ensureLoaded(多批次加载) 叠加卡顿
+                // post 到下一帧执行,让 filter 的 UI 更新先渲染
+                rvList.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        long t2 = System.currentTimeMillis();
+                        updatePlayingHighlight();
+                        Log.i(TAG, "[FavToggle] highlight(post)=" + (System.currentTimeMillis() - t2) + "ms"
+                                + " 总=" + (System.currentTimeMillis() - t0) + "ms");
+                    }
+                });
             }
             if (PerfLogger.isEnabled()) {
                 PerfLogger.log("FavToggle", "总=" + (System.currentTimeMillis() - t0) + "ms favoritesOnly=" + favoritesOnly);
@@ -3002,10 +3009,17 @@ public class MainActivity extends AppCompatActivity {
             long t3 = System.currentTimeMillis();
             lrcView.setLrcList(service.getCurrentLrc());
             Log.i(TAG, "[onResume] setLrcList=" + (System.currentTimeMillis() - t3) + "ms");
-            // 更新列表高亮和滚动位置到当前播放歌曲
-            long t4 = System.currentTimeMillis();
-            scrollToCurrentSong();
-            Log.i(TAG, "[onResume] scrollToCurrentSong=" + (System.currentTimeMillis() - t4) + "ms");
+            // 延迟滚动和高亮到下一帧:scrollToCurrentSong 内部会做 findPositionByBean
+            // (O(n)遍历) + ensureLoaded(多批次加载) + scrollToPositionWithOffset,
+            // 同步执行会阻塞第一帧渲染导致黑屏。post 让第一帧先画出来
+            rvList.post(new Runnable() {
+                @Override
+                public void run() {
+                    long t4 = System.currentTimeMillis();
+                    scrollToCurrentSong();
+                    Log.i(TAG, "[onResume] scrollToCurrentSong(post)=" + (System.currentTimeMillis() - t4) + "ms");
+                }
+            });
         }
         Log.i(TAG, "[onResume] 总耗时=" + (System.currentTimeMillis() - t0) + "ms");
         if (PerfLogger.isEnabled()) {

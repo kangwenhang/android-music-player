@@ -84,6 +84,19 @@
 - 版本号基于 git tag,正式版如 `v4.6`,预发布如 `v4.6.190-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
 
+### v5.5 更新内容
+
+- **SQLite封面BLOB缓存解决IO卡顿**:用SQLite数据库BLOB存储替代5000+个.cover小文件,彻底解决车机文件系统随机IO性能差的问题
+- **SQLite page cache优化**:设置64MB SQLite缓存页面(16384页),覆盖所有封面字节,实现零随机磁盘IO
+- **CoverLoader双读优化**:将BitmapFactory双读(inJustDecodeBounds=true再=false)合并为一次性readFileToBytes到byte[],避免每次打开文件的重复IO开销
+- **新增CoverDatabase**:完整的SQLiteOpenHelper实现,支持BLOB存储的封面数据库,配合page cache减少文件系统访问频率
+- **歌词内存缓存**:为LyricCache新增内存LruCache,缓存20首热门歌曲的歌词,切歌时优先从内存读取,减少磁盘IO
+- **随机播放歌词预加载优化**:结合内存缓存机制,自动缓存当前播放歌曲的歌词,随机模式下无需预知下一首
+- **修复收藏切换卡顿**:优化ensureLoaded方法,合并多次notifyItemRangeInserted为一次批量通知,减少RecyclerView布局计算开销
+- **修复后台返回黑屏**:将onResume中的scrollToCurrentSong延迟到下一帧执行,避免同步操作阻塞第一帧渲染
+- **修复封面双读性能问题**:在loadFromDiskCache中优先查询SQLite缓存,miss时一次性读取文件到内存,解码Bitmap时避免重复访问文件
+- **批量操作支持**:CoverDatabase支持putCoversBatch()批量写入,使用SQLite事务保证性能一致性
+
 ### v5.2 更新内容
 
 - **修复从桌面返回黑屏**:封面缩放(Bitmap.createScaledBitmap)移到后台线程,消除主线程 80-141ms 阻塞
