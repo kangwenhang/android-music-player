@@ -166,6 +166,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean bound = false;
     /** 标记是否需要自动播放(仅首次加载时触发) */
     private boolean autoPlayPending = false;
+    /** 用户点击歌曲时 service 还没绑定好,记录待播放位置,onServiceConnected 后自动播放 */
+    private int pendingPlayIndex = -1;
 
     /** 当前音乐列表(扫描同步目录) */
     private final List<MusicBean> musicList = new ArrayList<>();
@@ -296,6 +298,17 @@ public class MainActivity extends AppCompatActivity {
                     lastIndex = 0;
                 }
                 service.playIndexWithSeek(lastIndex, lastPos);
+            }
+
+            // 处理用户在 service 绑定前点击的歌曲
+            if (pendingPlayIndex >= 0 && !musicList.isEmpty()) {
+                int playPos = pendingPlayIndex;
+                pendingPlayIndex = -1;
+                if (playPos >= 0 && playPos < musicList.size()) {
+                    List<MusicBean> displayList = adapter.getDisplayList();
+                    service.setPlayList(displayList, playPos);
+                    service.playIndex(playPos);
+                }
             }
         }
 
@@ -451,16 +464,19 @@ public class MainActivity extends AppCompatActivity {
         adapter = new MusicAdapter(this);
         adapter.setFavoriteManager(favoriteManager);
         adapter.setOnItemClickListener((position, bean) -> {
-            if (service != null) {
-                // 用当前显示的列表作为播放列表
+            if (service != null && bound) {
+                // service 已绑定:直接播放
                 List<MusicBean> displayList = adapter.getDisplayList();
-                // 用 bean 身份验证位置(防止列表变化后位置错位导致"乱跳")
                 int realPos = adapter.findPositionByBean(bean);
                 if (realPos >= 0 && realPos != position) {
                     position = realPos;
                 }
                 service.setPlayList(displayList, position);
                 service.playIndex(position);
+            } else {
+                // service 还没绑定好:记录待播放位置,绑定完成后自动播放
+                pendingPlayIndex = position;
+                Toast.makeText(this, "正在初始化播放器,请稍候...", Toast.LENGTH_SHORT).show();
             }
         });
         rvList.setLayoutManager(new LinearLayoutManager(this));
@@ -1915,9 +1931,11 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 加载音乐(扫描同步目录)
-     * 1. 先用 MediaStore 快速加载(秒开,本地音乐立即可见可播)
-     * 2. 后台递归扫描补全(MediaStore 未收录的文件)
+     * 1. 先从本地缓存加载(秒开,完全不读U盘)
+     * 2. 无缓存时后台扫描 MediaStore(不阻塞主线程)
      * 3. 后台自动同步服务器新歌(不阻塞 UI)
+     *
+     * 注意:缓存加载和 MediaStore 扫描都在后台线程,避免阻塞主线程导致点击无响应
      */
     private void loadMusic() {
         final String syncPath = navidromeConfig.getSyncPath();
@@ -1925,85 +1943,98 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 封面磁盘缓存:使用内部存储(eMMC)
-        // v3.0优化后滑动时不读磁盘(cacheOnlyMode),磁盘速度只影响停止滑动后补加载
-        // 内部eMMC延迟更稳定,避免USB偶发100-190ms尖峰
-        // (之前切U盘是因为滑动时还在读磁盘,现在滑动时零磁盘读取)
-        // CoverLoader.initDiskCache() 已默认使用 context.getCacheDir(),无需切换
-
         // 性能日志已关闭(正式版无需日志,需要调试时取消注释下行)
         // PerfLogger.init(syncPath);
         // handler.post(logFlushTask);
         // PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
 
-        // 0. 优先从本地缓存加载(秒开,完全不读U盘)
-        //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
-        //    新增/删除歌曲需手动"刷新列表"(设置菜单)
-        List<MusicBean> cachedList = localMusicCache.load();
-        if (cachedList != null && !cachedList.isEmpty()) {
-            musicList.clear();
-            musicList.addAll(cachedList);
-            // 排序(确保和刷新后的顺序一致,避免视觉跳动)
-            java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
-                @Override
-                public int compare(MusicBean a, MusicBean b) {
-                    return a.getTitle().compareToIgnoreCase(b.getTitle());
+        // 显示加载中提示
+        tvEmpty.setText("正在加载音乐...");
+        tvEmpty.setVisibility(View.VISIBLE);
+
+        // 后台线程执行:缓存加载 + 排序 + MediaStore 扫描
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // 0. 优先从本地缓存加载(秒开,完全不读U盘)
+                List<MusicBean> cachedList = localMusicCache.load();
+                if (cachedList != null && !cachedList.isEmpty()) {
+                    // 排序(后台线程,不阻塞UI)
+                    java.util.Collections.sort(cachedList, new java.util.Comparator<MusicBean>() {
+                        @Override
+                        public int compare(MusicBean a, MusicBean b) {
+                            return a.getTitle().compareToIgnoreCase(b.getTitle());
+                        }
+                    });
+
+                    final List<MusicBean> finalList = cachedList;
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            musicList.clear();
+                            musicList.addAll(finalList);
+                            adapter.setData(musicList);
+                            updateCount();
+                            tvEmpty.setVisibility(View.GONE);
+                            // 设置播放列表(service 可能还没绑定,onServiceConnected 会再设一次)
+                            if (service != null) {
+                                int lastIndex = navidromeConfig.getLastPlayIndex();
+                                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                                    lastIndex = 0;
+                                }
+                                service.setPlayList(musicList, lastIndex);
+                                if (autoPlayPending && !service.isPlaying()) {
+                                    autoPlayPending = false;
+                                    int lastPos = navidromeConfig.getLastPlayPosition();
+                                    service.playIndexWithSeek(lastIndex, lastPos);
+                                }
+                            }
+                            // 后台预提取封面
+                            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
+                            // 启动后台服务器同步
+                            startBackgroundSync();
+                        }
+                    });
+                    return;
                 }
-            });
-            adapter.setData(musicList);
-            updateCount();
-            tvEmpty.setVisibility(View.GONE);
-            // 立即设置播放列表
-            if (service != null) {
-                int lastIndex = navidromeConfig.getLastPlayIndex();
-                if (lastIndex < 0 || lastIndex >= musicList.size()) {
-                    lastIndex = 0;
-                }
-                service.setPlayList(musicList, lastIndex);
-                if (autoPlayPending && !service.isPlaying()) {
-                    autoPlayPending = false;
-                    int lastPos = navidromeConfig.getLastPlayPosition();
-                    service.playIndexWithSeek(lastIndex, lastPos);
-                }
+
+                // 1. 无缓存:用 MediaStore 快速加载(后台线程,不阻塞UI)
+                final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(MainActivity.this, syncPath);
+
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        musicList.clear();
+                        musicList.addAll(quickList);
+                        adapter.setData(musicList);
+                        updateCount();
+
+                        if (musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                            if (service != null) {
+                                int lastIndex = navidromeConfig.getLastPlayIndex();
+                                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                                    lastIndex = 0;
+                                }
+                                service.setPlayList(musicList, lastIndex);
+                                if (autoPlayPending && !service.isPlaying()) {
+                                    autoPlayPending = false;
+                                    int lastPos = navidromeConfig.getLastPlayPosition();
+                                    service.playIndexWithSeek(lastIndex, lastPos);
+                                }
+                            }
+                        }
+
+                        // 2. 后台递归扫描补全 + 同步
+                        backgroundScanAndMerge(syncPath, quickList, false);
+                    }
+                });
             }
-            // 缓存路径不扫描U盘(用户要求:点击歌曲才读U盘)
-            // 后台预提取所有封面到U盘缓存(车机eMMC比U盘慢,缓存放U盘更快)
-            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
-            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
-            // 仅启动后台服务器同步(如果配置了Navidrome)
-            startBackgroundSync();
-            return;
-        }
-
-        // 1. 无缓存:用 MediaStore 快速加载(秒开)
-        final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(this, syncPath);
-
-        musicList.clear();
-        musicList.addAll(quickList);
-        adapter.setData(musicList);
-        updateCount();
-
-        if (musicList.isEmpty()) {
-            tvEmpty.setVisibility(View.VISIBLE);
-            tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
-        } else {
-            tvEmpty.setVisibility(View.GONE);
-            if (service != null) {
-                int lastIndex = navidromeConfig.getLastPlayIndex();
-                if (lastIndex < 0 || lastIndex >= musicList.size()) {
-                    lastIndex = 0;
-                }
-                service.setPlayList(musicList, lastIndex);
-                if (autoPlayPending && !service.isPlaying()) {
-                    autoPlayPending = false;
-                    int lastPos = navidromeConfig.getLastPlayPosition();
-                    service.playIndexWithSeek(lastIndex, lastPos);
-                }
-            }
-        }
-
-        // 2. 后台递归扫描补全 + 同步
-        backgroundScanAndMerge(syncPath, quickList, false);
+        }, "LoadMusic").start();
     }
 
     /**
