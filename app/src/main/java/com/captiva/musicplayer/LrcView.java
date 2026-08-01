@@ -235,6 +235,8 @@ public class LrcView extends View {
     }
 
     public void setLrcList(List<LrcEntry> list) {
+        // 同一引用(暂停/恢复时 service.getCurrentLrc() 返回同一个 list):不重置,避免歌词跳到开头
+        if (list == lrcList) return;
         if (list == null) {
             lrcList = new ArrayList<>();
         } else {
