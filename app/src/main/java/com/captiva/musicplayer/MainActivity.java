@@ -488,6 +488,10 @@ public class MainActivity extends AppCompatActivity {
                             CoverLoader.getInstance().preload(bean, coverSizePx);
                         }
                     }
+
+                    // 停止滚动后,后台把全部封面从磁盘载入内存
+                    // 之后滚动时全部命中内存缓存,零磁盘IO
+                    CoverLoader.getInstance().preloadAllToMemory(musicList);
                 }
             }
         });
@@ -535,6 +539,8 @@ public class MainActivity extends AppCompatActivity {
                 if (!musicList.isEmpty()) {
                     tvEmpty.setVisibility(View.GONE);
                 }
+                // 更新高亮:切回全部歌曲后重新定位当前播放歌曲
+                updatePlayingHighlight();
             }
         });
 
@@ -611,6 +617,8 @@ public class MainActivity extends AppCompatActivity {
             adapter.filter(currentSearchQuery);
         }
         updateCount();
+        // 更新高亮:过滤后重新定位当前播放歌曲
+        updatePlayingHighlight();
     }
 
     // ==================== 收藏夹 ====================
@@ -631,6 +639,8 @@ public class MainActivity extends AppCompatActivity {
         } else {
             tvEmpty.setVisibility(View.GONE);
         }
+        // 更新高亮:只标记当前播放歌曲(如果不在收藏列表中则清除高亮)
+        updatePlayingHighlight();
     }
 
     // ==================== 设置菜单 ====================
@@ -2035,7 +2045,8 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             }
                             service.setPlayList(musicList, newIndex);
-                            adapter.setPlayingIndex(newIndex);
+                            // 用歌曲身份在当前显示列表中定位高亮(避免过滤时索引错位)
+                            updatePlayingHighlight();
                         }
 
                         // 保存到缓存(下次秒开) — 强制保存(内容可能变化但数量不变)
@@ -2170,8 +2181,8 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             }
                             service.setPlayList(musicList, newIndex);
-                            // 同步更新列表高亮(避免高亮错位)
-                            adapter.setPlayingIndex(newIndex);
+                            // 用歌曲身份在当前显示列表中定位高亮(避免过滤时索引错位)
+                            updatePlayingHighlight();
                         }
 
                         // 保存缓存(下次秒开) — 强制保存(扫描后内容可能变化)
@@ -2436,6 +2447,8 @@ public class MainActivity extends AppCompatActivity {
                                     service.setPlayList(musicList, 0);
                                 }
                             }
+                            // 更新高亮:数据更新后重新定位当前播放歌曲
+                            updatePlayingHighlight();
                         } else {
                             musicList.clear();
                             musicList.addAll(newList);
@@ -2444,6 +2457,8 @@ public class MainActivity extends AppCompatActivity {
                             if (service != null) {
                                 service.setPlayList(musicList, 0);
                             }
+                            // 更新高亮:过滤后重新定位当前播放歌曲
+                            updatePlayingHighlight();
                         }
 
                         if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
@@ -2547,13 +2562,14 @@ public class MainActivity extends AppCompatActivity {
 
         // 在显示列表中查找当前播放歌曲的位置
         int pos = adapter.findPositionByBean(current);
+
+        // 无论是否找到都更新高亮(找不到时清除高亮,避免错误高亮)
+        updatePlayingHighlight();
+
         if (pos < 0) return;
 
         // 确保该位置数据已加载(分批加载机制)
         adapter.ensureLoaded(pos);
-
-        // 更新高亮索引
-        adapter.setPlayingIndex(pos);
 
         // 滚动到该位置并定位到列表中间(车机性能弱,不用平滑滚动)
         LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
@@ -2573,6 +2589,22 @@ public class MainActivity extends AppCompatActivity {
                 lm.scrollToPositionWithOffset(pos, offset);
             }
         }
+    }
+
+    /**
+     * 仅更新播放高亮(不滚动列表)
+     * 在切换收藏/搜索过滤后调用,确保高亮跟随当前播放歌曲
+     * 如果当前播放歌曲不在过滤后的列表中,清除高亮
+     */
+    private void updatePlayingHighlight() {
+        if (service == null) return;
+        MusicBean current = service.getCurrentMusic();
+        if (current == null) {
+            adapter.setPlayingIndex(-1);
+            return;
+        }
+        int pos = adapter.findPositionByBean(current);
+        adapter.setPlayingIndex(pos);
     }
 
     /** 更新播放按钮:播放中=蓝色圆形+暂停图标,暂停中=红色圆形+播放图标 */
@@ -2641,6 +2673,18 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter f = new IntentFilter(MusicService.ACTION_STATE_CHANGED);
         registerReceiver(stateReceiver, f);
         handler.post(progressTask);
+
+        // 同步当前播放状态:从桌面返回时可能已自动切歌,需更新UI
+        // onPause 期间 stateReceiver 被注销,自动切歌的广播被错过
+        if (service != null && bound) {
+            int idx = service.getCurrentIndex();
+            updateNowPlaying(idx);
+            updatePlayButton(service.isPlaying());
+            btnMode.setText(service.getPlayMode().getShortLabel());
+            lrcView.setLrcList(service.getCurrentLrc());
+            // 更新列表高亮和滚动位置到当前播放歌曲
+            scrollToCurrentSong();
+        }
     }
 
     @Override

@@ -40,10 +40,16 @@ import java.util.concurrent.TimeUnit;
 public class CoverLoader {
 
     private static final String TAG = "CoverLoader";
-    // 内存缓存:256MB设备用12MB(约150张封面),够覆盖一轮滑动的可见+预加载范围
-    private static final int CACHE_SIZE = 12 * 1024 * 1024; // 12MB内存缓存
+    // 内存缓存:28MB,配合48px缩略图(1x采样约2-5KB/张),可缓存5000+张封面
+    // 不滚动时把磁盘缓存全部载入内存,滚动时零磁盘IO
+    private static final int CACHE_SIZE = 28 * 1024 * 1024; // 28MB内存缓存
     private static final String DISK_CACHE_DIR = "cover_cache";
-    private static final long DISK_CACHE_MAX_SIZE = 50 * 1024 * 1024; // 50MB磁盘缓存(预提取需要更大)
+    // 磁盘缓存:200MB,支持5000+首歌的封面预提取
+    private static final long DISK_CACHE_MAX_SIZE = 200 * 1024 * 1024; // 200MB磁盘缓存
+    /** 列表缩略图目标尺寸(px),48dp显示用48px(1x采样,缩略图小足够清晰) */
+    private static final int THUMB_TARGET_SIZE = 48;
+    /** 磁盘缓存JPEG压缩质量(小缩略图75足够,减少文件大小) */
+    private static final int JPEG_QUALITY = 75;
 
     /** 每隔多少次保存才检查一次磁盘缓存大小 */
     private static final int CLEAN_INTERVAL = 10;
@@ -289,9 +295,98 @@ public class CoverLoader {
                         + ", 已缓存" + alreadyCached + ", 无封面" + noCover
                         + ", 耗时" + elapsed + "ms");
                 preloading = false;
+
+                // 磁盘预提取完成后,启动内存预加载(把磁盘缓存载入内存)
+                preloadAllToMemory(songs);
             }
         }, "CoverPreload").start();
     }
+
+    /**
+     * 将磁盘缓存的封面批量载入内存缓存(不读U盘/网络)
+     *
+     * 使用场景:不滚动时后台静默加载,把所有磁盘缓存的封面读入内存 LruCache
+     * 之后滚动列表时全部命中内存缓存,零磁盘IO,完全不卡
+     *
+     * 特点:
+     * - 只从磁盘缓存读,不碰U盘/网络
+     * - 滚动开始时自动暂停(cacheOnlyMode 时不提交新任务,executor 队列被清空)
+     * - 已在内存中的跳过
+     * - 无封面的跳过(黑名单)
+     *
+     * @param songs 歌曲列表
+     */
+    public void preloadAllToMemory(final List<MusicBean> songs) {
+        if (songs == null || songs.isEmpty()) return;
+        if (memoryPreloading) {
+            Log.d(TAG, "内存预加载已在进行中,跳过");
+            return;
+        }
+        memoryPreloading = true;
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                int total = songs.size();
+                int loaded = 0;
+                int alreadyInMem = 0;
+                int notOnDisk = 0;
+                int skipped = 0;
+                long startTime = System.currentTimeMillis();
+
+                for (int i = 0; i < total; i++) {
+                    // 滚动开始时暂停预加载(避免抢磁盘IO)
+                    if (cacheOnlyMode) {
+                        skipped = total - i;
+                        break;
+                    }
+
+                    MusicBean bean = songs.get(i);
+                    String key = getCacheKey(bean);
+                    if (key == null) continue;
+
+                    // 已在内存缓存
+                    if (cache.get(key) != null) {
+                        alreadyInMem++;
+                        continue;
+                    }
+
+                    // 无封面黑名单
+                    if (noCoverSet.contains(key)) {
+                        continue;
+                    }
+
+                    // 从磁盘缓存加载(不读U盘)
+                    Bitmap bmp = loadFromDiskCache(key, THUMB_TARGET_SIZE, false);
+                    if (bmp != null) {
+                        cache.put(key, bmp);
+                        loaded++;
+                    } else {
+                        notOnDisk++;
+                    }
+
+                    // 每100张让出CPU,避免阻塞封面正常加载
+                    if (loaded % 100 == 0 && loaded > 0) {
+                        try {
+                            Thread.sleep(10);
+                        } catch (InterruptedException ignored) {
+                            break;
+                        }
+                    }
+                }
+
+                long elapsed = System.currentTimeMillis() - startTime;
+                Log.d(TAG, "内存预加载完成: 共" + total + "首, 新载入" + loaded
+                        + ", 已在内存" + alreadyInMem + ", 磁盘无缓存" + notOnDisk
+                        + ", 跳过" + skipped + ", 耗时" + elapsed + "ms"
+                        + ", 内存缓存大小=" + cache.size() / 1024 + "KB");
+                memoryPreloading = false;
+            }
+        }, "MemPreload").start();
+    }
+
+    /** 内存预加载是否正在运行 */
+    private volatile boolean memoryPreloading = false;
 
     // ==================== 封面加载 ====================
 
@@ -429,7 +524,7 @@ public class CoverLoader {
     }
 
     /**
-     * 异步加载封面 Bitmap(全分辨率,不限制200px,用于歌词背景)
+     * 异步加载封面 Bitmap(全分辨率,不限制缩略图尺寸,用于歌词背景)
      */
     public void loadBitmapFull(MusicBean bean, final int size, final BitmapCallback callback) {
         loadBitmapInternal(bean, size, callback, true);
@@ -528,8 +623,8 @@ public class CoverLoader {
 
             if (opts.outWidth <= 0 || opts.outHeight <= 0) return null;
 
-            // 计算采样率(列表缩略图限制200px,全分辨率用传入尺寸)
-            int actualTarget = fullRes ? targetSize : Math.min(targetSize, 200);
+            // 计算采样率(列表缩略图限制THUMB_TARGET_SIZE,全分辨率用传入尺寸)
+            int actualTarget = fullRes ? targetSize : Math.min(targetSize, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, actualTarget);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
@@ -552,7 +647,7 @@ public class CoverLoader {
             FileOutputStream fos = null;
             try {
                 fos = new FileOutputStream(file);
-                bmp.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+                bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
                 fos.flush();
             } finally {
                 if (fos != null) fos.close();
@@ -633,8 +728,8 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(art, 0, art.length, opts);
-            // 全分辨率模式不限制尺寸;列表缩略图限制200px
-            int targetSize = fullRes ? size : Math.min(size, 200);
+            // 全分辨率模式不限制尺寸;列表缩略图限制THUMB_TARGET_SIZE
+            int targetSize = fullRes ? size : Math.min(size, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
@@ -691,7 +786,7 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
-            int targetSize = fullRes ? size : Math.min(size, 200);
+            int targetSize = fullRes ? size : Math.min(size, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
@@ -725,13 +820,16 @@ public class CoverLoader {
         }
     }
 
-    /** 计算采样率,避免 OOM */
+    /**
+     * 计算采样率,避免 OOM
+     * 1x采样:解码后尺寸不超过 target,缩略图足够清晰且内存最小
+     */
     private int calculateSampleSize(int width, int height, int target) {
         if (target <= 0 || width <= 0 || height <= 0) {
             return 1;
         }
         int sample = 1;
-        while (width / sample > target * 2 || height / sample > target * 2) {
+        while (width / sample > target || height / sample > target) {
             sample *= 2;
         }
         return sample;
