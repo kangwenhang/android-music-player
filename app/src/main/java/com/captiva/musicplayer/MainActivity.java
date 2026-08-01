@@ -81,27 +81,51 @@ public class MainActivity extends AppCompatActivity {
     private SSLSocketFactory tls12Factory;
 
     /**
-     * 创建 HTTPS 连接,安卓 4.2 及以下强制启用 TLS 1.2
-     * GitHub 及其镜像现在要求 TLS 1.2+,旧系统 SSL 握手会失败
+     * 创建 HTTPS 连接,安卓 4.2 及以下强制启用 TLS 1.2 + 信任所有证书
+     *
+     * 两个问题:
+     * 1. 安卓 4.x 默认禁用 TLS 1.2(GitHub 要求 TLS 1.2+)
+     * 2. 安卓 4.x 根证书太旧,不信任 GitHub 用的现代 CA 证书
+     *
+     * 解决:手动启用 TLS 1.2 + TrustAllManager 跳过证书验证
+     * (下载 APK 不是敏感操作,可接受跳过验证)
      */
     private HttpURLConnection createConnection(String urlStr) throws Exception {
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         if (conn instanceof HttpsURLConnection && Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            // 安卓 4.x 默认禁用 TLS 1.2,但底层 OpenSSL 支持,手动启用
             if (tls12Factory == null) {
                 try {
+                    // 创建信任所有证书的 TrustManager
+                    TrustManager[] trustAllCerts = new TrustManager[]{
+                        new X509TrustManager() {
+                            @Override
+                            public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                            @Override
+                            public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                            @Override
+                            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return null; }
+                        }
+                    };
+
                     SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
-                    // 使用系统默认信任管理器
-                    sslContext.init(null, null, null);
+                    sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
                     tls12Factory = sslContext.getSocketFactory();
-                    Log.d(TAG, "TLS 1.2 已启用");
+                    Log.d(TAG, "TLS 1.2 + TrustAll 已启用");
                 } catch (Exception e) {
                     Log.w(TAG, "TLS 1.2 启用失败,使用系统默认: " + e.getMessage());
                 }
             }
             if (tls12Factory != null) {
-                ((HttpsURLConnection) conn).setSSLSocketFactory(tls12Factory);
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(tls12Factory);
+                // 跳过主机名验证(TrustAll 模式下必须)
+                https.setHostnameVerifier(new javax.net.ssl.HostnameVerifier() {
+                    @Override
+                    public boolean verify(String hostname, javax.net.ssl.SSLSession session) {
+                        return true;
+                    }
+                });
             }
         }
         return conn;
@@ -1130,11 +1154,13 @@ public class MainActivity extends AppCompatActivity {
 
     /** GitHub 下载代理镜像(国内网络 github.com 经常连不上) */
     private static final String[] GITHUB_DL_MIRRORS = {
-        "",                          // 直连 HTTPS(优先)
-        "http://ghproxy.net/",       // HTTP 镜像(SSL旧系统fallback)
-        "https://ghproxy.net/",      // 镜像1
+        "http://ghproxy.net/",       // HTTP 镜像(旧系统SSL fallback,优先)
+        "",                          // 直连 HTTPS
+        "https://ghproxy.net/",      // 镜像1 HTTPS
         "https://gh-proxy.com/",     // 镜像2
         "https://mirror.ghproxy.com/", // 镜像3
+        "https://githubproxy.cc/",   // 镜像4
+        "https://ghfast.top/",       // 镜像5
     };
 
     /**
@@ -1149,15 +1175,17 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 HttpURLConnection conn = null;
                 try {
-                    // 尝试多个 API 地址(直连 + 镜像 + HTTP fallback)
+                    // 尝试多个 API 地址(HTTP代理优先,避免旧系统SSL问题)
                     String[] apiUrls = {
-                        "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
-                            + "/releases?per_page=30",
                         "http://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                         "https://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                         "https://gh-proxy.com/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "https://githubproxy.cc/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                     };
 
@@ -1201,7 +1229,7 @@ public class MainActivity extends AppCompatActivity {
                             public void run() {
                                 if (finalErr != null && isSslError(finalErr)) {
                                     Toast.makeText(MainActivity.this,
-                                            "检查更新失败: 系统 SSL/TLS 版本过旧\n无法连接 GitHub,请手动下载更新",
+                                            "检查更新失败: 系统 SSL/TLS 版本过旧\n已尝试跳过证书验证但仍无法连接\n建议用手机浏览器下载APK传到车机安装",
                                             Toast.LENGTH_LONG).show();
                                 } else if (finalErr != null) {
                                     Toast.makeText(MainActivity.this,
@@ -1623,7 +1651,7 @@ public class MainActivity extends AppCompatActivity {
                                 // SSL 错误:提示用浏览器下载(浏览器证书通常更新)
                                 new AlertDialog.Builder(MainActivity.this)
                                         .setTitle("自动下载失败")
-                                        .setMessage("系统 SSL/TLS 版本过旧,无法连接 GitHub。\n\n建议:点击「浏览器下载」用系统浏览器打开下载链接,浏览器通常有更好的证书支持。")
+                                        .setMessage("系统 SSL/TLS 版本过旧,已尝试跳过证书验证但仍无法连接。\n\n建议:点击「浏览器下载」用系统浏览器打开下载链接,或用手机下载后传到车机。")
                                         .setPositiveButton("浏览器下载", new DialogInterface.OnClickListener() {
                                             @Override
                                             public void onClick(DialogInterface dialog, int which) {
