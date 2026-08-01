@@ -72,6 +72,9 @@ public class CoverLoader {
     /** 预提取是否正在运行 */
     private volatile boolean preloading = false;
 
+    /** SQLite 封面 BLOB 缓存(替代 5000+ 小文件,消除随机 IO) */
+    private CoverDatabase coverDb;
+
     private CoverLoader() {
         cache = new LruCache<String, Bitmap>(CACHE_SIZE) {
             @Override
@@ -113,6 +116,9 @@ public class CoverLoader {
             // 无封面黑名单持久化文件(小文件,保持在内部存储)
             noCoverFile = new File(cacheDir, "no_cover_list.txt");
             loadNoCoverSet();
+            // 初始化 SQLite 封面 BLOB 缓存
+            coverDb = CoverDatabase.getInstance(context);
+            Log.d(TAG, "SQLite 封面缓存已初始化, 已缓存 " + coverDb.getCount() + " 张");
         } catch (Exception e) {
             Log.w(TAG, "initDiskCache failed", e);
         }
@@ -248,10 +254,13 @@ public class CoverLoader {
                         continue;
                     }
 
-                    // 已在磁盘缓存
-                    String fileName = md5(key) + ".cover";
-                    File diskFile = new File(diskCacheDir, fileName);
-                    if (diskFile.exists()) {
+                    // 已在缓存(优先查 SQLite 索引,比 file.exists() 快)
+                    boolean inDb = coverDb != null && coverDb.hasCover(key);
+                    if (!inDb && diskCacheDir != null) {
+                        String fileName = md5(key) + ".cover";
+                        inDb = new File(diskCacheDir, fileName).exists();
+                    }
+                    if (inDb) {
                         alreadyCached++;
                         continue;
                     }
@@ -607,40 +616,86 @@ public class CoverLoader {
         return bmp;
     }
 
-    /** 从磁盘缓存加载(使用采样率+RGB_565,避免解码全尺寸大图) */
+    /** 从缓存加载封面(优先 SQLite BLOB,回退到磁盘文件缓存)
+     *  SQLite 走 page cache,命中时零随机磁盘 IO */
     private Bitmap loadFromDiskCache(String key, int targetSize, boolean fullRes) {
+        int actualTarget = fullRes ? targetSize : Math.min(targetSize, THUMB_TARGET_SIZE);
+
+        // 1. 优先从 SQLite 读取(走 page cache,零随机 IO)
+        if (coverDb != null) {
+            Bitmap dbBmp = coverDb.getCover(key, actualTarget);
+            if (dbBmp != null) {
+                return dbBmp;
+            }
+        }
+
+        // 2. 回退:从磁盘文件缓存读取(兼容旧数据)
         if (diskCacheDir == null) return null;
         try {
             String fileName = md5(key) + ".cover";
             File file = new File(diskCacheDir, fileName);
             if (!file.exists()) return null;
 
-            // 单次读取:先 inJustDecodeBounds 获取尺寸,再用同一 Options 解码
-            // (旧方案读两次文件,U盘上浪费 7-50ms)
+            // 修复双读:一次性读文件到 byte[],再从内存解码(只开一次文件)
+            byte[] data = readFileToBytes(file);
+            if (data == null || data.length == 0) return null;
+
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+            BitmapFactory.decodeByteArray(data, 0, data.length, opts);
 
             if (opts.outWidth <= 0 || opts.outHeight <= 0) return null;
 
-            // 计算采样率(列表缩略图限制THUMB_TARGET_SIZE,全分辨率用传入尺寸)
-            int actualTarget = fullRes ? targetSize : Math.min(targetSize, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, actualTarget);
             opts.inJustDecodeBounds = false;
-            opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
             opts.inPurgeable = true;
-            // 提供 inTempStorage 缓冲区,避免 BitmapFactory 内部频繁分配(减少 GC)
             opts.inTempStorage = new byte[8 * 1024];
 
-            return BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+            Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+
+            // 3. 迁移到 SQLite(下次读取不再开文件)
+            if (bmp != null && coverDb != null) {
+                coverDb.putCover(key, bmp);
+            }
+            return bmp;
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** 保存到磁盘缓存 */
+    /** 一次性读取文件到 byte[](避免多次打开文件) */
+    private byte[] readFileToBytes(File file) {
+        FileInputStream fis = null;
+        try {
+            fis = new FileInputStream(file);
+            byte[] data = new byte[(int) file.length()];
+            int offset = 0;
+            int remaining = data.length;
+            while (remaining > 0) {
+                int read = fis.read(data, offset, remaining);
+                if (read == -1) break;
+                offset += read;
+                remaining -= read;
+            }
+            return data;
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (fis != null) { try { fis.close(); } catch (Exception ignored) {} }
+        }
+    }
+
+    /** 保存到缓存(同时写入 SQLite BLOB + 磁盘文件,双写兼容)
+     *  SQLite 是主缓存,文件缓存作为兼容备份 */
     private void saveToDiskCache(String key, Bitmap bmp) {
-        if (diskCacheDir == null || bmp == null) return;
+        if (bmp == null) return;
+        // 1. 写入 SQLite BLOB 缓存(主缓存,走 page cache)
+        if (coverDb != null) {
+            coverDb.putCover(key, bmp);
+        }
+        // 2. 写入磁盘文件缓存(兼容旧数据,可逐步淘汰)
+        if (diskCacheDir == null) return;
         try {
             String fileName = md5(key) + ".cover";
             File file = new File(diskCacheDir, fileName);

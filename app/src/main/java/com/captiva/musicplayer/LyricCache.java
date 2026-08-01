@@ -2,6 +2,7 @@ package com.captiva.musicplayer;
 
 import android.content.Context;
 import android.util.Log;
+import android.util.LruCache;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -24,6 +25,15 @@ public class LyricCache {
 
     private static final String TAG = "LyricCache";
     private static final String CACHE_DIR = "lyrics";
+
+    /** 内存缓存:最多 20 首歌词(每首约 4KB,共 80KB)
+     *  切歌时先查内存,命中则零磁盘 IO */
+    private final LruCache<String, List<LrcEntry>> memoryCache = new LruCache<String, List<LrcEntry>>(20) {
+        @Override
+        protected int sizeOf(String key, List<LrcEntry> value) {
+            return 1; // 按条目数计,不按字节
+        }
+    };
 
     private final File cacheDir;
 
@@ -59,6 +69,11 @@ public class LyricCache {
         if (streamId == null || streamId.isEmpty() || lrcText == null || lrcText.isEmpty()) {
             return;
         }
+        // 同时写入内存缓存(切歌时直接命中,零磁盘 IO)
+        List<LrcEntry> parsed = LrcParser.parseLrcText(lrcText);
+        if (parsed != null && !parsed.isEmpty()) {
+            memoryCache.put(streamId, parsed);
+        }
         File file = new File(cacheDir, sanitizeFileName(streamId) + ".lrc");
         OutputStreamWriter writer = null;
         try {
@@ -84,6 +99,12 @@ public class LyricCache {
         if (streamId == null || streamId.isEmpty()) {
             return null;
         }
+        // 1. 优先从内存缓存读取(零磁盘 IO)
+        List<LrcEntry> cached = memoryCache.get(streamId);
+        if (cached != null) {
+            return cached;
+        }
+        // 2. 回退:从磁盘文件读取
         File file = new File(cacheDir, sanitizeFileName(streamId) + ".lrc");
         if (!file.exists()) {
             return null;
@@ -93,7 +114,11 @@ public class LyricCache {
             return null;
         }
         List<LrcEntry> list = LrcParser.parseLrcText(text);
-        Log.d(TAG, "从缓存加载歌词: " + streamId + " (" + list.size() + " 行)");
+        if (list != null && !list.isEmpty()) {
+            // 写入内存缓存(下次切回这首歌零 IO)
+            memoryCache.put(streamId, list);
+        }
+        Log.d(TAG, "从磁盘缓存加载歌词: " + streamId + " (" + (list != null ? list.size() : 0) + " 行)");
         return list;
     }
 
@@ -155,13 +180,31 @@ public class LyricCache {
         return file.exists() && file.length() > 0;
     }
 
-    /** 清除全部歌词缓存 */
+    /** 清除全部歌词缓存(内存+磁盘) */
     public void clear() {
+        memoryCache.evictAll();
         File[] files = cacheDir.listFiles();
         if (files != null) {
             for (File f : files) {
                 f.delete();
             }
+        }
+    }
+
+    /** 预加载歌词到内存缓存(切歌前提前加载,避免切歌时磁盘 IO)
+     * @param streamId 歌曲 ID
+     */
+    public void preloadToMemory(String streamId) {
+        if (streamId == null || streamId.isEmpty()) return;
+        if (memoryCache.get(streamId) != null) return; // 已在内存
+        // 后台读取文件,写入内存缓存
+        File file = new File(cacheDir, sanitizeFileName(streamId) + ".lrc");
+        if (!file.exists()) return;
+        String text = readTextFile(file);
+        if (text == null || text.isEmpty()) return;
+        List<LrcEntry> list = LrcParser.parseLrcText(text);
+        if (list != null && !list.isEmpty()) {
+            memoryCache.put(streamId, list);
         }
     }
 
