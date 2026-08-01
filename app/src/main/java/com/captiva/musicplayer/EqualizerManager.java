@@ -518,20 +518,11 @@ public class EqualizerManager {
     // ==================== 单曲EQ绑定 ====================
 
     /**
-     * 生成歌曲唯一标识(与 MusicAdapter.getSongKey 一致)
-     * 网络歌曲用 streamId,本地歌曲用规范化文件路径
+     * 生成歌曲唯一标识(使用 MusicBean 缓存,避免重复文件系统 I/O)
      */
     public static String getSongKey(MusicBean bean) {
         if (bean == null) return "";
-        if (bean.isNetwork()) {
-            return "net_" + bean.getStreamId();
-        } else {
-            String data = bean.getData();
-            if (data != null && !data.isEmpty()) {
-                return "local_" + MusicScanner.normalizePath(data);
-            }
-            return "local_" + bean.getId();
-        }
+        return bean.getCachedKey();
     }
 
     /**

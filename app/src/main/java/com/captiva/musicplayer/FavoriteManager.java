@@ -42,17 +42,9 @@ public class FavoriteManager {
         prefs.edit().putStringSet(KEY_FAVORITES, favoriteSet).apply();
     }
 
-    /** 生成歌曲唯一 key(与 MusicAdapter.getSongKey 一致) */
+    /** 生成歌曲唯一 key(使用 MusicBean 缓存,避免重复文件系统 I/O) */
     public static String getSongKey(MusicBean bean) {
-        if (bean.isNetwork()) {
-            return "net_" + bean.getStreamId();
-        } else {
-            String data = bean.getData();
-            if (data != null && !data.isEmpty()) {
-                return "local_" + MusicScanner.normalizePath(data);
-            }
-            return "local_" + bean.getId();
-        }
+        return bean.getCachedKey();
     }
 
     /** 是否已收藏 */

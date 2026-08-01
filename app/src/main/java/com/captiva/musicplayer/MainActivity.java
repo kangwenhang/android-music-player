@@ -2453,18 +2453,10 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 生成歌曲唯一key(用于匹配播放位置,与 MusicAdapter.getSongKey 规则一致) */
+    /** 生成歌曲唯一key(使用 MusicBean 缓存,避免重复文件系统 I/O) */
     private String getSongKey(MusicBean b) {
         if (b == null) return "";
-        if (b.isNetwork()) {
-            return "net_" + b.getStreamId();
-        } else {
-            String data = b.getData();
-            if (data != null && !data.isEmpty()) {
-                return "local_" + MusicScanner.normalizePath(data);
-            }
-            return "local_" + b.getId();
-        }
+        return b.getCachedKey();
     }
 
     /**
