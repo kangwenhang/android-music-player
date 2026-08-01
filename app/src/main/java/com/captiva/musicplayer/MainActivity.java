@@ -257,7 +257,7 @@ public class MainActivity extends AppCompatActivity {
 
                 updateNowPlaying(index);
                 updatePlayButton(playing);
-                btnMode.setText(mode.getShortLabel());
+                updatePlayModeIcon(mode);
                 if (service != null) {
                     lrcView.setLrcList(service.getCurrentLrc());
                 }
@@ -287,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
             updatePlayButton(service.isPlaying());
-            btnMode.setText(service.getPlayMode().getShortLabel());
+            updatePlayModeIcon(service.getPlayMode());
             lrcView.setLrcList(service.getCurrentLrc());
             // 更新EQ按钮显示
             updateEqButtonText(null);
@@ -624,7 +624,7 @@ public class MainActivity extends AppCompatActivity {
         btnMode.setOnClickListener(v -> {
             if (service != null) {
                 PlayMode mode = service.cyclePlayMode();
-                btnMode.setText(mode.getShortLabel());
+                updatePlayModeIcon(mode);
                 Toast.makeText(this, "播放模式: " + mode.getLabel(), Toast.LENGTH_SHORT).show();
             }
         });
@@ -2850,6 +2850,32 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** 更新播放模式按钮图标(顺序/随机/单曲循环) */
+    private void updatePlayModeIcon(PlayMode mode) {
+        btnMode.setText("");
+        int iconRes;
+        switch (mode) {
+            case SHUFFLE:
+                iconRes = R.drawable.ic_play_shuffle;
+                break;
+            case REPEAT_ONE:
+                iconRes = R.drawable.ic_play_repeat_one;
+                break;
+            case SEQUENCE:
+            default:
+                iconRes = R.drawable.ic_play_sequence;
+                break;
+        }
+        // 用 compound drawable 居中显示图标
+        android.graphics.drawable.Drawable icon = ContextCompat.getDrawable(this, iconRes);
+        if (icon != null) {
+            // 缩放到合适尺寸(按钮约48dp,图标用24dp)
+            int iconSize = (int) (24 * getResources().getDisplayMetrics().density);
+            icon.setBounds(0, 0, iconSize, iconSize);
+            btnMode.setCompoundDrawables(icon, null, null, null);
+        }
+    }
+
     private void updateProgress() {
         if (service == null || !bound) {
             return;
@@ -2916,7 +2942,7 @@ public class MainActivity extends AppCompatActivity {
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
             updatePlayButton(service.isPlaying());
-            btnMode.setText(service.getPlayMode().getShortLabel());
+            updatePlayModeIcon(service.getPlayMode());
             lrcView.setLrcList(service.getCurrentLrc());
             // 更新列表高亮和滚动位置到当前播放歌曲
             scrollToCurrentSong();

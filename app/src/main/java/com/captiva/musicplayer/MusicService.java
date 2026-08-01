@@ -125,6 +125,9 @@ public class MusicService extends Service {
         equalizerManager.setContext(this);
         equalizerManager.initSilent();
         MusicDataHolder.getInstance().setEqualizerManager(equalizerManager);
+        // 恢复上次播放模式
+        NavidromeConfig config = new NavidromeConfig(this);
+        playMode = PlayMode.fromValue(config.getPlayMode());
     }
 
     /**
@@ -481,6 +484,8 @@ public class MusicService extends Service {
     /** 切换到下一个播放模式 */
     public PlayMode cyclePlayMode() {
         playMode = playMode.next();
+        // 持久化保存播放模式
+        new NavidromeConfig(this).setPlayMode(playMode.getValue());
         notifyState();
         return playMode;
     }
