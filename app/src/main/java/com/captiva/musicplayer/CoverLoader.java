@@ -40,10 +40,17 @@ import java.util.concurrent.TimeUnit;
 public class CoverLoader {
 
     private static final String TAG = "CoverLoader";
-    // 内存缓存:256MB设备用12MB(约150张封面),够覆盖一轮滑动的可见+预加载范围
-    private static final int CACHE_SIZE = 12 * 1024 * 1024; // 12MB内存缓存
+    // 内存缓存:16MB,配合100px缩略图(20KB/张),可缓存约800张封面
+    // 足够覆盖5000首歌列表的可见+预加载范围,滚动时不读磁盘
+    private static final int CACHE_SIZE = 16 * 1024 * 1024; // 16MB内存缓存
     private static final String DISK_CACHE_DIR = "cover_cache";
-    private static final long DISK_CACHE_MAX_SIZE = 50 * 1024 * 1024; // 50MB磁盘缓存(预提取需要更大)
+    // 磁盘缓存:200MB,支持5000+首歌的封面预提取
+    // 100px JPEG quality 75 约5-10KB/张,200MB可存20000+张
+    private static final long DISK_CACHE_MAX_SIZE = 200 * 1024 * 1024; // 200MB磁盘缓存
+    /** 列表缩略图目标尺寸(px),48dp显示用100px足够清晰(2x超采样) */
+    private static final int THUMB_TARGET_SIZE = 100;
+    /** 磁盘缓存JPEG压缩质量(小缩略图75足够,减少文件大小) */
+    private static final int JPEG_QUALITY = 75;
 
     /** 每隔多少次保存才检查一次磁盘缓存大小 */
     private static final int CLEAN_INTERVAL = 10;
@@ -429,7 +436,7 @@ public class CoverLoader {
     }
 
     /**
-     * 异步加载封面 Bitmap(全分辨率,不限制200px,用于歌词背景)
+     * 异步加载封面 Bitmap(全分辨率,不限制缩略图尺寸,用于歌词背景)
      */
     public void loadBitmapFull(MusicBean bean, final int size, final BitmapCallback callback) {
         loadBitmapInternal(bean, size, callback, true);
@@ -528,8 +535,8 @@ public class CoverLoader {
 
             if (opts.outWidth <= 0 || opts.outHeight <= 0) return null;
 
-            // 计算采样率(列表缩略图限制200px,全分辨率用传入尺寸)
-            int actualTarget = fullRes ? targetSize : Math.min(targetSize, 200);
+            // 计算采样率(列表缩略图限制THUMB_TARGET_SIZE,全分辨率用传入尺寸)
+            int actualTarget = fullRes ? targetSize : Math.min(targetSize, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, actualTarget);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
@@ -552,7 +559,7 @@ public class CoverLoader {
             FileOutputStream fos = null;
             try {
                 fos = new FileOutputStream(file);
-                bmp.compress(Bitmap.CompressFormat.JPEG, 85, fos);
+                bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, fos);
                 fos.flush();
             } finally {
                 if (fos != null) fos.close();
@@ -633,8 +640,8 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(art, 0, art.length, opts);
-            // 全分辨率模式不限制尺寸;列表缩略图限制200px
-            int targetSize = fullRes ? size : Math.min(size, 200);
+            // 全分辨率模式不限制尺寸;列表缩略图限制THUMB_TARGET_SIZE
+            int targetSize = fullRes ? size : Math.min(size, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565; // 减少内存
@@ -691,7 +698,7 @@ public class CoverLoader {
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
-            int targetSize = fullRes ? size : Math.min(size, 200);
+            int targetSize = fullRes ? size : Math.min(size, THUMB_TARGET_SIZE);
             opts.inSampleSize = calculateSampleSize(opts.outWidth, opts.outHeight, targetSize);
             opts.inJustDecodeBounds = false;
             opts.inPreferredConfig = Bitmap.Config.RGB_565;
