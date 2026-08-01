@@ -345,22 +345,21 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (position < 0 || position >= filteredData.size()) {
             return false;
         }
-        // 如果位置已超出当前加载范围,补充加载
+        // 如果位置已超出当前加载范围,一次性补充加载所有需要的批次
+        // 然后只通知一次(原来每批 notifyItemRangeInserted,目标在 3000 时触发 60 次通知)
         while (loadedCount <= position && hasMore) {
             int start = loadedCount;
             int end = Math.min(loadedCount + BATCH_SIZE, filteredData.size());
             for (int i = start; i < end; i++) {
                 data.add(filteredData.get(i));
             }
-            int addedCount = end - start;
             loadedCount = end;
             hasMore = loadedCount < filteredData.size();
-            if (addedCount > 0) {
-                notifyItemRangeInserted(start, addedCount);
-            }
         }
         int added = loadedCount - startLoaded;
         if (added > 0) {
+            // 只通知一次,而不是每批通知
+            notifyItemRangeInserted(startLoaded, added);
             long elapsed = System.currentTimeMillis() - t0;
             Log.i(TAG, "[ensureLoaded] pos=" + position + " 加载" + added + "条"
                     + " loadedCount=" + loadedCount + "/" + filteredData.size() + " " + elapsed + "ms");
