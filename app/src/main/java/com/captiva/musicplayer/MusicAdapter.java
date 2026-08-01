@@ -208,9 +208,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (filterKeyword.isEmpty()) {
             return true;
         }
-        String title = b.getTitle().toLowerCase();
-        String artist = b.getArtist() != null ? b.getArtist().toLowerCase() : "";
-        return title.contains(filterKeyword) || artist.contains(filterKeyword);
+        // 使用缓存的小写值,避免每次过滤都对 810 首歌调用 toLowerCase()
+        return b.getLowerTitle().contains(filterKeyword) || b.getLowerArtist().contains(filterKeyword);
     }
 
     /**

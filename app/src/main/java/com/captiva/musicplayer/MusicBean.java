@@ -25,6 +25,11 @@ public class MusicBean {
     /** 缓存的 song key,避免重复调用 getCanonicalPath()(文件系统 I/O) */
     private String cachedKey;
 
+    /** 缓存的小写标题(搜索过滤用,避免每次 toLowerCase 分配新字符串) */
+    private String cachedLowerTitle;
+    /** 缓存的小写艺术家(同上) */
+    private String cachedLowerArtist;
+
     public MusicBean() {
     }
 
@@ -173,5 +178,26 @@ public class MusicBean {
             }
         }
         return cachedKey;
+    }
+
+    /**
+     * 获取小写标题(懒加载缓存)
+     * 搜索过滤用,避免每次输入都对 810 首歌调用 toLowerCase()
+     */
+    public String getLowerTitle() {
+        if (cachedLowerTitle == null) {
+            cachedLowerTitle = getTitle().toLowerCase();
+        }
+        return cachedLowerTitle;
+    }
+
+    /**
+     * 获取小写艺术家(懒加载缓存)
+     */
+    public String getLowerArtist() {
+        if (cachedLowerArtist == null) {
+            cachedLowerArtist = getArtist() != null ? getArtist().toLowerCase() : "";
+        }
+        return cachedLowerArtist;
     }
 }
