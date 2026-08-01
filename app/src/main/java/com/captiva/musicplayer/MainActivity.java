@@ -1260,7 +1260,58 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
 
-                    JSONArray releases = new JSONArray(sb.toString());
+                    // 检查响应是否是合法 JSON(代理镜像可能返回 HTML 错误页)
+                    String responseStr = sb.toString().trim();
+                    if (responseStr.startsWith("<") || responseStr.startsWith("<!")) {
+                        // 收到 HTML 页面而非 JSON,说明代理镜像返回了错误页
+                        // 继续尝试下一个镜像(如果还有的话)
+                        Log.w(TAG, "API 返回 HTML 而非 JSON(代理错误页),尝试下一个镜像");
+                        // 重新遍历剩余的镜像
+                        boolean found = false;
+                        for (int retry = 0; retry < apiUrls.length; retry++) {
+                            try {
+                                conn = createConnection(apiUrls[retry]);
+                                conn.setRequestMethod("GET");
+                                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                                conn.setConnectTimeout(15000);
+                                conn.setReadTimeout(15000);
+                                conn.connect();
+                                if (conn.getResponseCode() == 200) {
+                                    is = conn.getInputStream();
+                                    BufferedReader reader2 = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                                    sb.setLength(0);
+                                    String line2;
+                                    while ((line2 = reader2.readLine()) != null) {
+                                        sb.append(line2);
+                                    }
+                                    reader2.close();
+                                    responseStr = sb.toString().trim();
+                                    if (responseStr.startsWith("[")) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            } catch (Exception e) {
+                                Log.w(TAG, "重试镜像失败(" + apiUrls[retry] + "): " + e.getMessage());
+                            } finally {
+                                if (conn != null) { conn.disconnect(); conn = null; }
+                            }
+                        }
+                        if (!found) {
+                            final String errMsg = "所有镜像均返回非JSON响应\n可能是网络代理拦截\n建议用手机浏览器下载APK传到车机安装";
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    Toast.makeText(MainActivity.this,
+                                            "检查更新失败: " + errMsg,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            });
+                            return;
+                        }
+                    }
+
+                    JSONArray releases = new JSONArray(responseStr);
 
                     // 只找正式版(prerelease=false),取第一个(最新)
                     JSONObject latestRelease = null;
