@@ -6,11 +6,28 @@ plugins {
 }
 
 /**
- * 获取 git commit 数量作为 versionCode
- * 每次提交自动 +1,保证单调递增,可覆盖安装
- * 无 git 环境时回退到 1
+ * 获取 versionCode
+ *
+ * CI 环境(GitHub Actions):使用 GITHUB_RUN_NUMBER + 100000
+ *   - run number 每次构建自动递增,不分分支,保证跨分支单调递增
+ *   - 加 100000 基数确保 > 之前所有 git-commit 版本号(最大约 189)
+ *   - 解决 local-test commit 数 < main 导致降级安装失败的问题
+ *
+ * 本地构建:用 git commit 数量
+ *   - 每次提交自动 +1,保证单调递增
+ *   - 无 git 环境时回退到 1
  */
 static int getGitVersionCode() {
+    // CI 环境:优先使用 GitHub Actions run number
+    String runNumber = System.getenv('GITHUB_RUN_NUMBER')
+    if (runNumber != null && !runNumber.isEmpty()) {
+        try {
+            return 100000 + runNumber.toInteger()
+        } catch (Exception ignored) {
+        }
+    }
+
+    // 本地构建:用 git commit 数量
     try {
         def process = "git rev-list --count HEAD".execute()
         process.waitFor()

@@ -61,6 +61,15 @@ public class MusicService extends Service {
     private RemoteControlClient remoteControlClient;
     private AudioManager audioManager;
 
+    /** 音频焦点监听器:导航播报时压低音量,播报结束恢复 */
+    private AudioManager.OnAudioFocusChangeListener audioFocusListener;
+    /** 是否因失去焦点而暂停(用于焦点恢复时自动继续播放) */
+    private boolean pausedByFocusLoss = false;
+    /** 是否因 ducking 降低音量(用于恢复时还原音量) */
+    private boolean ducked = false;
+    /** ducking 前的原始音量 */
+    private float volumeBeforeDuck = 1.0f;
+
     // 播放模式
     private PlayMode playMode = PlayMode.SEQUENCE;
     private final Random random = new Random();
@@ -100,12 +109,109 @@ public class MusicService extends Service {
         super.onCreate();
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         registerMediaButton();
+        initAudioFocus();
         // 初始化均衡器并注册到全局,供 EqualizerActivity 使用
         // 设置 Context 用于持久化,并在启动时静默初始化(允许未播放时调节)
         equalizerManager = new EqualizerManager();
         equalizerManager.setContext(this);
         equalizerManager.initSilent();
         MusicDataHolder.getInstance().setEqualizerManager(equalizerManager);
+    }
+
+    /**
+     * 初始化音频焦点监听
+     *
+     * 导航播报时系统会请求 AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+     * 我们收到 AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK 时降低音量(ducking),
+     * 焦点恢复后还原音量。
+     *
+     * 如果导航请求的是 AUDIOFOCUS_GAIN_TRANSIENT(不可压低),
+     * 我们暂停播放,焦点恢复后自动继续。
+     */
+    private void initAudioFocus() {
+        audioFocusListener = new AudioManager.OnAudioFocusChangeListener() {
+            @Override
+            public void onAudioFocusChange(int focusChange) {
+                switch (focusChange) {
+                    case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                        // 导航播报(可压低):降低音量到 20%
+                        if (player != null && isPrepared && player.isPlaying()) {
+                            ducked = true;
+                            player.setVolume(0.2f, 0.2f);
+                        }
+                        break;
+
+                    case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                        // 电话等(不可压低):暂停播放,等焦点恢复后自动继续
+                        if (player != null && isPrepared && player.isPlaying()) {
+                            pausedByFocusLoss = true;
+                            player.pause();
+                            updateRemoteControlPlayState(false);
+                            notifyState();
+                        }
+                        break;
+
+                    case AudioManager.AUDIOFOCUS_GAIN:
+                        // 焦点恢复:先还原音量
+                        if (ducked) {
+                            ducked = false;
+                            if (player != null && isPrepared) {
+                                player.setVolume(1.0f, 1.0f);
+                            }
+                        }
+                        // 如果是因失去焦点而暂停的,自动恢复播放
+                        if (pausedByFocusLoss) {
+                            pausedByFocusLoss = false;
+                            if (player != null && isPrepared && !player.isPlaying()) {
+                                player.start();
+                                updateRemoteControlPlayState(true);
+                                notifyState();
+                            }
+                        }
+                        break;
+
+                    case AudioManager.AUDIOFOCUS_LOSS:
+                        // 永久失去焦点(如其他音乐应用):暂停播放,不自动恢复
+                        pausedByFocusLoss = false;
+                        ducked = false;
+                        if (player != null && isPrepared && player.isPlaying()) {
+                            player.pause();
+                            updateRemoteControlPlayState(false);
+                            notifyState();
+                            updateNotification();
+                        }
+                        // 释放音频焦点
+                        if (audioManager != null) {
+                            audioManager.abandonAudioFocus(audioFocusListener);
+                        }
+                        break;
+                }
+            }
+        };
+    }
+
+    /**
+     * 请求音频焦点(在开始播放时调用)
+     * @return true 如果获得焦点
+     */
+    private boolean requestAudioFocus() {
+        if (audioManager == null || audioFocusListener == null) return true;
+        int result = audioManager.requestAudioFocus(
+                audioFocusListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN);
+        return result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    /**
+     * 释放音频焦点(在停止播放时调用)
+     */
+    private void abandonAudioFocus() {
+        if (audioManager != null && audioFocusListener != null) {
+            audioManager.abandonAudioFocus(audioFocusListener);
+            ducked = false;
+            pausedByFocusLoss = false;
+        }
     }
 
     /** 注册媒体按键接收,响应方向盘控制 */
@@ -599,6 +705,10 @@ public class MusicService extends Service {
                         } catch (Exception e) {
                             Log.w(TAG, "equalizer init failed", e);
                         }
+                        // 请求音频焦点(导航播报时系统才能压低音乐音量)
+                        requestAudioFocus();
+                        // 确保音量正常(可能之前 ducking 后未恢复)
+                        mp.setVolume(1.0f, 1.0f);
                         mp.start();
                         // 恢复上次播放进度
                         if (pendingSeekPosition > 0) {
@@ -845,6 +955,7 @@ public class MusicService extends Service {
     // ---------- 生命周期 ----------
 
     private void stopSelfSafely() {
+        abandonAudioFocus();
         if (player != null) {
             try {
                 if (player.isPlaying()) {
@@ -880,6 +991,8 @@ public class MusicService extends Service {
         } catch (Exception e) {
             Log.w(TAG, "unregister RCC failed", e);
         }
+        // 释放音频焦点
+        abandonAudioFocus();
         if (player != null) {
             try {
                 player.release();
