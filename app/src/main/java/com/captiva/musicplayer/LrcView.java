@@ -6,6 +6,8 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -28,6 +30,9 @@ import java.util.List;
  * 3. 零分配 onDraw: 用预分配数组替代 ArrayList,消除 GC 压力
  */
 public class LrcView extends View {
+
+    private static final String TAG = "LrcView";
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private List<LrcEntry> lrcList = new ArrayList<>();
     private int currentIndex = -1;
@@ -180,7 +185,7 @@ public class LrcView extends View {
         scrimPaint.setColor(COLOR_SCRIM);
     }
 
-    /** 设置封面背景 Bitmap */
+    /** 设置封面背景 Bitmap(缩放在后台线程执行,避免阻塞主线程) */
     public void setCoverBitmap(Bitmap bmp) {
         if (bmp == coverBitmap) {
             return;
@@ -196,15 +201,34 @@ public class LrcView extends View {
                 // 滑动中:跳过 createScaledBitmap(耗时操作,会导致主线程卡顿)
                 // blurredBitmap 保持 null,setSkipDraw(false) 恢复时会补创建
             } else {
-                try {
-                    blurredBitmap = createScaledBitmap(coverBitmap);
-                } catch (OutOfMemoryError e) {
-                    // 车机内存不足时,直接用原图,不模糊
-                    blurredBitmap = null;
-                }
+                // 后台线程执行 createScaledBitmap(车机上约 80-140ms,不能在主线程做)
+                final Bitmap src = coverBitmap;
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            final Bitmap scaled = createScaledBitmap(src);
+                            mainHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    // 检查 src 是否仍是当前封面(可能已切换歌曲)
+                                    if (src == coverBitmap) {
+                                        blurredBitmap = scaled;
+                                        invalidate();
+                                    } else if (scaled != null) {
+                                        scaled.recycle();
+                                    }
+                                }
+                            });
+                        } catch (OutOfMemoryError e) {
+                            // 内存不足,用纯色背景
+                        }
+                    }
+                }).start();
             }
+        } else {
+            invalidate();
         }
-        invalidate();
     }
 
     /**

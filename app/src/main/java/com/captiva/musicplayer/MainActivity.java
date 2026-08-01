@@ -20,10 +20,12 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -560,6 +562,35 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // 搜索栏:IME 搜索按钮(软键盘回车)
+        etSearch.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                if (actionId == EditorInfo.IME_ACTION_SEARCH ||
+                    (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                    long t0 = System.currentTimeMillis();
+                    String query = etSearch.getText() != null ? etSearch.getText().toString().trim() : "";
+                    Log.i(TAG, "[SearchSubmit] query='" + query + "' 长度=" + query.length());
+                    // 空搜索:清除焦点+收起键盘,不做过滤(避免不必要的 notifyDataSetChanged)
+                    if (query.isEmpty()) {
+                        etSearch.clearFocus();
+                        android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                        if (imm != null) {
+                            imm.hideSoftInputFromWindow(etSearch.getWindowToken(), 0);
+                        }
+                        Log.i(TAG, "[SearchSubmit] 空搜索,清除焦点 " + (System.currentTimeMillis() - t0) + "ms");
+                    } else {
+                        // 非空搜索:执行过滤
+                        handleSearchInput(query);
+                        Log.i(TAG, "[SearchSubmit] 过滤完成 " + (System.currentTimeMillis() - t0) + "ms");
+                    }
+                    return true;
+                }
+                return false;
+            }
+        });
+
         // 设置(均衡器 + 服务器统一入口)
         btnSettings.setOnClickListener(v -> {
             showSettingsMenu();
@@ -572,21 +603,33 @@ public class MainActivity extends AppCompatActivity {
 
         // 收藏夹:切换只看收藏
         btnFavorites.setOnClickListener(v -> {
+            long t0 = System.currentTimeMillis();
             favoritesOnly = !favoritesOnly;
             if (favoritesOnly) {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn_play);
+                Log.i(TAG, "[FavToggle] 切到收藏模式");
                 applyFavoritesFilter();
+                Log.i(TAG, "[FavToggle] 收藏模式完成 " + (System.currentTimeMillis() - t0) + "ms");
             } else {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn);
+                Log.i(TAG, "[FavToggle] 切回全部歌曲 query='" + currentSearchQuery + "'");
                 // 恢复搜索或全部
+                long t1 = System.currentTimeMillis();
                 adapter.filter(currentSearchQuery);
+                Log.i(TAG, "[FavToggle] adapter.filter=" + (System.currentTimeMillis() - t1) + "ms");
                 updateCount();
                 // 隐藏"还没有收藏"的空提示
                 if (!musicList.isEmpty()) {
                     tvEmpty.setVisibility(View.GONE);
                 }
                 // 更新高亮:切回全部歌曲后重新定位当前播放歌曲
+                long t2 = System.currentTimeMillis();
                 updatePlayingHighlight();
+                Log.i(TAG, "[FavToggle] highlight=" + (System.currentTimeMillis() - t2) + "ms"
+                        + " 总=" + (System.currentTimeMillis() - t0) + "ms");
+            }
+            if (PerfLogger.isEnabled()) {
+                PerfLogger.log("FavToggle", "总=" + (System.currentTimeMillis() - t0) + "ms favoritesOnly=" + favoritesOnly);
             }
         });
 
@@ -756,28 +799,43 @@ public class MainActivity extends AppCompatActivity {
      * 处理搜索栏输入(即时过滤本地文件)
      */
     private void handleSearchInput(String query) {
+        long t0 = System.currentTimeMillis();
         currentSearchQuery = query != null ? query.trim() : "";
+        Log.i(TAG, "[handleSearchInput] query='" + currentSearchQuery + "' favoritesOnly=" + favoritesOnly);
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("SearchInput", "query='" + currentSearchQuery + "' favoritesOnly=" + favoritesOnly);
+        }
         if (favoritesOnly) {
             applyFavoritesFilter();
         } else {
+            long t1 = System.currentTimeMillis();
             adapter.filter(currentSearchQuery);
+            Log.i(TAG, "[handleSearchInput] adapter.filter=" + (System.currentTimeMillis() - t1) + "ms");
         }
+        long t2 = System.currentTimeMillis();
         updateCount();
-        // 更新高亮:过滤后重新定位当前播放歌曲
         updatePlayingHighlight();
+        Log.i(TAG, "[handleSearchInput] updateCount+highlight=" + (System.currentTimeMillis() - t2) + "ms");
+        Log.i(TAG, "[handleSearchInput] 总耗时=" + (System.currentTimeMillis() - t0) + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("SearchInput", "总耗时=" + (System.currentTimeMillis() - t0) + "ms");
+        }
     }
 
     // ==================== 收藏夹 ====================
 
     /** 应用收藏过滤:只显示已收藏的歌曲(同时应用搜索关键词) */
     private void applyFavoritesFilter() {
+        long t0 = System.currentTimeMillis();
         int count = favoriteManager.size();
         if (count == 0) {
             Toast.makeText(this, "还没有收藏的歌曲", Toast.LENGTH_SHORT).show();
         }
         // 设置搜索关键词,使 filterFavorites 也按搜索过滤
         adapter.setSearchKeyword(currentSearchQuery);
+        long t1 = System.currentTimeMillis();
         adapter.filterFavorites(favoriteManager);
+        Log.i(TAG, "[applyFavoritesFilter] filterFavorites=" + (System.currentTimeMillis() - t1) + "ms");
         updateCount();
         if (count == 0) {
             tvEmpty.setVisibility(View.VISIBLE);
@@ -786,7 +844,13 @@ public class MainActivity extends AppCompatActivity {
             tvEmpty.setVisibility(View.GONE);
         }
         // 更新高亮:只标记当前播放歌曲(如果不在收藏列表中则清除高亮)
+        long t2 = System.currentTimeMillis();
         updatePlayingHighlight();
+        Log.i(TAG, "[applyFavoritesFilter] highlight=" + (System.currentTimeMillis() - t2) + "ms"
+                + " 总=" + (System.currentTimeMillis() - t0) + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("applyFavFilter", "总=" + (System.currentTimeMillis() - t0) + "ms");
+        }
     }
 
     // ==================== 设置菜单 ====================
@@ -2420,18 +2484,10 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 生成歌曲唯一key(用于匹配播放位置,与 MusicAdapter.getSongKey 规则一致) */
+    /** 生成歌曲唯一key(使用 MusicBean 缓存,避免重复文件系统 I/O) */
     private String getSongKey(MusicBean b) {
         if (b == null) return "";
-        if (b.isNetwork()) {
-            return "net_" + b.getStreamId();
-        } else {
-            String data = b.getData();
-            if (data != null && !data.isEmpty()) {
-                return "local_" + MusicScanner.normalizePath(data);
-            }
-            return "local_" + b.getId();
-        }
+        return b.getCachedKey();
     }
 
     /**
@@ -2823,18 +2879,31 @@ public class MainActivity extends AppCompatActivity {
      * 如果当前播放歌曲不在过滤后的列表中,清除高亮
      */
     private void updatePlayingHighlight() {
-        if (service == null) return;
+        long t0 = System.currentTimeMillis();
+        if (service == null) {
+            Log.i(TAG, "[updatePlayingHighlight] service=null " + (System.currentTimeMillis() - t0) + "ms");
+            return;
+        }
         MusicBean current = service.getCurrentMusic();
         if (current == null) {
             adapter.setPlayingIndex(-1);
+            Log.i(TAG, "[updatePlayingHighlight] current=null " + (System.currentTimeMillis() - t0) + "ms");
             return;
         }
+        long t1 = System.currentTimeMillis();
         int pos = adapter.findPositionByBean(current);
+        Log.i(TAG, "[updatePlayingHighlight] findPosition=" + pos + " " + (System.currentTimeMillis() - t1) + "ms");
         if (pos >= 0) {
             // 确保该位置数据已加载(搜索清空后当前歌曲可能在分批加载范围之外)
+            long t2 = System.currentTimeMillis();
             adapter.ensureLoaded(pos);
+            Log.i(TAG, "[updatePlayingHighlight] ensureLoaded=" + (System.currentTimeMillis() - t2) + "ms");
         }
         adapter.setPlayingIndex(pos);
+        Log.i(TAG, "[updatePlayingHighlight] 总=" + (System.currentTimeMillis() - t0) + "ms pos=" + pos);
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("Highlight", "pos=" + pos + " " + (System.currentTimeMillis() - t0) + "ms");
+        }
     }
 
     /** 更新播放按钮:播放中=蓝色圆形+暂停图标,暂停中=红色圆形+播放图标 */
@@ -2850,7 +2919,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 更新播放模式按钮文字(顺序/随机/单曲循环) */
+    /** 更新播放模式按钮文字(顺/随/单) */
     private void updatePlayModeIcon(PlayMode mode) {
         btnMode.setText(mode.getShortLabel());
         btnMode.setCompoundDrawables(null, null, null, null);
@@ -2895,9 +2964,12 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onResume() {
+        long t0 = System.currentTimeMillis();
         super.onResume();
+        Log.i(TAG, "[onResume] 开始");
         // 从其他页面返回时重新隐藏系统 UI
         hideSystemUI();
+        Log.i(TAG, "[onResume] hideSystemUI=" + (System.currentTimeMillis() - t0) + "ms");
         // 从均衡器页面返回时刷新EQ按钮显示(可能修改了设置或新增了自定义预设)
         updateEqButtonText(null);
         // 从设置页面返回时,如果配置有更新则重新加载
@@ -2919,13 +2991,25 @@ public class MainActivity extends AppCompatActivity {
         // 同步当前播放状态:从桌面返回时可能已自动切歌,需更新UI
         // onPause 期间 stateReceiver 被注销,自动切歌的广播被错过
         if (service != null && bound) {
+            long t1 = System.currentTimeMillis();
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
+            Log.i(TAG, "[onResume] updateNowPlaying=" + (System.currentTimeMillis() - t1) + "ms");
+            long t2 = System.currentTimeMillis();
             updatePlayButton(service.isPlaying());
             updatePlayModeIcon(service.getPlayMode());
+            Log.i(TAG, "[onResume] updatePlayButton+Mode=" + (System.currentTimeMillis() - t2) + "ms");
+            long t3 = System.currentTimeMillis();
             lrcView.setLrcList(service.getCurrentLrc());
+            Log.i(TAG, "[onResume] setLrcList=" + (System.currentTimeMillis() - t3) + "ms");
             // 更新列表高亮和滚动位置到当前播放歌曲
+            long t4 = System.currentTimeMillis();
             scrollToCurrentSong();
+            Log.i(TAG, "[onResume] scrollToCurrentSong=" + (System.currentTimeMillis() - t4) + "ms");
+        }
+        Log.i(TAG, "[onResume] 总耗时=" + (System.currentTimeMillis() - t0) + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("onResume", "总=" + (System.currentTimeMillis() - t0) + "ms");
         }
     }
 

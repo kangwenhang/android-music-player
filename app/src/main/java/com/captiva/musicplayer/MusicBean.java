@@ -22,6 +22,14 @@ public class MusicBean {
     private String localSuffix; // 音频文件后缀(如 mp3, flac),用于下载
     private int bitRate;        // 比特率(kbps),用于下载时选择质量
 
+    /** 缓存的 song key,避免重复调用 getCanonicalPath()(文件系统 I/O) */
+    private String cachedKey;
+
+    /** 缓存的小写标题(搜索过滤用,避免每次 toLowerCase 分配新字符串) */
+    private String cachedLowerTitle;
+    /** 缓存的小写艺术家(同上) */
+    private String cachedLowerArtist;
+
     public MusicBean() {
     }
 
@@ -144,5 +152,52 @@ public class MusicBean {
         if (s < 10) sb.append('0');
         sb.append(s);
         return sb.toString();
+    }
+
+    /**
+     * 获取缓存的 song key(懒加载,线程安全)
+     *
+     * key 规则(与各处 getSongKey 一致):
+     * - 网络歌曲: net_{streamId}
+     * - 本地歌曲: local_{normalizePath(data)} 或 local_{id}
+     *
+     * 关键优化:normalizePath() 内部调用 getCanonicalPath() 是文件系统 I/O,
+     * 在车机上每次约 0.3ms。810 首歌遍历一次 = 243ms 主线程卡顿。
+     * 缓存后只需计算一次,后续调用为纯内存操作。
+     */
+    public synchronized String getCachedKey() {
+        if (cachedKey == null) {
+            if (network) {
+                cachedKey = "net_" + streamId;
+            } else {
+                if (data != null && !data.isEmpty()) {
+                    cachedKey = "local_" + MusicScanner.normalizePath(data);
+                } else {
+                    cachedKey = "local_" + id;
+                }
+            }
+        }
+        return cachedKey;
+    }
+
+    /**
+     * 获取小写标题(懒加载缓存)
+     * 搜索过滤用,避免每次输入都对 810 首歌调用 toLowerCase()
+     */
+    public String getLowerTitle() {
+        if (cachedLowerTitle == null) {
+            cachedLowerTitle = getTitle().toLowerCase();
+        }
+        return cachedLowerTitle;
+    }
+
+    /**
+     * 获取小写艺术家(懒加载缓存)
+     */
+    public String getLowerArtist() {
+        if (cachedLowerArtist == null) {
+            cachedLowerArtist = getArtist() != null ? getArtist().toLowerCase() : "";
+        }
+        return cachedLowerArtist;
     }
 }
