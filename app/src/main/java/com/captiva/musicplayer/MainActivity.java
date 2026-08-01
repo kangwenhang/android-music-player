@@ -20,10 +20,12 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -557,6 +559,35 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void afterTextChanged(Editable s) {
                 handleSearchInput(s != null ? s.toString() : "");
+            }
+        });
+
+        // 搜索栏:IME 搜索按钮(软键盘回车)
+        etSearch.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+                if (actionId == EditorInfo.IME_ACTION_SEARCH ||
+                    (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                    long t0 = System.currentTimeMillis();
+                    String query = etSearch.getText() != null ? etSearch.getText().toString().trim() : "";
+                    Log.i(TAG, "[SearchSubmit] query='" + query + "' 长度=" + query.length());
+                    // 空搜索:清除焦点+收起键盘,不做过滤(避免不必要的 notifyDataSetChanged)
+                    if (query.isEmpty()) {
+                        etSearch.clearFocus();
+                        android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                        if (imm != null) {
+                            imm.hideSoftInputFromWindow(etSearch.getWindowToken(), 0);
+                        }
+                        Log.i(TAG, "[SearchSubmit] 空搜索,清除焦点 " + (System.currentTimeMillis() - t0) + "ms");
+                    } else {
+                        // 非空搜索:执行过滤
+                        handleSearchInput(query);
+                        Log.i(TAG, "[SearchSubmit] 过滤完成 " + (System.currentTimeMillis() - t0) + "ms");
+                    }
+                    return true;
+                }
+                return false;
             }
         });
 
@@ -2933,9 +2964,12 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onResume() {
+        long t0 = System.currentTimeMillis();
         super.onResume();
+        Log.i(TAG, "[onResume] 开始");
         // 从其他页面返回时重新隐藏系统 UI
         hideSystemUI();
+        Log.i(TAG, "[onResume] hideSystemUI=" + (System.currentTimeMillis() - t0) + "ms");
         // 从均衡器页面返回时刷新EQ按钮显示(可能修改了设置或新增了自定义预设)
         updateEqButtonText(null);
         // 从设置页面返回时,如果配置有更新则重新加载
@@ -2957,13 +2991,25 @@ public class MainActivity extends AppCompatActivity {
         // 同步当前播放状态:从桌面返回时可能已自动切歌,需更新UI
         // onPause 期间 stateReceiver 被注销,自动切歌的广播被错过
         if (service != null && bound) {
+            long t1 = System.currentTimeMillis();
             int idx = service.getCurrentIndex();
             updateNowPlaying(idx);
+            Log.i(TAG, "[onResume] updateNowPlaying=" + (System.currentTimeMillis() - t1) + "ms");
+            long t2 = System.currentTimeMillis();
             updatePlayButton(service.isPlaying());
             updatePlayModeIcon(service.getPlayMode());
+            Log.i(TAG, "[onResume] updatePlayButton+Mode=" + (System.currentTimeMillis() - t2) + "ms");
+            long t3 = System.currentTimeMillis();
             lrcView.setLrcList(service.getCurrentLrc());
+            Log.i(TAG, "[onResume] setLrcList=" + (System.currentTimeMillis() - t3) + "ms");
             // 更新列表高亮和滚动位置到当前播放歌曲
+            long t4 = System.currentTimeMillis();
             scrollToCurrentSong();
+            Log.i(TAG, "[onResume] scrollToCurrentSong=" + (System.currentTimeMillis() - t4) + "ms");
+        }
+        Log.i(TAG, "[onResume] 总耗时=" + (System.currentTimeMillis() - t0) + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("onResume", "总=" + (System.currentTimeMillis() - t0) + "ms");
         }
     }
 
