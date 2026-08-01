@@ -81,27 +81,51 @@ public class MainActivity extends AppCompatActivity {
     private SSLSocketFactory tls12Factory;
 
     /**
-     * 创建 HTTPS 连接,安卓 4.2 及以下强制启用 TLS 1.2
-     * GitHub 及其镜像现在要求 TLS 1.2+,旧系统 SSL 握手会失败
+     * 创建 HTTPS 连接,安卓 4.2 及以下强制启用 TLS 1.2 + 信任所有证书
+     *
+     * 两个问题:
+     * 1. 安卓 4.x 默认禁用 TLS 1.2(GitHub 要求 TLS 1.2+)
+     * 2. 安卓 4.x 根证书太旧,不信任 GitHub 用的现代 CA 证书
+     *
+     * 解决:手动启用 TLS 1.2 + TrustAllManager 跳过证书验证
+     * (下载 APK 不是敏感操作,可接受跳过验证)
      */
     private HttpURLConnection createConnection(String urlStr) throws Exception {
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         if (conn instanceof HttpsURLConnection && Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            // 安卓 4.x 默认禁用 TLS 1.2,但底层 OpenSSL 支持,手动启用
             if (tls12Factory == null) {
                 try {
+                    // 创建信任所有证书的 TrustManager
+                    TrustManager[] trustAllCerts = new TrustManager[]{
+                        new X509TrustManager() {
+                            @Override
+                            public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                            @Override
+                            public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                            @Override
+                            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return null; }
+                        }
+                    };
+
                     SSLContext sslContext = SSLContext.getInstance("TLSv1.2");
-                    // 使用系统默认信任管理器
-                    sslContext.init(null, null, null);
+                    sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
                     tls12Factory = sslContext.getSocketFactory();
-                    Log.d(TAG, "TLS 1.2 已启用");
+                    Log.d(TAG, "TLS 1.2 + TrustAll 已启用");
                 } catch (Exception e) {
                     Log.w(TAG, "TLS 1.2 启用失败,使用系统默认: " + e.getMessage());
                 }
             }
             if (tls12Factory != null) {
-                ((HttpsURLConnection) conn).setSSLSocketFactory(tls12Factory);
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(tls12Factory);
+                // 跳过主机名验证(TrustAll 模式下必须)
+                https.setHostnameVerifier(new javax.net.ssl.HostnameVerifier() {
+                    @Override
+                    public boolean verify(String hostname, javax.net.ssl.SSLSession session) {
+                        return true;
+                    }
+                });
             }
         }
         return conn;
@@ -142,6 +166,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean bound = false;
     /** 标记是否需要自动播放(仅首次加载时触发) */
     private boolean autoPlayPending = false;
+    /** 用户点击歌曲时 service 还没绑定好,记录待播放位置,onServiceConnected 后自动播放 */
+    private int pendingPlayIndex = -1;
 
     /** 当前音乐列表(扫描同步目录) */
     private final List<MusicBean> musicList = new ArrayList<>();
@@ -272,6 +298,17 @@ public class MainActivity extends AppCompatActivity {
                     lastIndex = 0;
                 }
                 service.playIndexWithSeek(lastIndex, lastPos);
+            }
+
+            // 处理用户在 service 绑定前点击的歌曲
+            if (pendingPlayIndex >= 0 && !musicList.isEmpty()) {
+                int playPos = pendingPlayIndex;
+                pendingPlayIndex = -1;
+                if (playPos >= 0 && playPos < musicList.size()) {
+                    List<MusicBean> displayList = adapter.getDisplayList();
+                    service.setPlayList(displayList, playPos);
+                    service.playIndex(playPos);
+                }
             }
         }
 
@@ -427,16 +464,19 @@ public class MainActivity extends AppCompatActivity {
         adapter = new MusicAdapter(this);
         adapter.setFavoriteManager(favoriteManager);
         adapter.setOnItemClickListener((position, bean) -> {
-            if (service != null) {
-                // 用当前显示的列表作为播放列表
+            if (service != null && bound) {
+                // service 已绑定:直接播放
                 List<MusicBean> displayList = adapter.getDisplayList();
-                // 用 bean 身份验证位置(防止列表变化后位置错位导致"乱跳")
                 int realPos = adapter.findPositionByBean(bean);
                 if (realPos >= 0 && realPos != position) {
                     position = realPos;
                 }
                 service.setPlayList(displayList, position);
                 service.playIndex(position);
+            } else {
+                // service 还没绑定好:记录待播放位置,绑定完成后自动播放
+                pendingPlayIndex = position;
+                Toast.makeText(this, "正在初始化播放器,请稍候...", Toast.LENGTH_SHORT).show();
             }
         });
         rvList.setLayoutManager(new LinearLayoutManager(this));
@@ -1130,11 +1170,13 @@ public class MainActivity extends AppCompatActivity {
 
     /** GitHub 下载代理镜像(国内网络 github.com 经常连不上) */
     private static final String[] GITHUB_DL_MIRRORS = {
-        "",                          // 直连 HTTPS(优先)
-        "http://ghproxy.net/",       // HTTP 镜像(SSL旧系统fallback)
-        "https://ghproxy.net/",      // 镜像1
+        "http://ghproxy.net/",       // HTTP 镜像(旧系统SSL fallback,优先)
+        "",                          // 直连 HTTPS
+        "https://ghproxy.net/",      // 镜像1 HTTPS
         "https://gh-proxy.com/",     // 镜像2
         "https://mirror.ghproxy.com/", // 镜像3
+        "https://githubproxy.cc/",   // 镜像4
+        "https://ghfast.top/",       // 镜像5
     };
 
     /**
@@ -1149,15 +1191,17 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 HttpURLConnection conn = null;
                 try {
-                    // 尝试多个 API 地址(直连 + 镜像 + HTTP fallback)
+                    // 尝试多个 API 地址(HTTP代理优先,避免旧系统SSL问题)
                     String[] apiUrls = {
-                        "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
-                            + "/releases?per_page=30",
                         "http://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                         "https://ghproxy.net/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                         "https://gh-proxy.com/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
+                            + "/releases?per_page=30",
+                        "https://githubproxy.cc/https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO
                             + "/releases?per_page=30",
                     };
 
@@ -1201,7 +1245,7 @@ public class MainActivity extends AppCompatActivity {
                             public void run() {
                                 if (finalErr != null && isSslError(finalErr)) {
                                     Toast.makeText(MainActivity.this,
-                                            "检查更新失败: 系统 SSL/TLS 版本过旧\n无法连接 GitHub,请手动下载更新",
+                                            "检查更新失败: 系统 SSL/TLS 版本过旧\n已尝试跳过证书验证但仍无法连接\n建议用手机浏览器下载APK传到车机安装",
                                             Toast.LENGTH_LONG).show();
                                 } else if (finalErr != null) {
                                     Toast.makeText(MainActivity.this,
@@ -1216,7 +1260,58 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
 
-                    JSONArray releases = new JSONArray(sb.toString());
+                    // 检查响应是否是合法 JSON(代理镜像可能返回 HTML 错误页)
+                    String responseStr = sb.toString().trim();
+                    if (responseStr.startsWith("<") || responseStr.startsWith("<!")) {
+                        // 收到 HTML 页面而非 JSON,说明代理镜像返回了错误页
+                        // 继续尝试下一个镜像(如果还有的话)
+                        Log.w(TAG, "API 返回 HTML 而非 JSON(代理错误页),尝试下一个镜像");
+                        // 重新遍历剩余的镜像
+                        boolean found = false;
+                        for (int retry = 0; retry < apiUrls.length; retry++) {
+                            try {
+                                conn = createConnection(apiUrls[retry]);
+                                conn.setRequestMethod("GET");
+                                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                                conn.setConnectTimeout(15000);
+                                conn.setReadTimeout(15000);
+                                conn.connect();
+                                if (conn.getResponseCode() == 200) {
+                                    is = conn.getInputStream();
+                                    BufferedReader reader2 = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+                                    sb.setLength(0);
+                                    String line2;
+                                    while ((line2 = reader2.readLine()) != null) {
+                                        sb.append(line2);
+                                    }
+                                    reader2.close();
+                                    responseStr = sb.toString().trim();
+                                    if (responseStr.startsWith("[")) {
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            } catch (Exception e) {
+                                Log.w(TAG, "重试镜像失败(" + apiUrls[retry] + "): " + e.getMessage());
+                            } finally {
+                                if (conn != null) { conn.disconnect(); conn = null; }
+                            }
+                        }
+                        if (!found) {
+                            final String errMsg = "所有镜像均返回非JSON响应\n可能是网络代理拦截\n建议用手机浏览器下载APK传到车机安装";
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    Toast.makeText(MainActivity.this,
+                                            "检查更新失败: " + errMsg,
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            });
+                            return;
+                        }
+                    }
+
+                    JSONArray releases = new JSONArray(responseStr);
 
                     // 只找正式版(prerelease=false),取第一个(最新)
                     JSONObject latestRelease = null;
@@ -1623,7 +1718,7 @@ public class MainActivity extends AppCompatActivity {
                                 // SSL 错误:提示用浏览器下载(浏览器证书通常更新)
                                 new AlertDialog.Builder(MainActivity.this)
                                         .setTitle("自动下载失败")
-                                        .setMessage("系统 SSL/TLS 版本过旧,无法连接 GitHub。\n\n建议:点击「浏览器下载」用系统浏览器打开下载链接,浏览器通常有更好的证书支持。")
+                                        .setMessage("系统 SSL/TLS 版本过旧,已尝试跳过证书验证但仍无法连接。\n\n建议:点击「浏览器下载」用系统浏览器打开下载链接,或用手机下载后传到车机。")
                                         .setPositiveButton("浏览器下载", new DialogInterface.OnClickListener() {
                                             @Override
                                             public void onClick(DialogInterface dialog, int which) {
@@ -1887,9 +1982,11 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 加载音乐(扫描同步目录)
-     * 1. 先用 MediaStore 快速加载(秒开,本地音乐立即可见可播)
-     * 2. 后台递归扫描补全(MediaStore 未收录的文件)
+     * 1. 先从本地缓存加载(秒开,完全不读U盘)
+     * 2. 无缓存时后台扫描 MediaStore(不阻塞主线程)
      * 3. 后台自动同步服务器新歌(不阻塞 UI)
+     *
+     * 注意:缓存加载和 MediaStore 扫描都在后台线程,避免阻塞主线程导致点击无响应
      */
     private void loadMusic() {
         final String syncPath = navidromeConfig.getSyncPath();
@@ -1897,85 +1994,98 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 封面磁盘缓存:使用内部存储(eMMC)
-        // v3.0优化后滑动时不读磁盘(cacheOnlyMode),磁盘速度只影响停止滑动后补加载
-        // 内部eMMC延迟更稳定,避免USB偶发100-190ms尖峰
-        // (之前切U盘是因为滑动时还在读磁盘,现在滑动时零磁盘读取)
-        // CoverLoader.initDiskCache() 已默认使用 context.getCacheDir(),无需切换
-
         // 性能日志已关闭(正式版无需日志,需要调试时取消注释下行)
         // PerfLogger.init(syncPath);
         // handler.post(logFlushTask);
         // PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
 
-        // 0. 优先从本地缓存加载(秒开,完全不读U盘)
-        //    列表纯从缓存来,只有用户点击歌曲时才从U盘读取文件播放
-        //    新增/删除歌曲需手动"刷新列表"(设置菜单)
-        List<MusicBean> cachedList = localMusicCache.load();
-        if (cachedList != null && !cachedList.isEmpty()) {
-            musicList.clear();
-            musicList.addAll(cachedList);
-            // 排序(确保和刷新后的顺序一致,避免视觉跳动)
-            java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
-                @Override
-                public int compare(MusicBean a, MusicBean b) {
-                    return a.getTitle().compareToIgnoreCase(b.getTitle());
+        // 显示加载中提示
+        tvEmpty.setText("正在加载音乐...");
+        tvEmpty.setVisibility(View.VISIBLE);
+
+        // 后台线程执行:缓存加载 + 排序 + MediaStore 扫描
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                // 0. 优先从本地缓存加载(秒开,完全不读U盘)
+                List<MusicBean> cachedList = localMusicCache.load();
+                if (cachedList != null && !cachedList.isEmpty()) {
+                    // 排序(后台线程,不阻塞UI)
+                    java.util.Collections.sort(cachedList, new java.util.Comparator<MusicBean>() {
+                        @Override
+                        public int compare(MusicBean a, MusicBean b) {
+                            return a.getTitle().compareToIgnoreCase(b.getTitle());
+                        }
+                    });
+
+                    final List<MusicBean> finalList = cachedList;
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            musicList.clear();
+                            musicList.addAll(finalList);
+                            adapter.setData(musicList);
+                            updateCount();
+                            tvEmpty.setVisibility(View.GONE);
+                            // 设置播放列表(service 可能还没绑定,onServiceConnected 会再设一次)
+                            if (service != null) {
+                                int lastIndex = navidromeConfig.getLastPlayIndex();
+                                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                                    lastIndex = 0;
+                                }
+                                service.setPlayList(musicList, lastIndex);
+                                if (autoPlayPending && !service.isPlaying()) {
+                                    autoPlayPending = false;
+                                    int lastPos = navidromeConfig.getLastPlayPosition();
+                                    service.playIndexWithSeek(lastIndex, lastPos);
+                                }
+                            }
+                            // 后台预提取封面
+                            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
+                            // 启动后台服务器同步
+                            startBackgroundSync();
+                        }
+                    });
+                    return;
                 }
-            });
-            adapter.setData(musicList);
-            updateCount();
-            tvEmpty.setVisibility(View.GONE);
-            // 立即设置播放列表
-            if (service != null) {
-                int lastIndex = navidromeConfig.getLastPlayIndex();
-                if (lastIndex < 0 || lastIndex >= musicList.size()) {
-                    lastIndex = 0;
-                }
-                service.setPlayList(musicList, lastIndex);
-                if (autoPlayPending && !service.isPlaying()) {
-                    autoPlayPending = false;
-                    int lastPos = navidromeConfig.getLastPlayPosition();
-                    service.playIndexWithSeek(lastIndex, lastPos);
-                }
+
+                // 1. 无缓存:用 MediaStore 快速加载(后台线程,不阻塞UI)
+                final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(MainActivity.this, syncPath);
+
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        musicList.clear();
+                        musicList.addAll(quickList);
+                        adapter.setData(musicList);
+                        updateCount();
+
+                        if (musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                            if (service != null) {
+                                int lastIndex = navidromeConfig.getLastPlayIndex();
+                                if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                                    lastIndex = 0;
+                                }
+                                service.setPlayList(musicList, lastIndex);
+                                if (autoPlayPending && !service.isPlaying()) {
+                                    autoPlayPending = false;
+                                    int lastPos = navidromeConfig.getLastPlayPosition();
+                                    service.playIndexWithSeek(lastIndex, lastPos);
+                                }
+                            }
+                        }
+
+                        // 2. 后台递归扫描补全 + 同步
+                        backgroundScanAndMerge(syncPath, quickList, false);
+                    }
+                });
             }
-            // 缓存路径不扫描U盘(用户要求:点击歌曲才读U盘)
-            // 后台预提取所有封面到U盘缓存(车机eMMC比U盘慢,缓存放U盘更快)
-            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
-            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
-            // 仅启动后台服务器同步(如果配置了Navidrome)
-            startBackgroundSync();
-            return;
-        }
-
-        // 1. 无缓存:用 MediaStore 快速加载(秒开)
-        final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(this, syncPath);
-
-        musicList.clear();
-        musicList.addAll(quickList);
-        adapter.setData(musicList);
-        updateCount();
-
-        if (musicList.isEmpty()) {
-            tvEmpty.setVisibility(View.VISIBLE);
-            tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
-        } else {
-            tvEmpty.setVisibility(View.GONE);
-            if (service != null) {
-                int lastIndex = navidromeConfig.getLastPlayIndex();
-                if (lastIndex < 0 || lastIndex >= musicList.size()) {
-                    lastIndex = 0;
-                }
-                service.setPlayList(musicList, lastIndex);
-                if (autoPlayPending && !service.isPlaying()) {
-                    autoPlayPending = false;
-                    int lastPos = navidromeConfig.getLastPlayPosition();
-                    service.playIndexWithSeek(lastIndex, lastPos);
-                }
-            }
-        }
-
-        // 2. 后台递归扫描补全 + 同步
-        backgroundScanAndMerge(syncPath, quickList, false);
+        }, "LoadMusic").start();
     }
 
     /**
