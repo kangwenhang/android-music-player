@@ -488,6 +488,10 @@ public class MainActivity extends AppCompatActivity {
                             CoverLoader.getInstance().preload(bean, coverSizePx);
                         }
                     }
+
+                    // 停止滚动后,后台把全部封面从磁盘载入内存
+                    // 之后滚动时全部命中内存缓存,零磁盘IO
+                    CoverLoader.getInstance().preloadAllToMemory(musicList);
                 }
             }
         });
