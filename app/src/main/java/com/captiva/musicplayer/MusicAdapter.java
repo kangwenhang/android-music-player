@@ -299,6 +299,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         int old = playingIndex;
         playingIndex = index;
         if (old != index) {
+            // 确保新位置已加载到 data(搜索/过滤后当前歌曲可能在分批加载范围外)
+            if (index >= 0 && index < filteredData.size() && index >= data.size()) {
+                ensureLoaded(index);
+            }
             if (old >= 0 && old < data.size()) notifyItemChanged(old);
             if (index >= 0 && index < data.size()) notifyItemChanged(index);
         }
