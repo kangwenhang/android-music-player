@@ -1,6 +1,7 @@
 package com.captiva.musicplayer;
 
 import android.content.Context;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,6 +30,8 @@ import java.util.Set;
  * - 所有 notifyXXX 在主线程执行
  */
 public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
+
+    private static final String TAG = "MusicAdapter";
 
     public interface OnItemClickListener {
         void onItemClick(int position, MusicBean bean);
@@ -182,10 +185,19 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     /** 搜索过滤(主线程) */
     public synchronized void filter(String keyword) {
+        long t0 = System.currentTimeMillis();
+        String oldKeyword = filterKeyword;
         filterKeyword = keyword == null ? "" : keyword.trim().toLowerCase();
         loadedCount = 0;
         data.clear();
         applyFilterAndLoadFirstBatch();
+        long elapsed = System.currentTimeMillis() - t0;
+        Log.i(TAG, "[filter] keyword='" + filterKeyword + "' fullData=" + fullData.size()
+                + " filtered=" + filteredData.size() + " loaded=" + loadedCount + " " + elapsed + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("filter", "keyword='" + filterKeyword + "' fullData=" + fullData.size()
+                    + " filtered=" + filteredData.size() + " " + elapsed + "ms");
+        }
     }
 
     /**
@@ -214,6 +226,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 同时应用当前搜索关键词过滤(如果有的话)
      */
     public synchronized void filterFavorites(FavoriteManager fm) {
+        long t0 = System.currentTimeMillis();
         loadedCount = 0;
         data.clear();
         filteredData.clear();
@@ -224,6 +237,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 }
             }
         }
+        long tFilter = System.currentTimeMillis() - t0;
         // 加载第一批
         int loadCount = Math.min(BATCH_SIZE, filteredData.size());
         for (int i = 0; i < loadCount; i++) {
@@ -231,17 +245,29 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         loadedCount = loadCount;
         hasMore = loadedCount < filteredData.size();
+        long t1 = System.currentTimeMillis();
         notifyDataSetChanged();
+        long tNotify = System.currentTimeMillis() - t1;
+        long elapsed = System.currentTimeMillis() - t0;
+        Log.i(TAG, "[filterFavorites] 遍历=" + tFilter + "ms notify=" + tNotify + "ms"
+                + " fullData=" + fullData.size() + " favorites=" + filteredData.size()
+                + " loaded=" + loadCount + " 总=" + elapsed + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("filterFavorites", "遍历=" + tFilter + "ms notify=" + tNotify + "ms"
+                    + " fullData=" + fullData.size() + " favorites=" + filteredData.size() + " " + elapsed + "ms");
+        }
     }
 
     /** 过滤并加载第一批(主线程) */
     private void applyFilterAndLoadFirstBatch() {
+        long t0 = System.currentTimeMillis();
         filteredData.clear();
         for (MusicBean b : fullData) {
             if (matchesFilter(b)) {
                 filteredData.add(b);
             }
         }
+        long tFilter = System.currentTimeMillis() - t0;
 
         // 加载第一批
         int loadCount = Math.min(BATCH_SIZE, filteredData.size());
@@ -250,7 +276,17 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         loadedCount = loadCount;
         hasMore = loadedCount < filteredData.size();
+        long t1 = System.currentTimeMillis();
         notifyDataSetChanged();
+        long tNotify = System.currentTimeMillis() - t1;
+        long elapsed = System.currentTimeMillis() - t0;
+        Log.i(TAG, "[applyFilter] 遍历=" + tFilter + "ms notify=" + tNotify + "ms"
+                + " fullData=" + fullData.size() + " filtered=" + filteredData.size()
+                + " loaded=" + loadCount + " 总=" + elapsed + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("applyFilter", "遍历=" + tFilter + "ms notify=" + tNotify + "ms"
+                    + " fullData=" + fullData.size() + " filtered=" + filteredData.size() + " " + elapsed + "ms");
+        }
     }
 
     /** 滚动时加载更多(由 onBindViewHolder 调用,主线程) */
@@ -313,6 +349,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * @return true 如果位置在 filteredData 范围内
      */
     public synchronized boolean ensureLoaded(int position) {
+        long t0 = System.currentTimeMillis();
+        int startLoaded = loadedCount;
         if (position < 0 || position >= filteredData.size()) {
             return false;
         }
@@ -330,6 +368,15 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 notifyItemRangeInserted(start, addedCount);
             }
         }
+        int added = loadedCount - startLoaded;
+        if (added > 0) {
+            long elapsed = System.currentTimeMillis() - t0;
+            Log.i(TAG, "[ensureLoaded] pos=" + position + " 加载" + added + "条"
+                    + " loadedCount=" + loadedCount + "/" + filteredData.size() + " " + elapsed + "ms");
+            if (PerfLogger.isEnabled()) {
+                PerfLogger.log("ensureLoaded", "pos=" + position + " 加载" + added + "条 " + elapsed + "ms");
+            }
+        }
         return position < data.size();
     }
 
@@ -339,13 +386,24 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * @return 位置索引,未找到返回 -1
      */
     public synchronized int findPositionByBean(MusicBean target) {
+        long t0 = System.currentTimeMillis();
         if (target == null) return -1;
         String targetKey = getSongKey(target);
         if (targetKey == null) return -1;
         for (int i = 0; i < filteredData.size(); i++) {
             if (targetKey.equals(getSongKey(filteredData.get(i)))) {
+                long elapsed = System.currentTimeMillis() - t0;
+                Log.i(TAG, "[findPosition] 找到 pos=" + i + " 遍历" + (i + 1) + "/" + filteredData.size() + " " + elapsed + "ms");
+                if (PerfLogger.isEnabled()) {
+                    PerfLogger.log("findPosition", "pos=" + i + " 遍历" + (i + 1) + "/" + filteredData.size() + " " + elapsed + "ms");
+                }
                 return i;
             }
+        }
+        long elapsed = System.currentTimeMillis() - t0;
+        Log.i(TAG, "[findPosition] 未找到 遍历" + filteredData.size() + "条 " + elapsed + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("findPosition", "未找到 遍历" + filteredData.size() + "条 " + elapsed + "ms");
         }
         return -1;
     }
