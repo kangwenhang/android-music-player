@@ -2,6 +2,10 @@
 
 专为 **安卓 4.2.2(API 17)** 车机设计的音乐播放器(科帕奇 2015 款改装车机,7 寸 1024×600 横屏)。
 
+<img width="1078" height="588" alt="image" src="https://github.com/user-attachments/assets/4c2e67de-7c2b-4ff8-a62a-e554b3ee34a8" />
+<img width="1075" height="582" alt="image" src="https://github.com/user-attachments/assets/f6f76f17-c3dc-4e8d-ba22-ceadcebdd22b" />
+<img width="1069" height="560" alt="image" src="https://github.com/user-attachments/assets/ef60fdb2-1b18-4c1a-841a-be86fbbd9bf1" />
+
 ## 功能特性
 
 ### 播放核心
