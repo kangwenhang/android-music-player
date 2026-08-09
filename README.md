@@ -84,6 +84,13 @@
 - 版本号基于 git tag,正式版如 `v4.5`,预发布如 `v4.5.190-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
 
+### v5.6 更新内容
+
+- **修复内存泄漏**:MusicService 歌词加载线程改为 ExecutorService（onDestroy 时 shutdownNow 取消），补充 unregisterMediaButtonEventReceiver 广播注销
+- **CoverLoader 资源释放**:新增 release() 方法，onDestroy 时关闭线程池和 SQLite 连接，避免数据库连接泄漏
+- **MainActivity Handler 清理**:onDestroy 时移除所有 Handler 残留回调，防止 Activity 泄漏
+- **ServerStatusMonitor 后台线程保护**:网络请求前检查 monitoring 状态，防止销毁后后台线程继续运行
+
 ### v5.5 更新内容
 
 - **SQLite封面BLOB缓存解决IO卡顿**:用SQLite数据库BLOB存储替代5000+个.cover小文件,彻底解决车机文件系统随机IO性能差的问题
