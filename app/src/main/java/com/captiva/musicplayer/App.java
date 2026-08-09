@@ -23,4 +23,11 @@ public class App extends MultiDexApplication {
         // 初始化封面磁盘缓存
         CoverLoader.getInstance().initDiskCache(this);
     }
+
+    @Override
+    public void onTerminate() {
+        super.onTerminate();
+        // 释放 CoverLoader 线程池和数据库连接(车机低内存场景)
+        CoverLoader.getInstance().release();
+    }
 }

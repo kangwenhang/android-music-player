@@ -138,6 +138,14 @@ public class ServerStatusMonitor {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 在发起网络请求前再次检查监控状态(可能在ping期间被stop了)
+                if (!monitoring) {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() { checking = false; }
+                    });
+                    return;
+                }
                 final boolean ok = apiRef.ping();
                 mainHandler.post(new Runnable() {
                     @Override

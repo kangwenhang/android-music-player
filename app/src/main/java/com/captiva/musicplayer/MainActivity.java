@@ -3073,6 +3073,8 @@ public class MainActivity extends AppCompatActivity {
         // 停止帧率监控和日志刷新
         Choreographer.getInstance().removeFrameCallback(frameCallback);
         handler.removeCallbacks(logFlushTask);
+        // 清除 Handler 消息队列中所有残留回调(防止 Activity 销毁后 Runnable 仍执行)
+        handler.removeCallbacksAndMessages(null);
         PerfLogger.shutdown();
         // 取消自动同步
         cancelAutoSync();

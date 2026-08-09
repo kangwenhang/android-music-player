@@ -27,6 +27,9 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 音乐后台服务
@@ -88,6 +91,9 @@ public class MusicService extends Service {
 
     // 主线程 Handler(用于异步歌词加载后更新 UI)
     private final android.os.Handler mainHandler = new android.os.Handler();
+
+    /** 歌词加载线程池(单线程,可取消,避免Service销毁后线程泄漏) */
+    private final ExecutorService lyricsExecutor = Executors.newSingleThreadExecutor();
 
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
@@ -525,7 +531,7 @@ public class MusicService extends Service {
     private void loadLocalLyrics(final MusicBean bean) {
         final String filePath = bean.getData();
 
-        new Thread(new Runnable() {
+        lyricsExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 List<LrcEntry> lyrics = null;
@@ -622,7 +628,7 @@ public class MusicService extends Service {
                     }
                 });
             }
-        }).start();
+        });
     }
 
     /** 判断两首歌曲是否为同一首(优先用文件路径,其次用歌名+歌手) */
@@ -645,7 +651,7 @@ public class MusicService extends Service {
             return;
         }
 
-        new Thread(new Runnable() {
+        lyricsExecutor.execute(new Runnable() {
             @Override
             public void run() {
                 List<LrcEntry> lyrics = null;
@@ -720,7 +726,7 @@ public class MusicService extends Service {
                     }
                 });
             }
-        }).start();
+        });
     }
 
     /** 准备并播放当前曲目(增加防抖,避免快速切歌卡死) */
@@ -1076,6 +1082,22 @@ public class MusicService extends Service {
         }
         if (equalizerManager != null) {
             equalizerManager.release();
+        }
+        // 取消所有未完成的歌词加载任务,避免Service销毁后线程继续运行
+        lyricsExecutor.shutdownNow();
+        try {
+            lyricsExecutor.awaitTermination(2, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {
+        }
+        // 反注册媒体按键接收器(补充修复:之前缺少此调用)
+        try {
+            if (audioManager != null) {
+                ComponentName comp = new ComponentName(getPackageName(),
+                        MediaButtonReceiver.class.getName());
+                audioManager.unregisterMediaButtonEventReceiver(comp);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "unregisterMediaButton failed", e);
         }
         super.onDestroy();
     }

@@ -876,6 +876,21 @@ public class CoverLoader {
     }
 
     /**
+     * 释放资源(应用退出时调用)
+     * 关闭线程池和数据库连接,避免线程泄漏。车机低内存场景下有助于资源干净释放。
+     */
+    public void release() {
+        executor.shutdownNow();
+        try {
+            executor.awaitTermination(2, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {
+        }
+        if (coverDb != null) {
+            coverDb.closeDb();
+        }
+    }
+
+    /**
      * 计算采样率,避免 OOM
      * 1x采样:解码后尺寸不超过 target,缩略图足够清晰且内存最小
      */
