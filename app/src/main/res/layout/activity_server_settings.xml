@@ -19,7 +19,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Navidrome 服务器设置"
+            android:text="音乐服务器设置"
             android:textColor="@color/text_title"
             android:textSize="@dimen/title_text_size"
             android:textStyle="bold" />
@@ -47,10 +47,45 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <!-- 服务器类型 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="服务器类型"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginBottom="6dp" />
+
+            <RadioGroup
+                android:id="@+id/rg_server_type"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/rb_type_navidrome"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Navidrome"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/sub_text_size"
+                    android:layout_marginRight="24dp"
+                    android:layout_marginEnd="24dp" />
+
+                <RadioButton
+                    android:id="@+id/rb_type_fnmusic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="飞牛音乐"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/sub_text_size" />
+            </RadioGroup>
+
             <!-- 服务器地址 -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
                 android:text="服务器地址"
                 android:textColor="@color/text_secondary"
                 android:textSize="@dimen/sub_text_size"
@@ -190,7 +225,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:text="说明:\n1. 服务器地址格式:http://IP:端口\n2. Navidrome 默认端口 4533\n3. 确保车机和 Navidrome 服务器在同一局域网\n4. 建议使用内网 IP,避免域名解析延迟"
+                android:text="说明:\n1. 服务器地址格式:http://IP:端口\n2. Navidrome 默认端口 4533;飞牛音乐填 NAS 的 Web 访问地址\n3. 确保车机和服务器在同一局域网\n4. 建议使用内网 IP,避免域名解析延迟"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp"
                 android:lineSpacingExtra="4dp" />

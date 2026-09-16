@@ -18,6 +18,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Navidrome / Subsonic API 客户端
@@ -26,7 +27,7 @@ import java.util.List;
  *
  * 认证方式:token = MD5(password + salt),salt 为随机六位十六进制
  */
-public class NavidromeApi {
+public class NavidromeApi implements MusicSourceApi {
 
     private static final String TAG = "NavidromeApi";
     private static final String API_VERSION = "1.16.1";
@@ -46,6 +47,24 @@ public class NavidromeApi {
         this.serverUrl = serverUrl;
         this.username = username;
         this.password = password;
+    }
+
+    // ==================== MusicSourceApi 标识 ====================
+
+    @Override
+    public String getSourceType() {
+        return MusicSourceFactory.TYPE_NAVIDROME;
+    }
+
+    @Override
+    public String getSourceName() {
+        return "Navidrome";
+    }
+
+    @Override
+    public Map<String, String> getAuthHeaders() {
+        // Navidrome 的 stream / getCoverArt URL 已自带 u / t / s 认证参数,无需附加头
+        return null;
     }
 
     // ==================== 认证相关 ====================

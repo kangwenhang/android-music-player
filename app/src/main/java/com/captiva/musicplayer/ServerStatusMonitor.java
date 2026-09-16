@@ -39,7 +39,7 @@ public class ServerStatusMonitor {
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private StatusCallback callback;
-    private NavidromeApi api;
+    private MusicSourceApi api;
     private Status currentStatus = Status.OFFLINE;
     private boolean monitoring = false;
     private boolean checking = false;
@@ -84,9 +84,9 @@ public class ServerStatusMonitor {
 
     /**
      * 启动监控
-     * @param api NavidromeApi 实例,null 则状态为 OFFLINE
+     * @param api 数据源实例,null 则状态为 OFFLINE
      */
-    public void start(NavidromeApi api) {
+    public void start(MusicSourceApi api) {
         this.api = api;
         monitoring = true;
         if (api == null) {
@@ -105,7 +105,7 @@ public class ServerStatusMonitor {
     }
 
     /** 更新 API 实例(配置变更后调用) */
-    public void updateApi(NavidromeApi api) {
+    public void updateApi(MusicSourceApi api) {
         this.api = api;
         if (api == null) {
             notifyStatus(Status.OFFLINE, "未配置服务器");
@@ -134,7 +134,7 @@ public class ServerStatusMonitor {
         checking = true;
         notifyStatus(Status.CONNECTING, "连接中...");
 
-        final NavidromeApi apiRef = api;
+        final MusicSourceApi apiRef = api;
         new Thread(new Runnable() {
             @Override
             public void run() {

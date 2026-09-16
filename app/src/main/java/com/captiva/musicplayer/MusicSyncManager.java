@@ -28,7 +28,7 @@ public class MusicSyncManager {
     private static final String TAG = "MusicSyncManager";
 
     private final Context context;
-    private final NavidromeApi api;
+    private final MusicSourceApi api;
     private final String syncPath;
     private volatile boolean cancelled = false;
 
@@ -49,7 +49,7 @@ public class MusicSyncManager {
         void onError(String message);
     }
 
-    public MusicSyncManager(Context context, NavidromeApi api, String syncPath) {
+    public MusicSyncManager(Context context, MusicSourceApi api, String syncPath) {
         this.context = context;
         this.api = api;
         this.syncPath = syncPath;

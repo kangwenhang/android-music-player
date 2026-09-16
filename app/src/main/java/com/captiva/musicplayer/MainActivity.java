@@ -341,13 +341,10 @@ public class MainActivity extends AppCompatActivity {
         favoriteManager = new FavoriteManager(this);
         lyricOffsetManager = new LyricOffsetManager(this);
 
-        // 初始化 NavidromeApi(如果已配置)
+        // 初始化数据源(如果已配置):Navidrome 或飞牛音乐
         if (navidromeConfig.isConfigured()) {
-            NavidromeApi api = new NavidromeApi(
-                    navidromeConfig.getServerUrl(),
-                    navidromeConfig.getUsername(),
-                    navidromeConfig.getPassword());
-            MusicDataHolder.getInstance().setNavidromeApi(api);
+            MusicSourceApi api = navidromeConfig.createSource();
+            MusicDataHolder.getInstance().setMusicSourceApi(api);
             MusicDataHolder.getInstance().setNavidromeEnabled(navidromeConfig.isEnabled());
         }
 
@@ -369,7 +366,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void run() {
                 // 启动服务器状态监控
-                statusMonitor.start(MusicDataHolder.getInstance().getNavidromeApi());
+                statusMonitor.start(MusicDataHolder.getInstance().getMusicSourceApi());
 
                 // 启动并绑定服务
                 Intent si = new Intent(MainActivity.this, MusicService.class);
@@ -642,7 +639,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 点击服务器状态可手动刷新
         tvServerStatus.setOnClickListener(v -> {
-            if (statusMonitor != null && MusicDataHolder.getInstance().getNavidromeApi() != null) {
+            if (statusMonitor != null && MusicDataHolder.getInstance().getMusicSourceApi() != null) {
                 Toast.makeText(this, "正在检测服务器连接...", Toast.LENGTH_SHORT).show();
                 statusMonitor.checkNow();
             }
@@ -2507,7 +2504,7 @@ public class MainActivity extends AppCompatActivity {
      *       所以必须切到主线程执行。
      */
     private void startBackgroundSync() {
-        final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
         if (api == null || !MusicDataHolder.getInstance().isNavidromeEnabled()) {
             return;
         }
@@ -2543,7 +2540,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 启动自动同步 */
     private void startAutoSync(String syncPath, int serverCount) {
-        final NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
         if (api == null) return;
 
         isAutoSyncing = true;
@@ -2982,7 +2979,7 @@ public class MainActivity extends AppCompatActivity {
         // 从设置页面返回时,如果配置有更新则重新加载
         if (needReload) {
             needReload = false;
-            NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+            MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
             // 更新监控器的 API 实例(会触发重新检测)
             if (statusMonitor != null) {
                 statusMonitor.updateApi(api);

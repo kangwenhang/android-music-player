@@ -21,6 +21,9 @@ public class NavidromeConfig {
     private static final String KEY_LAST_INDEX = "last_play_index"; // 上次播放索引
     private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)
     private static final String KEY_PLAY_MODE = "play_mode"; // 播放模式(0=顺序,1=单曲循环,2=随机)
+    private static final String KEY_SERVER_TYPE = "server_type"; // 服务器类型:navidrome / fnmusic
+    private static final String KEY_FNID = "fn_id";           // 原始 FN ID(用户填的,可为空)
+    private static final String KEY_FN_RELAY = "fn_relay";    // 上次解析出的地址是否走飞牛中继
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -65,6 +68,51 @@ public class NavidromeConfig {
 
     public void setEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
+
+    /**
+     * 获取服务器类型
+     * @return {@link MusicSourceFactory#TYPE_NAVIDROME} 或 {@link MusicSourceFactory#TYPE_FNMUSIC}
+     */
+    public String getServerType() {
+        return prefs.getString(KEY_SERVER_TYPE, MusicSourceFactory.TYPE_NAVIDROME);
+    }
+
+    /** 设置服务器类型 */
+    public void setServerType(String type) {
+        prefs.edit().putString(KEY_SERVER_TYPE, type).apply();
+    }
+
+    /**
+     * 原始 FN ID(仅飞牛、且用户填的是 FN ID 时才有值)。
+     * 保存它是为了以后网络环境变化时可重新解析;实际连接用 getServerUrl() 里的已解析地址。
+     */
+    public String getFnId() {
+        return prefs.getString(KEY_FNID, "");
+    }
+
+    /** 保存原始 FN ID;传 null 表示清空 */
+    public void setFnId(String fnId) {
+        prefs.edit().putString(KEY_FNID, fnId == null ? "" : fnId.trim()).apply();
+    }
+
+    /** 上次解析出的地址是否走飞牛中继(true = 远程中继访问) */
+    public boolean isFnRelay() {
+        return prefs.getBoolean(KEY_FN_RELAY, false);
+    }
+
+    /** 设置是否走飞牛中继 */
+    public void setFnRelay(boolean relay) {
+        prefs.edit().putBoolean(KEY_FN_RELAY, relay).apply();
+    }
+
+    /** 按当前配置创建数据源实例(飞牛会带上中继标志) */
+    public MusicSourceApi createSource() {
+        String type = getServerType();
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(type)) {
+            return MusicSourceFactory.createFn(getServerUrl(), getUsername(), getPassword(), isFnRelay());
+        }
+        return MusicSourceFactory.create(type, getServerUrl(), getUsername(), getPassword());
     }
 
     /** 获取最小时长过滤(秒),低于此时长的音频不显示 */

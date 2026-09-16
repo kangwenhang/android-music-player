@@ -88,9 +88,9 @@ public class SyncActivity extends AppCompatActivity {
 
     /** 开始同步 */
     private void startSync() {
-        NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
         if (api == null || !config.isConfigured()) {
-            Toast.makeText(this, "请先配置 Navidrome 服务器", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "请先配置音乐服务器", Toast.LENGTH_LONG).show();
             return;
         }
 

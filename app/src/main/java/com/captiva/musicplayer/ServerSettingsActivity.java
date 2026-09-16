@@ -8,6 +8,8 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,7 +22,8 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Navidrome 服务器设置界面
+ * 音乐服务器设置界面
+ * 支持两种数据源:Navidrome / Subsonic、飞牛 NAS 音乐服务
  * 输入服务器地址、用户名、密码,支持测试连接
  * 使用系统输入法
  */
@@ -29,6 +32,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private EditText etUrl, etUser, etPass, etSyncPath;
     private TextView tvResult;
     private Button btnTest, btnSave, btnBack;
+    private RadioGroup rgServerType;
+    private RadioButton rbTypeNavidrome, rbTypeFnMusic;
     private NavidromeConfig config;
 
     @Override
@@ -48,6 +53,28 @@ public class ServerSettingsActivity extends AppCompatActivity {
         btnTest = findViewById(R.id.btn_test);
         btnSave = findViewById(R.id.btn_save);
         btnBack = findViewById(R.id.btn_back);
+        rgServerType = findViewById(R.id.rg_server_type);
+        rbTypeNavidrome = findViewById(R.id.rb_type_navidrome);
+        rbTypeFnMusic = findViewById(R.id.rb_type_fnmusic);
+
+        // 回填服务器类型
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(config.getServerType())) {
+            rbTypeFnMusic.setChecked(true);
+        } else {
+            rbTypeNavidrome.setChecked(true);
+        }
+        // 切换类型时给出默认地址提示
+        rgServerType.setOnCheckedChangeListener((group, checkedId) -> {
+            if (checkedId == R.id.rb_type_fnmusic) {
+                etUrl.setHint("http://192.168.1.100:5666 或 FN ID(如 k495378412)");
+            } else {
+                etUrl.setHint("http://192.168.1.100:4533");
+            }
+        });
+        // 初始提示(未触发切换回调时也要正确)
+        if (rbTypeFnMusic.isChecked()) {
+            etUrl.setHint("http://192.168.1.100:5666 或 FN ID(如 k495378412)");
+        }
 
         // 回填已保存的配置
         etUrl.setText(config.getServerUrl());
@@ -298,15 +325,54 @@ public class ServerSettingsActivity extends AppCompatActivity {
             showResult("请填写完整的服务器信息", false);
             return;
         }
+        final String type = getCurrentServerType();
 
         tvResult.setVisibility(View.VISIBLE);
-        tvResult.setText("正在测试连接...");
         btnTest.setEnabled(false);
 
+        // 飞牛 + 填的是 FN ID:先联网解析出可达地址(内网 / 公网 IPv6 / 公网 IPv4 / 中继),再测登录
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(type) && MusicSourceFactory.looksLikeFnId(url)) {
+            tvResult.setText("正在解析 FN ID,请稍候...");
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    final FnIdResolver.Addr addr = MusicSourceFactory.resolveFnId(url);
+                    if (addr == null) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                btnTest.setEnabled(true);
+                                showResult("FN ID 解析失败:该 NAS 当前不可达。"
+                                        + "请确认 NAS 已开机、FN Connect 已开启", false);
+                            }
+                        });
+                        return;
+                    }
+                    MusicSourceApi api = MusicSourceFactory.createFn(addr.url, user, pass, addr.relay);
+                    final boolean ok = api.ping();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            btnTest.setEnabled(true);
+                            String route = addr.relay ? "飞牛中继" : "直连";
+                            if (ok) {
+                                showResult("连接成功!(" + route + ") " + addr.url, true);
+                            } else {
+                                showResult("已解析到 " + addr.url + "(" + route
+                                        + "),但登录失败,请检查账号密码", false);
+                            }
+                        }
+                    });
+                }
+            }).start();
+            return;
+        }
+
+        tvResult.setText("正在测试连接...");
         new Thread(new Runnable() {
             @Override
             public void run() {
-                NavidromeApi api = new NavidromeApi(url, user, pass);
+                MusicSourceApi api = MusicSourceFactory.create(type, url, user, pass);
                 final boolean ok = api.ping();
                 runOnUiThread(new Runnable() {
                     @Override
@@ -327,38 +393,70 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
     /** 保存配置 */
     private void saveConfig() {
-        if (!saveServerConfigSilently()) {
-            return;
-        }
-        Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show();
-        finish();
-    }
-
-    /** 静默保存服务器配置(不弹提示,不关闭页面),返回是否成功 */
-    private boolean saveServerConfigSilently() {
-        String url = etUrl.getText().toString().trim();
-        String user = etUser.getText().toString().trim();
-        String pass = etPass.getText().toString().trim();
-        String syncPath = etSyncPath.getText().toString().trim();
+        final String url = etUrl.getText().toString().trim();
+        final String user = etUser.getText().toString().trim();
+        final String pass = etPass.getText().toString().trim();
+        final String syncPath = etSyncPath.getText().toString().trim();
 
         if (url.isEmpty() || user.isEmpty() || pass.isEmpty()) {
             Toast.makeText(this, "请填写完整的服务器信息", Toast.LENGTH_SHORT).show();
-            return false;
+            return;
         }
-
         if (syncPath.isEmpty()) {
             Toast.makeText(this, "同步目录不能为空", Toast.LENGTH_SHORT).show();
-            return false;
+            return;
         }
         if (!syncPath.startsWith("/")) {
             Toast.makeText(this, "同步目录路径必须以 / 开头", Toast.LENGTH_SHORT).show();
-            return false;
+            return;
         }
 
-        config.setServerUrl(url);
+        final String type = getCurrentServerType();
+
+        // 飞牛 + FN ID:先解析,拿到真实地址与中继标志后再落盘
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(type) && MusicSourceFactory.looksLikeFnId(url)) {
+            tvResult.setVisibility(View.VISIBLE);
+            tvResult.setText("正在解析 FN ID,请稍候...");
+            btnSave.setEnabled(false);
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    final FnIdResolver.Addr addr = MusicSourceFactory.resolveFnId(url);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            btnSave.setEnabled(true);
+                            if (addr == null) {
+                                showResult("FN ID 解析失败,未保存。请确认 NAS 开机 / FN Connect 已开启", false);
+                                return;
+                            }
+                            applyAndSave(addr.url, addr.relay, url, user, pass, syncPath);
+                        }
+                    });
+                }
+            }).start();
+            return;
+        }
+
+        applyAndSave(url, false, null, user, pass, syncPath);
+    }
+
+    /**
+     * 写入配置 + 更新全局数据源 + 关闭页面
+     *
+     * @param serverUrl 实际连接用的地址(FN ID 场景为解析后的地址)
+     * @param relay     该地址是否走飞牛中继
+     * @param fnId      原始 FN ID(非 FN ID 场景传 null)
+     */
+    private void applyAndSave(String serverUrl, boolean relay, String fnId,
+                              String user, String pass, String syncPath) {
+        config.setServerUrl(serverUrl);
         config.setUsername(user);
         config.setPassword(pass);
         config.setSyncPath(syncPath);
+        config.setServerType(getCurrentServerType());
+        config.setFnId(fnId);
+        config.setFnRelay(relay);
         config.setEnabled(true);
 
         // 确保目录存在
@@ -367,12 +465,26 @@ public class ServerSettingsActivity extends AppCompatActivity {
             dir.mkdirs();
         }
 
-        // 更新全局 NavidromeApi
-        NavidromeApi api = new NavidromeApi(url, user, pass);
-        MusicDataHolder.getInstance().setNavidromeApi(api);
+        // 更新全局数据源实例(飞牛必须带上中继标志,否则中继地址连不上)
+        MusicSourceApi api;
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(config.getServerType())) {
+            api = MusicSourceFactory.createFn(serverUrl, user, pass, relay);
+        } else {
+            api = MusicSourceFactory.create(config.getServerType(), serverUrl, user, pass);
+        }
+        MusicDataHolder.getInstance().setMusicSourceApi(api);
         MusicDataHolder.getInstance().setNavidromeEnabled(true);
 
-        return true;
+        Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show();
+        finish();
+    }
+
+    /** 读取当前界面上选中的服务器类型 */
+    private String getCurrentServerType() {
+        if (rbTypeFnMusic != null && rbTypeFnMusic.isChecked()) {
+            return MusicSourceFactory.TYPE_FNMUSIC;
+        }
+        return MusicSourceFactory.TYPE_NAVIDROME;
     }
 
     private void showResult(String msg, boolean success) {

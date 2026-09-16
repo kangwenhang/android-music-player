@@ -813,7 +813,7 @@ public class CoverLoader {
         if (coverArtId == null || coverArtId.isEmpty()) {
             return null;
         }
-        NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+        MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
         if (api == null) {
             return null;
         }
@@ -829,6 +829,13 @@ public class CoverLoader {
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(8000);
             conn.setDoInput(true);
+            // 部分数据源(如飞牛)的封面地址不含凭据,需要附加鉴权头
+            java.util.Map<String, String> headers = api.getAuthHeaders();
+            if (headers != null) {
+                for (java.util.Map.Entry<String, String> e : headers.entrySet()) {
+                    conn.setRequestProperty(e.getKey(), e.getValue());
+                }
+            }
             int code = conn.getResponseCode();
             if (code != 200) {
                 return null;

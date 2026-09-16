@@ -7,3 +7,12 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+
+# 逆向参考用的官方 APK(69MB,不入库)
+参考app/
+
+# 本地工作区数据(记忆/会话),非应用源码
+.workbuddy/
+
+# 无 Android SDK 环境下的本地自检脚本(临时工具)
+java_brace_check.py

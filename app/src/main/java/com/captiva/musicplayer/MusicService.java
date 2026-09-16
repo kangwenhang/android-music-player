@@ -582,7 +582,7 @@ public class MusicService extends Service {
 
                 // 4. 缓存也没有,尝试从 Navidrome 按歌手+歌名获取歌词(需联网)
                 if (lyrics == null || lyrics.isEmpty()) {
-                    NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+                    MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
                     if (api != null && MusicDataHolder.getInstance().isNavidromeEnabled()) {
                         try {
                             // 优先尝试 getLyricsBySongId(结构化同步歌词)
@@ -676,7 +676,7 @@ public class MusicService extends Service {
                 }
 
                 // 缓存没有,从 Navidrome 获取
-                NavidromeApi api = MusicDataHolder.getInstance().getNavidromeApi();
+                MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
 
                 if (api != null) {
                     // 优先尝试 getLyricsBySongId(结构化同步歌词)
@@ -747,7 +747,17 @@ public class MusicService extends Service {
             // 网络歌曲:用 Navidrome stream URL
             // 本地歌曲:优先用 content uri,失败回退文件路径
             if (bean.isNetwork() && bean.getStreamUrl() != null) {
-                player.setDataSource(bean.getStreamUrl());
+                // 部分数据源(如飞牛)的流地址不含凭据,必须走请求头
+                java.util.Map<String, String> headers = null;
+                MusicSourceApi src = MusicDataHolder.getInstance().getMusicSourceApi();
+                if (src != null) {
+                    headers = src.getAuthHeaders();
+                }
+                if (headers != null && !headers.isEmpty()) {
+                    player.setDataSource(this, android.net.Uri.parse(bean.getStreamUrl()), headers);
+                } else {
+                    player.setDataSource(bean.getStreamUrl());
+                }
             } else if (bean.getUri() != null && !bean.getUri().isEmpty()) {
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
             } else if (bean.getData() != null && !bean.getData().isEmpty()) {
