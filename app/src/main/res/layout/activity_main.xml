@@ -126,8 +126,6 @@
                 android:id="@+id/rv_list"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:paddingRight="@dimen/index_bar_width"
-                android:clipToPadding="false"
                 android:scrollbars="vertical"
                 android:overScrollMode="ifContentScrolls" />
 
@@ -140,12 +138,16 @@
                 android:textSize="@dimen/sub_text_size"
                 android:visibility="gone" />
 
-            <!-- 右侧 A-Z 快速索引条(按住拖动即可跳到对应字母的歌曲) -->
+            <!-- 右侧 A-Z 快速索引条(半透明浮在列表之上,不占列表宽度;命中区还会用 TouchDelegate 再扩) -->
             <com.captiva.musicplayer.SideIndexBar
                 android:id="@+id/side_index_bar"
                 android:layout_width="@dimen/index_bar_width"
                 android:layout_height="match_parent"
                 android:layout_gravity="end|center_vertical"
+                android:layout_marginTop="48dp"
+                android:layout_marginBottom="48dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/bg_side_index"
                 android:visibility="gone" />
 
             <!-- 拖动索引条时居中显示的当前字母 -->

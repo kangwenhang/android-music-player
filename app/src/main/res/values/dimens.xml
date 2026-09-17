@@ -46,7 +46,7 @@
     <dimen name="top_btn_height">52dp</dimen>
     <dimen name="top_btn_min_width">90dp</dimen>
 
-    <!-- 右侧 A-Z 快速索引条 -->
-    <dimen name="index_bar_width">34dp</dimen>
+    <!-- 右侧 A-Z 快速索引条(浮在列表之上,故加宽更易点中;命中区还会用 TouchDelegate 再扩) -->
+    <dimen name="index_bar_width">48dp</dimen>
     <dimen name="index_letter_size">72dp</dimen>
 </resources>

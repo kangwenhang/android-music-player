@@ -26,6 +26,8 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.graphics.Rect;
+import android.view.TouchDelegate;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -619,6 +621,7 @@ public class MainActivity extends AppCompatActivity {
         boolean searchEmpty = currentSearchQuery == null || currentSearchQuery.trim().isEmpty();
         if (favoritesOnly || !searchEmpty || musicList.isEmpty()) {
             sideIndexBar.setVisibility(View.GONE);
+            updateIndexBarTouchDelegate();
             return;
         }
 
@@ -642,6 +645,39 @@ public class MainActivity extends AppCompatActivity {
 
         sideIndexBar.setAvailableLetters(hasSong);
         sideIndexBar.setVisibility(View.VISIBLE);
+        updateIndexBarTouchDelegate();
+    }
+
+    /**
+     * 用 TouchDelegate 把索引条的触摸命中区向左侧列表方向扩出约 18dp,
+     * 这样手指稍微偏出条外(尤其偏左)也能被索引条捕获,电阻屏更好点。
+     * 索引条隐藏(GONE)时清除代理,避免误吞列表的触摸。
+     */
+    private void updateIndexBarTouchDelegate() {
+        final ViewParent vp = sideIndexBar.getParent();
+        if (!(vp instanceof View)) return;
+        final View parent = (View) vp;
+        parent.post(new Runnable() {
+            @Override
+            public void run() {
+                if (sideIndexBar.getVisibility() != View.VISIBLE) {
+                    parent.setTouchDelegate(null);
+                    return;
+                }
+                Rect r = new Rect();
+                sideIndexBar.getHitRect(r);
+                if (r.isEmpty()) {
+                    parent.setTouchDelegate(null);
+                    return;
+                }
+                float density = getResources().getDisplayMetrics().density;
+                int expandLeft = (int) (18 * density);   // 向列表方向扩,捕获偏左的手指
+                int expandRight = (int) (6 * density);   // 贴右边略扩
+                r.left -= expandLeft;
+                r.right += expandRight;
+                parent.setTouchDelegate(new TouchDelegate(r, sideIndexBar));
+            }
+        });
     }
 
     /** 首字母 → LETTERS 下标;'#' 永远在最后一位 */

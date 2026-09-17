@@ -4,14 +4,9 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.util.AttributeSet;
-import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.widget.PopupWindow;
-import android.widget.TextView;
 
 /**
  * 右侧 A-Z 快速索引条
@@ -20,10 +15,12 @@ import android.widget.TextView;
  * 共 27 格:A~Z 加一个 #(数字 / 符号 / 生僻字)。
  *
  * 车机适配要点(针对电阻屏 + 横屏 1024x600 反复打磨):
- *   1. 条更宽(46dp)、字母更大(16sp 起步),低矮屏上也不会被压成针尖。
- *   2. 按住时屏幕正中央弹出"大字母气泡",眼睛不用盯着细条,且能确认跳到哪。
+ *   1. 条更宽(布局给 48dp,兜底 46dp)、字母更大(16sp 起步),低矮屏上也不会被压成针尖。
+ *   2. 半透明浮在列表之上(见 activity_main.xml 的 bg_side_index),不占列表宽度。
  *   3. 每次切到新字母给一下轻震动(无需权限),操作有确定感。
- *   4. 触摸判定整格响应,且向下/上越界时仍就近吸附到有歌的字母。
+ *   4. 触摸判定整格响应,且 MainActivity 里用 TouchDelegate 把命中区向左侧列表方向扩出 ~18dp,
+ *      手指稍微偏出条外也能被捕获。
+ *   5. 居中大字母提示由布局里的 tv_index_letter 负责(本类不重复实现)。
  */
 public class SideIndexBar extends View {
 
@@ -51,7 +48,7 @@ public class SideIndexBar extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     /**
      * 索引条宽度(布局未指定时的兜底)。车机电阻屏不能太窄——太窄字母小且极难点中。
-     * 从 34dp 提到 46dp,实测点击容错明显提升。
+     * 布局侧用 @dimen/index_bar_width(48dp) 指定,这里只是兜底。
      */
     private static final int DEFAULT_WIDTH_DP = 46;
 
@@ -62,12 +59,6 @@ public class SideIndexBar extends View {
     private int selectedIndex = -1;
     /** 期望基础字号;绘制时还会按格子高度收敛,防止低矮车机屏上字母重叠 */
     private float textSize;
-
-    /** 中央悬浮大字母气泡(仿通讯录),按住拖动时显示当前字母 */
-    private PopupWindow previewPopup;
-    private TextView previewText;
-    private static final float PREVIEW_DP = 96f;   // 气泡直径
-    private static final float PREVIEW_TEXT_DP = 52f; // 气泡内字母字号
 
     public SideIndexBar(Context context) {
         super(context);
@@ -92,32 +83,6 @@ public class SideIndexBar extends View {
         textSize = 16f * getResources().getDisplayMetrics().scaledDensity;
         paint.setTextSize(textSize);
         paint.setTextAlign(Paint.Align.CENTER);
-
-        buildPreview();
-    }
-
-    /** 构建中央大字母气泡(仅在首次触摸时 show,不占用布局) */
-    private void buildPreview() {
-        Context ctx = getContext();
-        previewText = new TextView(ctx);
-        previewText.setGravity(Gravity.CENTER);
-        previewText.setTextColor(Color.WHITE);
-        previewText.setTextSize(PREVIEW_TEXT_DP); // sp
-        previewText.setPaintFlags(previewText.getPaintFlags() | Paint.FAKE_BOLD_TEXT_FLAG);
-
-        int size = (int) (PREVIEW_DP * getResources().getDisplayMetrics().density);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(COLOR_SELECTED);
-        bg.setShape(GradientDrawable.OVAL);
-        previewText.setBackgroundDrawable(bg);
-        previewText.setWidth(size);
-        previewText.setHeight(size);
-
-        previewPopup = new PopupWindow(previewText, size, size, false);
-        previewPopup.setTouchable(false);   // 关键:别抢走手指事件
-        previewPopup.setFocusable(false);
-        previewPopup.setOutsideTouchable(false);
-        previewPopup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
     }
 
     public void setOnLetterChangedListener(OnLetterChangedListener l) {
@@ -192,7 +157,6 @@ public class SideIndexBar extends View {
                 setPressed(false);
                 selectedIndex = -1;
                 invalidate();
-                dismissPreview();
                 if (listener != null) listener.onTouchUp();
                 return true;
             default:
@@ -212,40 +176,10 @@ public class SideIndexBar extends View {
         if (resolved != selectedIndex) {
             selectedIndex = resolved;
             invalidate();
-            showPreview(LETTERS[resolved]);
             // 电阻屏轻震动,操作有确定感(无需权限)
             performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
             if (listener != null) listener.onLetterChanged(LETTERS[resolved]);
-        } else {
-            // 同一格内移动也要保持气泡可见(防止气泡被意外 dismiss)
-            showPreview(LETTERS[resolved]);
         }
-    }
-
-    /** 显示/刷新中央大字母气泡 */
-    private void showPreview(String letter) {
-        if (previewText == null || previewPopup == null) return;
-        previewText.setText(letter);
-        if (!previewPopup.isShowing()) {
-            try {
-                previewPopup.showAtLocation(this, Gravity.CENTER, 0, 0);
-            } catch (Exception ignored) {
-                // 未 attach 到窗口时可能抛异常,忽略即可
-            }
-        }
-    }
-
-    /** 收起中央大字母气泡 */
-    private void dismissPreview() {
-        if (previewPopup != null && previewPopup.isShowing()) {
-            previewPopup.dismiss();
-        }
-    }
-
-    @Override
-    protected void onDetachedFromWindow() {
-        super.onDetachedFromWindow();
-        dismissPreview();
     }
 
     /** 屏幕上某个 y 坐标对应第几个字母 */
