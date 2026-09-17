@@ -70,6 +70,14 @@ public class FnMusicApi implements MusicSourceApi {
     private String userToken;
     private boolean loginFailed = false;
 
+    /** 最近一次失败原因(给设置页展示,避免只有一句"连接失败") */
+    private volatile String lastError = null;
+
+    /** 取最近一次失败原因;成功时为 null */
+    public String getLastError() {
+        return lastError;
+    }
+
     /** 是否走飞牛中继(远程 FN ID 访问)。默认 false = 直连 NAS。开启后所有请求带 Cookie: mode=relay */
     private boolean relayMode = false;
     /** 外网访问码(NAS 开启访问码保护时填);为空表示不启用 */
@@ -81,7 +89,8 @@ public class FnMusicApi implements MusicSourceApi {
     private List<AlbumBean> allAlbumsCache = null;
 
     public FnMusicApi(String serverUrl, String username, String password) {
-        String base = serverUrl;
+        // 用户经常忘写 http://,这里统一补全(只填 huilong.xxx.fun:5666 也能连)
+        String base = TlsCompat.normalizeUrl(serverUrl);
         if (base != null && base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
         }
@@ -246,7 +255,7 @@ public class FnMusicApi implements MusicSourceApi {
             HttpURLConnection conn = null;
             try {
                 URL url = new URL(currentUrl);
-                conn = (HttpURLConnection) url.openConnection();
+                conn = TlsCompat.open(url);
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(CONNECT_TIMEOUT);
                 conn.setReadTimeout(READ_TIMEOUT);
@@ -263,6 +272,7 @@ public class FnMusicApi implements MusicSourceApi {
                     continue;
                 }
                 if (code != 200) {
+                    lastError = "GET " + signPath + " 返回 HTTP " + code;
                     Log.e(TAG, "GET " + signPath + " -> HTTP " + code);
                     return null;
                 }
@@ -273,6 +283,12 @@ public class FnMusicApi implements MusicSourceApi {
                 while ((line = reader.readLine()) != null) sb.append(line);
                 return sb.toString();
             } catch (Exception e) {
+                if (TlsCompat.isTlsError(e)) {
+                    lastError = "TLS 握手失败(系统 SSL 版本过旧): " + currentUrl;
+                } else if (lastError == null) {
+                    lastError = e.getClass().getSimpleName() + ": " + e.getMessage()
+                            + " @ " + currentUrl;
+                }
                 Log.e(TAG, "GET failed: " + signPath, e);
                 return null;
             } finally {
@@ -293,7 +309,7 @@ public class FnMusicApi implements MusicSourceApi {
             OutputStream os = null;
             try {
                 URL url = new URL(currentUrl);
-                conn = (HttpURLConnection) url.openConnection();
+                conn = TlsCompat.open(url);
                 conn.setRequestMethod("POST");
                 conn.setConnectTimeout(CONNECT_TIMEOUT);
                 conn.setReadTimeout(READ_TIMEOUT);
@@ -317,6 +333,7 @@ public class FnMusicApi implements MusicSourceApi {
                 }
                 InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
                 if (is == null) {
+                    lastError = "POST " + endpoint + " 返回 HTTP " + code;
                     Log.e(TAG, "POST " + endpoint + " -> HTTP " + code);
                     return null;
                 }
@@ -326,6 +343,12 @@ public class FnMusicApi implements MusicSourceApi {
                 while ((line = reader.readLine()) != null) sb.append(line);
                 return sb.toString();
             } catch (Exception e) {
+                if (TlsCompat.isTlsError(e)) {
+                    lastError = "TLS 握手失败(系统 SSL 版本过旧): " + currentUrl;
+                } else if (lastError == null) {
+                    lastError = e.getClass().getSimpleName() + ": " + e.getMessage()
+                            + " @ " + currentUrl;
+                }
                 Log.e(TAG, "POST failed: " + endpoint, e);
                 return null;
             } finally {
@@ -354,20 +377,33 @@ public class FnMusicApi implements MusicSourceApi {
             body.put("deviceId", deviceId);
 
             String resp = httpPost("/user/password-login", body);
-            JSONObject root = resp == null ? null : new JSONObject(resp);
-            if (root != null && root.optInt("code", -1) == 0) {
+            if (resp == null) {
+                if (lastError == null) lastError = "登录请求无响应(地址或网络不可达)";
+                loginFailed = true;
+                return null;
+            }
+            JSONObject root = new JSONObject(resp);
+            if (root.optInt("code", -1) == 0) {
                 JSONObject data = root.optJSONObject("data");
                 if (data != null) {
                     String t = data.optString("userToken", null);
                     if (t != null && !t.isEmpty()) {
                         userToken = t;
+                        lastError = null;
                         Log.d(TAG, "登录成功");
                         return userToken;
                     }
                 }
+                lastError = "登录应答缺少 userToken";
+            } else {
+                lastError = "登录被拒 code=" + root.optInt("code", -1)
+                        + " " + root.optString("msg", root.optString("message", ""));
             }
             Log.e(TAG, "登录失败: " + resp);
         } catch (Exception e) {
+            lastError = TlsCompat.isTlsError(e)
+                    ? "TLS 握手失败(系统 SSL 版本过旧)"
+                    : String.valueOf(e.getMessage());
             Log.e(TAG, "login failed", e);
         }
         loginFailed = true;
@@ -378,6 +414,7 @@ public class FnMusicApi implements MusicSourceApi {
     public boolean ping() {
         userToken = null;
         loginFailed = false;
+        lastError = null;
         return ensureToken() != null;
     }
 
@@ -731,7 +768,7 @@ public class FnMusicApi implements MusicSourceApi {
         try {
             String urlStr = getStreamUrl(songId);
             URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
+            conn = TlsCompat.open(url);
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(CONNECT_TIMEOUT);
             conn.setReadTimeout(60000);

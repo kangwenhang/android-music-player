@@ -39,12 +39,22 @@ public class NavidromeApi implements MusicSourceApi {
     private final String username;
     private final String password;
 
+    /** 最近一次失败原因(给设置页展示) */
+    private volatile String lastError = null;
+
+    /** 取最近一次失败原因;成功时为 null */
+    public String getLastError() {
+        return lastError;
+    }
+
     public NavidromeApi(String serverUrl, String username, String password) {
+        // 补全 scheme:用户常忘写 http://
+        String base = TlsCompat.normalizeUrl(serverUrl);
         // 统一去掉末尾斜杠
-        if (serverUrl != null && serverUrl.endsWith("/")) {
-            serverUrl = serverUrl.substring(0, serverUrl.length() - 1);
+        if (base != null && base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
         }
-        this.serverUrl = serverUrl;
+        this.serverUrl = base;
         this.username = username;
         this.password = password;
     }
@@ -131,7 +141,7 @@ public class NavidromeApi implements MusicSourceApi {
         InputStream is = null;
         try {
             URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
+            conn = TlsCompat.open(url);
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(CONNECT_TIMEOUT);
             conn.setReadTimeout(READ_TIMEOUT);
@@ -139,6 +149,7 @@ public class NavidromeApi implements MusicSourceApi {
 
             int code = conn.getResponseCode();
             if (code != 200) {
+                lastError = "服务器返回 HTTP " + code;
                 throw new Exception("HTTP " + code);
             }
             is = conn.getInputStream();
@@ -163,13 +174,23 @@ public class NavidromeApi implements MusicSourceApi {
      */
     public boolean ping() {
         try {
+            lastError = null;
             String json = httpGet(apiUrl("ping", null));
             JSONObject root = new JSONObject(json);
             JSONObject resp = root.optJSONObject("subsonic-response");
             if (resp != null) {
-                return "ok".equals(resp.optString("status"));
+                boolean ok = "ok".equals(resp.optString("status"));
+                if (!ok) lastError = "服务端 status=" + resp.optString("status")
+                        + " " + resp.optString("error", "");
+                return ok;
             }
+            lastError = "应答不是 Subsonic 格式(可能填的是网页地址)";
         } catch (Exception e) {
+            if (TlsCompat.isTlsError(e)) {
+                lastError = "TLS 握手失败(系统 SSL 版本过旧)";
+            } else if (lastError == null) {
+                lastError = e.getMessage();
+            }
             Log.e(TAG, "ping failed", e);
         }
         return false;
@@ -602,7 +623,7 @@ public class NavidromeApi implements MusicSourceApi {
         try {
             String urlStr = getStreamUrl(songId);
             URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
+            conn = TlsCompat.open(url);
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(CONNECT_TIMEOUT);
             conn.setReadTimeout(60000); // 下载用更长的超时

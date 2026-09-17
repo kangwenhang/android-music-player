@@ -225,7 +225,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:text="说明:\n1. 服务器地址格式:http://IP:端口\n2. Navidrome 默认端口 4533;飞牛音乐填 NAS 的 Web 访问地址\n3. 确保车机和服务器在同一局域网\n4. 建议使用内网 IP,避免域名解析延迟"
+                android:text="说明:\n1. 服务器地址格式:http://IP:端口(不写 http:// 也会自动补全)\n2. Navidrome 默认端口 4533;飞牛音乐默认端口 5666\n3. 飞牛音乐可只填 FN ID(如 k495378412),会自动解析内网/公网/中继地址\n4. 建议在家用内网 IP 或 FN ID;用车载流量时 FN ID 会自动走飞牛中继"
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp"
                 android:lineSpacingExtra="4dp" />

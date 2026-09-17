@@ -29,6 +29,10 @@ import java.util.List;
  */
 public class ServerSettingsActivity extends AppCompatActivity {
 
+    /** 地址栏提示文案(集中管理,避免三处不一致) */
+    private static final String HINT_FN = "FN ID(如 k495378412)或 http://192.168.1.100:5666";
+    private static final String HINT_NAVIDROME = "http://192.168.1.100:4533";
+
     private EditText etUrl, etUser, etPass, etSyncPath;
     private TextView tvResult;
     private Button btnTest, btnSave, btnBack;
@@ -66,18 +70,27 @@ public class ServerSettingsActivity extends AppCompatActivity {
         // 切换类型时给出默认地址提示
         rgServerType.setOnCheckedChangeListener((group, checkedId) -> {
             if (checkedId == R.id.rb_type_fnmusic) {
-                etUrl.setHint("http://192.168.1.100:5666 或 FN ID(如 k495378412)");
+                etUrl.setHint(HINT_FN);
             } else {
-                etUrl.setHint("http://192.168.1.100:4533");
+                etUrl.setHint(HINT_NAVIDROME);
             }
         });
         // 初始提示(未触发切换回调时也要正确)
         if (rbTypeFnMusic.isChecked()) {
-            etUrl.setHint("http://192.168.1.100:5666 或 FN ID(如 k495378412)");
+            etUrl.setHint(HINT_FN);
+        } else {
+            etUrl.setHint(HINT_NAVIDROME);
         }
 
         // 回填已保存的配置
-        etUrl.setText(config.getServerUrl());
+        // 如果上次是用 FN ID 保存的,地址栏回填 FN ID 本身(而不是当时解析出来的地址),
+        // 否则在家存的内网 IP 换个网络就失效,用户也看不出自己当初填的是什么。
+        String savedFnId = config.getFnId();
+        if (savedFnId != null && !savedFnId.trim().isEmpty()) {
+            etUrl.setText(savedFnId);
+        } else {
+            etUrl.setText(config.getServerUrl());
+        }
         etUser.setText(config.getUsername());
         etPass.setText(config.getPassword());
         // 显示同步路径(如果是默认路径,也显示出来)
@@ -327,29 +340,39 @@ public class ServerSettingsActivity extends AppCompatActivity {
         }
         final String type = getCurrentServerType();
 
+        // 兜底:裸 FN ID(不含 : / .)不可能是合法 URL。
+        // 无论当前选的是哪种数据源,都按飞牛 FN ID 处理 —— 否则会掉进 Navidrome 分支,
+        // 最后只报一句"连接失败,请检查地址和凭据",完全看不出真实原因。
+        final boolean fnIdInput = MusicSourceFactory.looksLikeFnId(url);
+
         tvResult.setVisibility(View.VISIBLE);
         btnTest.setEnabled(false);
 
         // 飞牛 + 填的是 FN ID:先联网解析出可达地址(内网 / 公网 IPv6 / 公网 IPv4 / 中继),再测登录
-        if (MusicSourceFactory.TYPE_FNMUSIC.equals(type) && MusicSourceFactory.looksLikeFnId(url)) {
+        if (fnIdInput) {
+            if (!MusicSourceFactory.TYPE_FNMUSIC.equals(type)) {
+                // 同步界面选中项,避免"选着 Navidrome 实际在连飞牛"的错位
+                rbTypeFnMusic.setChecked(true);
+            }
             tvResult.setText("正在解析 FN ID,请稍候...");
             new Thread(new Runnable() {
                 @Override
                 public void run() {
                     final FnIdResolver.Addr addr = MusicSourceFactory.resolveFnId(url);
                     if (addr == null) {
+                        final String why = buildResolveFailReason(url);
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
                                 btnTest.setEnabled(true);
-                                showResult("FN ID 解析失败:该 NAS 当前不可达。"
-                                        + "请确认 NAS 已开机、FN Connect 已开启", false);
+                                showResult("FN ID 解析失败\n" + why, false);
                             }
                         });
                         return;
                     }
                     MusicSourceApi api = MusicSourceFactory.createFn(addr.url, user, pass, addr.relay);
                     final boolean ok = api.ping();
+                    final String reason = ok ? null : lastErrorOf(api);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -358,8 +381,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
                             if (ok) {
                                 showResult("连接成功!(" + route + ") " + addr.url, true);
                             } else {
-                                showResult("已解析到 " + addr.url + "(" + route
-                                        + "),但登录失败,请检查账号密码", false);
+                                showResult("已解析到 " + addr.url + "(" + route + ")\n"
+                                        + "但登录失败:" + reason, false);
                             }
                         }
                     });
@@ -374,6 +397,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
             public void run() {
                 MusicSourceApi api = MusicSourceFactory.create(type, url, user, pass);
                 final boolean ok = api.ping();
+                final String reason = ok ? null : lastErrorOf(api);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -381,12 +405,44 @@ public class ServerSettingsActivity extends AppCompatActivity {
                         if (ok) {
                             showResult("连接成功!服务器响应正常", true);
                         } else {
-                            showResult("连接失败,请检查地址和凭据", false);
+                            // 带上真实原因:HTTP 状态码 / TLS 版本过旧 / DNS 失败……
+                            showResult("连接失败:" + reason + "\n地址: " + url, false);
                         }
                     }
                 });
             }
         }).start();
+    }
+
+    /** FN ID 解析失败时,把原因讲清楚(解析服务 / 探测结果) */
+    private String buildResolveFailReason(String fnId) {
+        String e1 = FnIdResolver.getLastError();
+        String e2 = FnIdResolver.getLastProbeError();
+        StringBuilder sb = new StringBuilder();
+        sb.append("FN ID: ").append(fnId);
+        if (e1 != null) {
+            sb.append("\n· 解析阶段:").append(e1);
+        }
+        if (e2 != null) {
+            sb.append("\n· 探测阶段:").append(e2);
+        }
+        if (e1 == null && e2 == null) {
+            sb.append("\n· NAS 未开机,或 FN Connect / 远程访问未开启");
+        }
+        return sb.toString();
+    }
+
+    /** 取数据源记录的失败原因;没有则给一句兜底说明 */
+    private static String lastErrorOf(MusicSourceApi api) {
+        if (api instanceof FnMusicApi) {
+            String e = ((FnMusicApi) api).getLastError();
+            return e != null ? e : "服务器无响应(地址错误 / 未开机 / 不在同一网络)";
+        }
+        if (api instanceof NavidromeApi) {
+            String e = ((NavidromeApi) api).getLastError();
+            return e != null ? e : "服务器无响应(地址错误 / 未开机 / 不在同一网络)";
+        }
+        return "服务器无响应";
     }
 
     // ==================== 保存配置 ====================
@@ -413,8 +469,14 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
         final String type = getCurrentServerType();
 
+        // 与测试连接同一套判定:裸 FN ID 一律按飞牛处理(不依赖单选状态)
+        boolean fnIdInput = MusicSourceFactory.looksLikeFnId(url);
+        if (fnIdInput && !MusicSourceFactory.TYPE_FNMUSIC.equals(type)) {
+            rbTypeFnMusic.setChecked(true);
+        }
+
         // 飞牛 + FN ID:先解析,拿到真实地址与中继标志后再落盘
-        if (MusicSourceFactory.TYPE_FNMUSIC.equals(type) && MusicSourceFactory.looksLikeFnId(url)) {
+        if (fnIdInput) {
             tvResult.setVisibility(View.VISIBLE);
             tvResult.setText("正在解析 FN ID,请稍候...");
             btnSave.setEnabled(false);
@@ -422,12 +484,13 @@ public class ServerSettingsActivity extends AppCompatActivity {
                 @Override
                 public void run() {
                     final FnIdResolver.Addr addr = MusicSourceFactory.resolveFnId(url);
+                    final String why = addr == null ? buildResolveFailReason(url) : null;
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             btnSave.setEnabled(true);
                             if (addr == null) {
-                                showResult("FN ID 解析失败,未保存。请确认 NAS 开机 / FN Connect 已开启", false);
+                                showResult("FN ID 解析失败,未保存\n" + why, false);
                                 return;
                             }
                             applyAndSave(addr.url, addr.relay, url, user, pass, syncPath);

@@ -825,7 +825,7 @@ public class CoverLoader {
         InputStream is = null;
         try {
             URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
+            conn = TlsCompat.open(url);
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(8000);
             conn.setDoInput(true);

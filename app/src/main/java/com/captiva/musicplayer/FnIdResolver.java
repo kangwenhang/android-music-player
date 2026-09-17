@@ -47,14 +47,29 @@ import java.util.Random;
  */
 public class FnIdResolver {
 
-    /** 解析服务地址。开源客户端实测用 5ddd.com(fnos.net 同样能解析,但 5ddd 是官方中继域名) */
-    private static final String CON_HOST = "https://5ddd.com";
+    /** 解析服务地址。5ddd.com 与 fnos.net 都能解析,主用前者,失败自动切后者 */
+    private static final String[] CON_HOSTS = {"https://5ddd.com", "https://fnos.net"};
     private static final String CON_PATH = "/api/v1/fn/con";
 
     private static final String PREFIX = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh";
     private static final String APIKEY = "zIGtkc3dqZnJpd29qZXJqa2w7c";
 
     private static final int TIMEOUT_MS = 6000;
+
+    /** 最近一次解析失败的原因(给设置页显示,避免只看到一句"连接失败") */
+    private static volatile String lastError = null;
+    /** 最近一次探测失败的原因 */
+    private static volatile String lastProbeError = null;
+
+    /** 取解析失败原因;成功时为 null */
+    public static String getLastError() {
+        return lastError;
+    }
+
+    /** 取探测失败原因;成功时为 null */
+    public static String getLastProbeError() {
+        return lastProbeError;
+    }
 
     /** 一个候选地址 */
     public static class Addr {
@@ -80,17 +95,57 @@ public class FnIdResolver {
      */
     public static List<Addr> resolve(String fnId) {
         List<Addr> out = new ArrayList<>();
-        if (fnId == null) return out;
+        lastError = null;
+        if (fnId == null) {
+            lastError = "FN ID 为空";
+            return out;
+        }
         fnId = fnId.trim();
-        if (fnId.isEmpty()) return out;
+        if (fnId.isEmpty()) {
+            lastError = "FN ID 为空";
+            return out;
+        }
 
         try {
             String body = "{\"fnId\":\"" + fnId + "\"}";
-            JSONObject root = new JSONObject(post(CON_HOST + CON_PATH, body));
-            if (root.optInt("code", -1) != 0) return out;
+            String resp = null;
+            // 逐个解析服务尝试(5ddd.com → fnos.net),拿到有效应答即停
+            for (String host : CON_HOSTS) {
+                resp = post(host + CON_PATH, body);
+                if (resp != null && !resp.trim().isEmpty()) {
+                    try {
+                        JSONObject probe = new JSONObject(resp);
+                        // code=3000037/3000006 是业务层"查不到",换域名也没用,直接判定失败
+                        int c = probe.optInt("code", -1);
+                        if (c == 0) break;
+                        if (c == 3000037 || c == 3000006) {
+                            lastError = describeCode(c, fnId);
+                            return out;
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            if (resp == null || resp.trim().isEmpty()) {
+                if (lastError == null) {
+                    lastError = "解析服务无响应(" + CON_HOSTS[0] + ")";
+                }
+                return out;
+            }
+            JSONObject root = new JSONObject(resp);
+            int code = root.optInt("code", -1);
+            if (code != 0) {
+                lastError = describeCode(code, fnId);
+                return out;
+            }
 
             JSONObject d = root.optJSONObject("data");
-            if (d == null) return out;
+            if (d == null) {
+                lastError = "解析服务返回结构异常(data 为空)";
+                return out;
+            }
+            // 解析成功,清掉过程中可能留下的中间态错误(例如第一个域名试错时记下的)
+            lastError = null;
 
             String httpPort = "5666";
             String httpsPort = "5667";
@@ -119,9 +174,43 @@ public class FnIdResolver {
             }
 
         } catch (Exception e) {
-            // 解析失败一律返回空列表,由调用方提示用户
+            // 解析失败一律返回空列表,由调用方提示用户;原因记下来给设置页显示。
+            // 注意不要覆盖更具体的原因(例如 post() 里已记下的 "HTTP 400")
+            if (lastError == null) {
+                lastError = describe(e);
+            }
         }
         return out;
+    }
+
+    /**
+     * 把服务端业务码翻译成用户能照着改的提示。
+     *
+     * 实测:
+     *   正确 ID   → code 0
+     *   k1483162508 → code 3000037 Not Found Error(格式合法但这台设备查不到)
+     *   zzzzzzzzzz  → code 3000006
+     */
+    private static String describeCode(int code, String fnId) {
+        if (code == 3000037) {
+            return "FN ID「" + fnId + "」查不到(code 3000037):飞牛服务器没有这台设备。\n"
+                    + "注意 FN ID 不是 DDNS 域名里的那段数字。\n"
+                    + "正确位置:飞牛 App → 设置 → 远程访问 → FN ID(形如 k495378412)";
+        }
+        if (code == 3000006) {
+            return "FN ID「" + fnId + "」不存在或格式不对(code 3000006)";
+        }
+        return "解析失败(code " + code + ")";
+    }
+
+    /** 把异常翻译成看得懂的一句话 */
+    private static String describe(Exception e) {
+        if (TlsCompat.isTlsError(e)) {
+            return "TLS 握手失败(系统 SSL 版本过旧)";
+        }
+        String m = e.getMessage();
+        if (m == null || m.trim().isEmpty()) m = e.getClass().getSimpleName();
+        return m;
     }
 
     private static void addAddrs(List<Addr> out, JSONArray arr, String type,
@@ -151,11 +240,20 @@ public class FnIdResolver {
      * 逐个探测候选地址,返回第一个能用的 Addr(含 relay 标记);全部不可达返回 null。
      */
     public static Addr pickReachableAddr(List<Addr> list) {
+        lastProbeError = null;
         if (list == null) return null;
+        if (list.isEmpty()) {
+            lastProbeError = "没有可用的候选地址";
+            return null;
+        }
         for (Addr a : list) {
             if (a == null || a.url == null) continue;
-            if (probe(a.url, a.relay)) return a;
+            if (probe(a.url, a.relay)) {
+                lastProbeError = null;
+                return a;
+            }
         }
+        if (lastProbeError == null) lastProbeError = "所有候选地址均不可达";
         return null;
     }
 
@@ -173,7 +271,7 @@ public class FnIdResolver {
             if (u.endsWith("/")) u = u.substring(0, u.length() - 1);
             // 中继只验证连通性(返回的是 SPA/重定向,不是 JSON code0);直连验证音乐 init 接口
             String probeUrl = relay ? u : (u + "/music/api/v1/initialization/state");
-            conn = (HttpURLConnection) new URL(probeUrl).openConnection();
+            conn = TlsCompat.open(probeUrl);
             conn.setConnectTimeout(TIMEOUT_MS);
             conn.setReadTimeout(TIMEOUT_MS);
             conn.setRequestMethod("GET");
@@ -182,12 +280,22 @@ public class FnIdResolver {
             conn.setInstanceFollowRedirects(false);
             int code = conn.getResponseCode();
             // 中继:2xx/3xx 都算可达(后面实际请求会带 token)
-            if (relay) return code >= 200 && code < 400;
-            if (code != 200) return false;
+            if (relay) {
+                if (code >= 200 && code < 400) return true;
+                lastProbeError = "中继 " + u + " 返回 HTTP " + code;
+                return false;
+            }
+            if (code != 200) {
+                lastProbeError = u + " 返回 HTTP " + code;
+                return false;
+            }
             String s = readAll(conn.getInputStream());
             JSONObject o = new JSONObject(s);
-            return o.optInt("code", -1) == 0;
+            boolean ok = o.optInt("code", -1) == 0;
+            if (!ok) lastProbeError = u + " 应答非音乐服务(可能被网关/反代拦截)";
+            return ok;
         } catch (Exception e) {
+            lastProbeError = baseUrl + " → " + describe(e);
             return false;
         } finally {
             if (conn != null) conn.disconnect();
@@ -202,7 +310,7 @@ public class FnIdResolver {
         String sign = md5(PREFIX + "_" + CON_PATH + "_" + nonce + "_" + ts + "_" + md5(body) + "_" + APIKEY);
         String authx = "nonce=" + nonce + "&timestamp=" + ts + "&sign=" + sign;
 
-        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+        HttpURLConnection conn = TlsCompat.open(urlStr);
         try {
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
@@ -215,6 +323,9 @@ public class FnIdResolver {
             conn.getOutputStream().flush();
             int code = conn.getResponseCode();
             InputStream is = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+            if (code < 200 || code >= 300) {
+                lastError = "解析服务返回 HTTP " + code;
+            }
             return is == null ? "" : readAll(is);
         } finally {
             conn.disconnect();
