@@ -84,6 +84,17 @@
 - 版本号基于 git tag,正式版如 `v4.5`,预发布如 `v4.5.190-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
 
+### v5.7 更新内容(local-test)
+
+- **接入飞牛音乐(FN Music)数据源**:新增 `FnMusicApi`,支持 `user/password-login`、`album/list`、`track/list`、`artist/list`、`track/stream`、`static/cover`、`lyric/list` 全套接口
+- **FN ID 直接登录**:服务器地址栏可直接填 FN ID(如 `k495378412`),由 `FnIdResolver` 通过官方查询接口解析出局域网 / IPv6 / 公网 / 中继地址并自动择优
+- **官方中继支持**:中继链路自动带 `Cookie: mode=relay`,并手动跟进 302(自动重发该 Cookie);已实测可通过 `k495378412.5ddd.com` 完成登录与取歌
+- **歌曲名按字母/拼音排序**:新增 `MusicTitleComparator`,先用 `PinyinUtils` 按首字母分组,组内再用 ICU Collator 细分
+- **拼音首字母算法**:`PinyinUtils` 基于 GB2312 一级汉字区位码(不依赖设备 ICU 数据),结果确定、不随系统变化;已离线验证 79/82 用例正确,生僻字与繁体归入 `#`
+- **右侧 A-Z 快速索引条**:新增 `SideIndexBar` 自定义 View,A~Z 加 `#`,无歌字母自动置灰并按最近邻跳转;按下/拖动时列表跳转到该字母首曲,居中显示大字母提示,抬手 600ms 后消失
+- 搜索 / 收藏夹过滤时索引条自动隐藏(此时列表不是全量排序结果,字母索引会错位)
+- 列表右侧预留 34dp 给索引条,避免遮挡曲目
+
 ### v5.6 更新内容
 
 - **修复内存泄漏**:MusicService 歌词加载线程改为 ExecutorService（onDestroy 时 shutdownNow 取消），补充 unregisterMediaButtonEventReceiver 广播注销

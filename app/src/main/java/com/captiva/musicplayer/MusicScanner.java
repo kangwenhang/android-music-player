@@ -160,12 +160,7 @@ public class MusicScanner {
             }
         }
 
-        java.util.Collections.sort(list, new java.util.Comparator<MusicBean>() {
-            @Override
-            public int compare(MusicBean a, MusicBean b) {
-                return a.getTitle().compareToIgnoreCase(b.getTitle());
-            }
-        });
+        java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
 
         return list;
     }
@@ -283,12 +278,7 @@ public class MusicScanner {
         }
 
         // 按标题排序
-        java.util.Collections.sort(list, new java.util.Comparator<MusicBean>() {
-            @Override
-            public int compare(MusicBean a, MusicBean b) {
-                return a.getTitle().compareToIgnoreCase(b.getTitle());
-            }
-        });
+        java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
 
         return list;
     }

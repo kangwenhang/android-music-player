@@ -45,4 +45,8 @@
     <!-- 顶栏按钮(电阻屏优化) -->
     <dimen name="top_btn_height">52dp</dimen>
     <dimen name="top_btn_min_width">90dp</dimen>
+
+    <!-- 右侧 A-Z 快速索引条 -->
+    <dimen name="index_bar_width">34dp</dimen>
+    <dimen name="index_letter_size">72dp</dimen>
 </resources>

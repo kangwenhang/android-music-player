@@ -16,3 +16,5 @@ captures/
 
 # 无 Android SDK 环境下的本地自检脚本(临时工具)
 java_brace_check.py
+pinyin_verify.py
+_gitcheck.py

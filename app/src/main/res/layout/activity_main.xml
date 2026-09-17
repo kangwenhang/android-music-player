@@ -126,6 +126,8 @@
                 android:id="@+id/rv_list"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
+                android:paddingRight="@dimen/index_bar_width"
+                android:clipToPadding="false"
                 android:scrollbars="vertical"
                 android:overScrollMode="ifContentScrolls" />
 
@@ -136,6 +138,27 @@
                 android:layout_gravity="center"
                 android:textColor="@color/text_secondary"
                 android:textSize="@dimen/sub_text_size"
+                android:visibility="gone" />
+
+            <!-- 右侧 A-Z 快速索引条(按住拖动即可跳到对应字母的歌曲) -->
+            <com.captiva.musicplayer.SideIndexBar
+                android:id="@+id/side_index_bar"
+                android:layout_width="@dimen/index_bar_width"
+                android:layout_height="match_parent"
+                android:layout_gravity="end|center_vertical"
+                android:visibility="gone" />
+
+            <!-- 拖动索引条时居中显示的当前字母 -->
+            <TextView
+                android:id="@+id/tv_index_letter"
+                android:layout_width="@dimen/index_letter_size"
+                android:layout_height="@dimen/index_letter_size"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:background="@drawable/bg_index_letter"
+                android:textColor="@color/accent"
+                android:textSize="34sp"
+                android:textStyle="bold"
                 android:visibility="gone" />
         </FrameLayout>
 

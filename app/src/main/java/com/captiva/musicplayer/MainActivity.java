@@ -15,6 +15,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -187,6 +188,22 @@ public class MainActivity extends AppCompatActivity {
     private boolean favoritesOnly = false;
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
+
+    /** 右侧 A-Z 快速索引条 */
+    private SideIndexBar sideIndexBar;
+    /** 拖动索引条时居中显示的当前字母 */
+    private TextView tvIndexLetter;
+    /** 延迟隐藏居中字母提示 */
+    private final Runnable hideIndexLetterTask = new Runnable() {
+        @Override
+        public void run() {
+            if (tvIndexLetter != null) {
+                tvIndexLetter.setVisibility(View.GONE);
+            }
+        }
+    };
+    /** 每个字母在列表中的起始位置(与 SideIndexBar.LETTERS 对应,无歌为 -1),避免每次拖动都重扫全表 */
+    private final int[] letterPositions = new int[SideIndexBar.LETTERS.length];
 
     /** 服务器状态监控器 */
     private ServerStatusMonitor statusMonitor;
@@ -417,6 +434,8 @@ public class MainActivity extends AppCompatActivity {
     private void initViews() {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
+        sideIndexBar = findViewById(R.id.side_index_bar);
+        tvIndexLetter = findViewById(R.id.tv_index_letter);
         tvCount = findViewById(R.id.tv_count);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
         etSearch = findViewById(R.id.et_search);
@@ -492,6 +511,7 @@ public class MainActivity extends AppCompatActivity {
         // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
         rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
+        setupIndexBar();
         // 滑动状态监听:拖拽和惯性滑动时开启cacheOnlyMode(只读内部缓存),停止后关闭
         rvList.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
@@ -542,6 +562,133 @@ public class MainActivity extends AppCompatActivity {
         });
         tvEmpty.setText("正在扫描本地音乐...");
         tvEmpty.setVisibility(View.VISIBLE);
+    }
+
+    // ===== 右侧 A-Z 快速索引条 =====
+
+    /** 索引条初始化:绑定监听 + 数据变化自动刷新 */
+    private void setupIndexBar() {
+        if (sideIndexBar == null) return;
+        sideIndexBar.setOnLetterChangedListener(new SideIndexBar.OnLetterChangedListener() {
+            @Override
+            public void onLetterChanged(String letter) {
+                showIndexLetter(letter);
+                scrollToLetter(letter);
+            }
+
+            @Override
+            public void onTouchUp() {
+                hideIndexLetterDelayed();
+            }
+        });
+        // 全量刷新(setData / filter / filterFavorites 都会走 notifyDataSetChanged)时重算
+        adapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
+            @Override
+            public void onChanged() {
+                refreshIndexBar();
+            }
+        });
+        refreshIndexBar();
+    }
+
+    /** 切主线程执行索引条刷新(后台线程如果误触发,不能去动 View) */
+    private final Runnable refreshIndexBarTask = new Runnable() {
+        @Override
+        public void run() {
+            refreshIndexBarInternal();
+        }
+    };
+
+    /**
+     * 刷新索引条三件事:
+     * 1. 统计哪些字母有歌 —— 没歌的置灰,手指按上去会自动落到最近的字母
+     * 2. 记录每个字母在列表里的首个位置 —— 拖动时直接跳,不用每次全表扫描
+     * 3. 搜索 / 收藏夹模式下隐藏 —— 那时列表已不是完整排序结果,字母索引会错位
+     */
+    private void refreshIndexBar() {
+        if (sideIndexBar == null || adapter == null) return;
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.removeCallbacks(refreshIndexBarTask);
+            handler.post(refreshIndexBarTask);
+            return;
+        }
+        refreshIndexBarInternal();
+    }
+
+    private void refreshIndexBarInternal() {
+        boolean searchEmpty = currentSearchQuery == null || currentSearchQuery.trim().isEmpty();
+        if (favoritesOnly || !searchEmpty || musicList.isEmpty()) {
+            sideIndexBar.setVisibility(View.GONE);
+            return;
+        }
+
+        for (int i = 0; i < letterPositions.length; i++) {
+            letterPositions[i] = -1;
+        }
+        boolean[] hasSong = new boolean[SideIndexBar.LETTERS.length];
+
+        List<MusicBean> list = adapter.getDisplayList();
+        if (list == null || list.isEmpty()) list = musicList;
+        for (int i = 0; i < list.size(); i++) {
+            MusicBean b = list.get(i);
+            if (b == null) continue;
+            int idx = indexOfLetter(PinyinUtils.firstLetter(b.getTitle()));
+            if (idx < 0) continue;
+            hasSong[idx] = true;
+            if (letterPositions[idx] < 0) {
+                letterPositions[idx] = i;
+            }
+        }
+
+        sideIndexBar.setAvailableLetters(hasSong);
+        sideIndexBar.setVisibility(View.VISIBLE);
+    }
+
+    /** 首字母 → LETTERS 下标;'#' 永远在最后一位 */
+    private static int indexOfLetter(char c) {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c == '#') return SideIndexBar.LETTERS.length - 1;
+        return -1;
+    }
+
+    /** 滚动到某个字母的第一首歌 */
+    private void scrollToLetter(String letter) {
+        if (letter == null || letter.length() == 0 || adapter == null) return;
+        int idx = -1;
+        for (int i = 0; i < SideIndexBar.LETTERS.length; i++) {
+            if (SideIndexBar.LETTERS[i].equals(letter)) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) return;
+        int pos = letterPositions[idx];
+        if (pos < 0) return;
+
+        // 分批加载机制下,列表后半部分可能还没进显示区,先补齐再滚
+        adapter.ensureLoaded(pos);
+        rvList.stopScroll();
+        RecyclerView.LayoutManager lm = rvList.getLayoutManager();
+        if (lm instanceof LinearLayoutManager) {
+            ((LinearLayoutManager) lm).scrollToPositionWithOffset(pos, 0);
+        } else {
+            rvList.scrollToPosition(pos);
+        }
+    }
+
+    /** 居中显示当前字母 */
+    private void showIndexLetter(String letter) {
+        if (tvIndexLetter == null) return;
+        handler.removeCallbacks(hideIndexLetterTask);
+        tvIndexLetter.setText(letter);
+        tvIndexLetter.setVisibility(View.VISIBLE);
+    }
+
+    /** 抬起手指后延迟隐藏居中字母 */
+    private void hideIndexLetterDelayed() {
+        if (tvIndexLetter == null) return;
+        handler.removeCallbacks(hideIndexLetterTask);
+        handler.postDelayed(hideIndexLetterTask, 600);
     }
 
     private void setupListeners() {
@@ -2190,12 +2337,7 @@ public class MainActivity extends AppCompatActivity {
                 List<MusicBean> cachedList = localMusicCache.load();
                 if (cachedList != null && !cachedList.isEmpty()) {
                     // 排序(后台线程,不阻塞UI)
-                    java.util.Collections.sort(cachedList, new java.util.Comparator<MusicBean>() {
-                        @Override
-                        public int compare(MusicBean a, MusicBean b) {
-                            return a.getTitle().compareToIgnoreCase(b.getTitle());
-                        }
-                    });
+                    java.util.Collections.sort(cachedList, MusicTitleComparator.INSTANCE);
 
                     final List<MusicBean> finalList = cachedList;
                     handler.post(new Runnable() {
@@ -2290,12 +2432,7 @@ public class MainActivity extends AppCompatActivity {
                 final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
 
                 // 排序
-                java.util.Collections.sort(fullList, new java.util.Comparator<MusicBean>() {
-                    @Override
-                    public int compare(MusicBean a, MusicBean b) {
-                        return a.getTitle().compareToIgnoreCase(b.getTitle());
-                    }
-                });
+                java.util.Collections.sort(fullList, MusicTitleComparator.INSTANCE);
 
                 runOnUiThread(new Runnable() {
                     @Override
@@ -2443,12 +2580,7 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         // 排序
-                        java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
-                            @Override
-                            public int compare(MusicBean a, MusicBean b) {
-                                return a.getTitle().compareToIgnoreCase(b.getTitle());
-                            }
-                        });
+                        java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
                         adapter.setData(musicList);
                         updateCount();
                         if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
@@ -2702,12 +2834,7 @@ public class MainActivity extends AppCompatActivity {
                             // 收藏夹模式:重新设置数据后重新过滤收藏
                             if (!toAdd.isEmpty()) {
                                 musicList.addAll(toAdd);
-                                java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
-                                    @Override
-                                    public int compare(MusicBean a, MusicBean b) {
-                                        return a.getTitle().compareToIgnoreCase(b.getTitle());
-                                    }
-                                });
+                                java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
                             }
                             adapter.setData(musicList);
                             applyFavoritesFilter();
@@ -2717,12 +2844,7 @@ public class MainActivity extends AppCompatActivity {
                         } else if (currentSearchQuery.isEmpty()) {
                             if (!toAdd.isEmpty()) {
                                 musicList.addAll(toAdd);
-                                java.util.Collections.sort(musicList, new java.util.Comparator<MusicBean>() {
-                                    @Override
-                                    public int compare(MusicBean a, MusicBean b) {
-                                        return a.getTitle().compareToIgnoreCase(b.getTitle());
-                                    }
-                                });
+                                java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
                                 adapter.setData(musicList);
                                 if (service != null && !musicList.isEmpty()) {
                                     service.setPlayList(musicList, 0);
