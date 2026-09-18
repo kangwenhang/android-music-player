@@ -179,6 +179,13 @@ public class PerfLogger {
      */
     public static void onFrame(long frameTimeNanos) {
         if (!enabled) return;
+        // 不在滑动中:跳过帧间隔统计,并清空上一帧时间戳。
+        // 否则滑动停止后那次"未续投"的尾帧仍会执行到末尾的 lastFrameTimeNanos=frameTimeNanos,
+        // 把上一次滑动的帧时间写回,导致下次滑动首帧把"两次滑动之间的空闲间隔"误判成巨长掉帧(假 🔴严重)。
+        if (!scrolling) {
+            lastFrameTimeNanos = 0;
+            return;
+        }
         frameCount++;
 
         if (lastFrameTimeNanos > 0) {
@@ -186,11 +193,9 @@ public class PerfLogger {
             // 加严:单帧超过 20ms 即记为一次卡顿(车机上会被放大成明显卡顿)
             if (delta > FRAME_HITCH_MS) {
                 droppedFrameCount++;
-                if (scrolling) {
-                    boolean severe = delta >= FRAME_INTERVAL_33MS; // >=33ms 视为严重卡顿
-                    log("掉帧", "delta=" + (delta / 1_000_000) + "ms"
-                            + (severe ? " 🔴严重" : " ⚠️"));
-                }
+                boolean severe = delta >= FRAME_INTERVAL_33MS; // >=33ms 视为严重卡顿
+                log("掉帧", "delta=" + (delta / 1_000_000) + "ms"
+                        + (severe ? " 🔴严重" : " ⚠️"));
             }
         }
         lastFrameTimeNanos = frameTimeNanos;
