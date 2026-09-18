@@ -506,10 +506,14 @@ public class MainActivity extends AppCompatActivity {
                 if (newState == RecyclerView.SCROLL_STATE_DRAGGING
                         || newState == RecyclerView.SCROLL_STATE_SETTLING) {
                     // 滑动中:暂停封面U盘读取 + 暂停歌词渲染 + 暂停进度更新
-                    listScrolling = true;
-                    CoverLoader.getInstance().setCacheOnlyMode(true);
-                    lrcView.setSkipDraw(true);
-                    PerfLogger.setScrolling(true);
+                listScrolling = true;
+                CoverLoader.getInstance().setCacheOnlyMode(true);
+                lrcView.setSkipDraw(true);
+                PerfLogger.setScrolling(true);
+                // 启动帧率监控回调(回调内部仅在 listScrolling 时自续,停止滑动后自动停止)
+                if (BuildConfig.DEBUG && PerfLogger.isEnabled()) {
+                    Choreographer.getInstance().postFrameCallback(frameCallback);
+                }
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     // 停止滑动:恢复一切
                     listScrolling = false;
@@ -2294,10 +2298,12 @@ public class MainActivity extends AppCompatActivity {
         // 设置扫描路径为同步目录
         navidromeConfig.setScanPath(syncPath);
 
-        // 性能日志:输出到音乐同步目录下的 perf_log.txt
-        PerfLogger.init(syncPath);
-        handler.post(logFlushTask);
-        PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
+        // 性能日志:仅调试版(BuildConfig.DEBUG)开启,自动写入 perf_log.txt 用于分析卡顿
+        if (BuildConfig.DEBUG) {
+            PerfLogger.init(this, syncPath);
+            handler.post(logFlushTask);
+            PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
+        }
 
         // 显示加载中提示
         tvEmpty.setText("正在加载音乐...");

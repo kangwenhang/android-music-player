@@ -21,14 +21,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * 3. 日志写入U盘文件,方便导出分析
  * 4. 环形缓冲区,避免内存无限增长
  *
- * 日志文件路径: <syncPath>/perf_log.txt
- * 每次启动清空旧日志,重新记录
+ * 日志文件路径: <syncPath>/perf_log.txt(同步目录为空时回退到 App 私有 perf/ 目录)
+ * 每次启动清空旧日志,重新记录。
+ * 仅调试版(BuildConfig.DEBUG=true)启用;正式版不调用 init,perf 日志完全关闭。
  *
- * 使用方式:
- *   PerfLogger.init(context, syncPath);
- *   PerfLogger.startFrameMonitor();   // 开始帧率监控
- *   PerfLogger.log("onBind", 15);     // 记录耗时操作
- *   PerfLogger.dump();                // 手动刷新到文件
+ * 使用方式(在 MainActivity.loadMusic 中,已按 BuildConfig.DEBUG 判断后调用):
+ *   PerfLogger.init(context, syncPath);  // 初始化并开始写日志
+ *   PerfLogger.log("onBind", 15);        // 记录耗时操作
+ *   PerfLogger.dump();                   // 手动刷新到文件(另有 50 条/10秒 自动刷新)
  */
 public class PerfLogger {
 
@@ -54,18 +54,39 @@ public class PerfLogger {
 
     private PerfLogger() {}
 
-    /** 初始化日志文件(在U盘上) */
-    public static void init(String syncPath) {
-        if (syncPath == null || syncPath.isEmpty()) {
-            Log.w(TAG, "syncPath 为空,性能日志不可用");
+    /**
+     * 初始化日志文件。
+     *
+     * 仅调试版(BuildConfig.DEBUG=true)由 MainActivity 调用;正式版不调用,perf 日志完全关闭。
+     * 同步目录为空时,回退到 App 私有外部存储下的 perf 子目录,
+     * 保证没有 U 盘时也能记录卡顿信息用于分析。
+     *
+     * @param context  用于获取兜底存储目录
+     * @param syncPath 首选日志目录(同步/U盘目录),可为空
+     */
+    public static void init(Context context, String syncPath) {
+        if (context == null) {
+            Log.w(TAG, "context 为空,性能日志不可用");
             return;
         }
+        File dir;
+        if (syncPath != null && !syncPath.isEmpty()) {
+            dir = new File(syncPath);
+        } else {
+            // 兜底:同步目录为空时写入 App 私有外部存储,确保无 U 盘也能分析卡顿
+            File base = context.getExternalFilesDir(null);
+            if (base == null) base = context.getFilesDir();
+            dir = new File(base, "perf");
+        }
         try {
-            File dir = new File(syncPath);
             if (!dir.exists()) dir.mkdirs();
             logFile = new File(dir, LOG_FILE_NAME);
+            // 每次启动清空旧日志(环形缓冲 + 自动刷新,单文件足够定位卡顿)
+            if (logFile.exists() && !logFile.delete()) {
+                Log.w(TAG, "无法删除旧日志文件,将追加写入");
+            }
             enabled = true;
-            log("=== PerfLogger 初始化,日志文件: " + logFile.getAbsolutePath() + " ===");
+            log("=== PerfLogger 初始化(调试版),日志文件: " + logFile.getAbsolutePath() + " ===");
             log("设备信息: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
                     + " Android " + android.os.Build.VERSION.RELEASE
                     + " SDK=" + android.os.Build.VERSION.SDK_INT);
