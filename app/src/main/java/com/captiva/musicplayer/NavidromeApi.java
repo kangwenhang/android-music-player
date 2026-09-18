@@ -17,8 +17,10 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Navidrome / Subsonic API 客户端
@@ -34,6 +36,12 @@ public class NavidromeApi implements MusicSourceApi {
     private static final String CLIENT_NAME = "CaptivaMusic";
     private static final int CONNECT_TIMEOUT = 10000;
     private static final int READ_TIMEOUT = 15000;
+    /** 专辑列表请求的最大尝试次数(首次 + 重试) */
+    private static final int LIST_ATTEMPTS = 3;
+    /** 专辑列表重试前的退避等待(毫秒) */
+    private static final long LIST_RETRY_BACKOFF_MS = 300L;
+    /** 全量列表翻页的页数上限(兜底,防止服务端异常时无限翻页) */
+    private static final int MAX_BULK_PAGES = 400;
 
     private final String serverUrl;
     private final String username;
@@ -208,43 +216,68 @@ public class NavidromeApi implements MusicSourceApi {
 
     /**
      * getAlbumList2:获取专辑列表(支持分页)
+     *
+     * 【重要】请求失败 / 解析失败时必须重试,不能直接返回空列表:
+     * 调用方(getAllAlbums、同步流程)把"空列表"当作"服务器没有更多专辑",
+     * 一次网络抖动就会被误判成"专辑已经取完",进而导致同步的歌曲数偏少。
+     *
      * @param type   newest | random | frequent | recent | alphabeticalByName
      * @param size   每页数量
      * @param offset 偏移量
-     * @return 该页专辑列表
+     * @return 该页专辑列表;服务器正常应答但没有数据时返回空列表
      */
     public List<AlbumBean> getAlbumList(String type, int size, int offset) {
-        List<AlbumBean> list = new ArrayList<>();
-        try {
-            String params = "type=" + type + "&size=" + size + "&offset=" + offset;
-            String json = httpGet(apiUrl("getAlbumList2", params));
-            JSONObject root = new JSONObject(json);
-            JSONObject resp = root.optJSONObject("subsonic-response");
-            if (resp != null && "ok".equals(resp.optString("status"))) {
-                JSONObject albumList = resp.optJSONObject("albumList2");
-                if (albumList != null) {
-                    JSONArray albums = albumList.optJSONArray("album");
-                    if (albums != null) {
-                        for (int i = 0; i < albums.length(); i++) {
-                            JSONObject a = albums.optJSONObject(i);
-                            if (a != null) {
-                                AlbumBean bean = new AlbumBean();
-                                bean.setId(a.optString("id"));
-                                bean.setName(a.optString("name"));
-                                bean.setArtist(a.optString("artist"));
-                                bean.setCoverArtId(a.optString("coverArt"));
-                                bean.setSongCount(a.optInt("songCount", 0));
-                                bean.setDuration(a.optLong("duration", 0));
-                                list.add(bean);
+        String params = "type=" + type + "&size=" + size + "&offset=" + offset;
+        for (int attempt = 0; attempt < LIST_ATTEMPTS; attempt++) {
+            try {
+                String json = httpGet(apiUrl("getAlbumList2", params));
+                JSONObject root = new JSONObject(json);
+                JSONObject resp = root.optJSONObject("subsonic-response");
+                if (resp != null && "ok".equals(resp.optString("status"))) {
+                    List<AlbumBean> list = new ArrayList<>();
+                    JSONObject albumList = resp.optJSONObject("albumList2");
+                    if (albumList != null) {
+                        JSONArray albums = albumList.optJSONArray("album");
+                        if (albums != null) {
+                            for (int i = 0; i < albums.length(); i++) {
+                                JSONObject a = albums.optJSONObject(i);
+                                if (a != null) {
+                                    AlbumBean bean = new AlbumBean();
+                                    bean.setId(a.optString("id"));
+                                    bean.setName(a.optString("name"));
+                                    bean.setArtist(a.optString("artist"));
+                                    bean.setCoverArtId(a.optString("coverArt"));
+                                    bean.setSongCount(a.optInt("songCount", 0));
+                                    bean.setDuration(a.optLong("duration", 0));
+                                    list.add(bean);
+                                }
                             }
                         }
                     }
+                    return list; // 正常应答:空就是真的没有更多
                 }
+                Log.w(TAG, "getAlbumList 应答异常: status="
+                        + (resp != null ? resp.optString("status") : "无响应体")
+                        + " (attempt " + (attempt + 1) + ")");
+            } catch (Exception e) {
+                Log.e(TAG, "getAlbumList failed (attempt " + (attempt + 1) + ")", e);
             }
-        } catch (Exception e) {
-            Log.e(TAG, "getAlbumList failed", e);
+            if (attempt < LIST_ATTEMPTS - 1) {
+                sleepQuietly(LIST_RETRY_BACKOFF_MS);
+            }
         }
-        return list;
+        Log.e(TAG, "getAlbumList 连续 " + LIST_ATTEMPTS + " 次失败: type=" + type
+                + " size=" + size + " offset=" + offset);
+        return new ArrayList<>();
+    }
+
+    /** 静默休眠(重试退避用) */
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -350,25 +383,47 @@ public class NavidromeApi implements MusicSourceApi {
     /**
      * 获取全部歌曲(分页获取,无数量限制)
      * 使用 search3 接口以空查询匹配全部,分页拉取直到没有更多
+     *
+     * 说明:同步流程会用它做"补漏"(把按专辑取歌时漏掉的歌补进来),因此
+     * 这里必须能安全终止 —— 按 streamId 去重,并防范服务器忽略 songOffset
+     * 导致的"每页都返回同一批歌"死循环。
      * @return 全部歌曲列表
      */
     public List<MusicBean> getAllSongs() {
         List<MusicBean> all = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
         try {
             int pageSize = 500;
             int offset = 0;
-            while (true) {
+            int pages = 0;
+            while (pages < MAX_BULK_PAGES) {
+                pages++;
                 List<MusicBean> page = getSongsPage(offset, pageSize);
                 if (page == null || page.isEmpty()) {
                     break;
                 }
-                all.addAll(page);
+                int added = 0;
+                for (MusicBean b : page) {
+                    if (b == null) {
+                        continue;
+                    }
+                    String id = b.getStreamId();
+                    if (id != null && seenIds.add(id)) {
+                        all.add(b);
+                        added++;
+                    }
+                }
+                // 整页都是重复的 = 服务器忽略了 songOffset,继续翻页会死循环
+                if (added == 0) {
+                    Log.w(TAG, "getAllSongs: offset=" + offset + " 整页重复,停止翻页");
+                    break;
+                }
                 if (page.size() < pageSize) {
                     break;
                 }
                 offset += pageSize;
             }
-            Log.d(TAG, "getAllSongs: 共获取 " + all.size() + " 首");
+            Log.d(TAG, "getAllSongs: 共获取 " + all.size() + " 首(请求 " + pages + " 页)");
         } catch (Exception e) {
             Log.e(TAG, "getAllSongs failed", e);
         }
@@ -452,19 +507,40 @@ public class NavidromeApi implements MusicSourceApi {
     /**
      * 获取全部专辑列表(分页拉取到底),用于统计总歌曲数
      * 每个专辑的 songCount 累加即为总歌曲数
+     *
+     * 说明:专辑数是"库有多大"的权威依据,所以这里除了"不足一页即到底"之外,
+     * 还按 id 去重,并防范服务器忽略 offset 导致的死循环。
      * @return 全部专辑列表
      */
     public List<AlbumBean> getAllAlbums() {
         List<AlbumBean> all = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
         try {
             int offset = 0;
             int size = 50;
-            while (true) {
+            int pages = 0;
+            while (pages < MAX_BULK_PAGES) {
+                pages++;
                 List<AlbumBean> page = getAlbumList("alphabeticalByName", size, offset);
                 if (page == null || page.isEmpty()) {
                     break;
                 }
-                all.addAll(page);
+                int added = 0;
+                for (AlbumBean a : page) {
+                    if (a == null) {
+                        continue;
+                    }
+                    String id = a.getId();
+                    if (id != null && !id.isEmpty() && seenIds.add(id)) {
+                        all.add(a);
+                        added++;
+                    }
+                }
+                // 整页都是已见过的专辑 = 服务器忽略了 offset,继续翻页会死循环
+                if (added == 0) {
+                    Log.w(TAG, "getAllAlbums: offset=" + offset + " 整页重复专辑,停止翻页");
+                    break;
+                }
                 if (page.size() < size) {
                     break;
                 }

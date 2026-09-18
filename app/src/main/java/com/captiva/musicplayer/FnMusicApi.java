@@ -59,6 +59,8 @@ public class FnMusicApi implements MusicSourceApi {
     private static final int MAX_PAGE_SIZE = 5000;
     /** 中继模式手动跟随重定向的最大次数(飞牛中继会返回 302,需带 mode=relay 重发) */
     private static final int MAX_RELAY_REDIRECTS = 5;
+    /** 登录失败后的重试冷却(毫秒):冷却期内不重复尝试,避免把请求打成风暴 */
+    private static final long LOGIN_RETRY_COOLDOWN_MS = 5000L;
 
     private final String serverUrl;
     private final String username;
@@ -68,7 +70,10 @@ public class FnMusicApi implements MusicSourceApi {
 
     /** 登录令牌 */
     private String userToken;
-    private boolean loginFailed = false;
+    /** 上次尝试登录的时间戳(0 = 从未尝试) */
+    private long lastLoginAttemptMs = 0;
+    /** 本次请求刚遇到过 token 失效,用于重登后重试同一请求 */
+    private volatile boolean tokenExpired = false;
 
     /** 最近一次失败原因(给设置页展示,避免只有一句"连接失败") */
     private volatile String lastError = null;
@@ -361,14 +366,25 @@ public class FnMusicApi implements MusicSourceApi {
 
     // ==================== 认证 ====================
 
-    /** 登录并缓存 userToken */
+    /**
+     * 登录并缓存 userToken
+     *
+     * 【重要】这里刻意不用"一次失败就永久锁定"的写法:
+     * 旧实现一旦置 loginFailed=true 就再也不尝试登录,之后所有请求都静默返回 null,
+     * 同步会因此在中途"取到 0 首歌"而被误判成"已经取完",导致曲库只同步了一部分
+     * (表现为总数偏少,如 815 首只同步出 233 首)。
+     * 改为"失败后进入冷却期,冷却结束自动再次尝试",既不会静默失效也不会打成请求风暴。
+     */
     private synchronized String ensureToken() {
         if (userToken != null) {
             return userToken;
         }
-        if (loginFailed) {
-            return null;
+        long now = System.currentTimeMillis();
+        if (lastLoginAttemptMs != 0 && now - lastLoginAttemptMs < LOGIN_RETRY_COOLDOWN_MS) {
+            return null; // 冷却中:本次先不尝试
         }
+        lastLoginAttemptMs = now;
+        lastError = null;
         try {
             JSONObject body = new JSONObject();
             body.put("username", username);
@@ -379,7 +395,6 @@ public class FnMusicApi implements MusicSourceApi {
             String resp = httpPost("/user/password-login", body);
             if (resp == null) {
                 if (lastError == null) lastError = "登录请求无响应(地址或网络不可达)";
-                loginFailed = true;
                 return null;
             }
             JSONObject root = new JSONObject(resp);
@@ -390,6 +405,7 @@ public class FnMusicApi implements MusicSourceApi {
                     if (t != null && !t.isEmpty()) {
                         userToken = t;
                         lastError = null;
+                        lastLoginAttemptMs = 0;
                         Log.d(TAG, "登录成功");
                         return userToken;
                     }
@@ -406,14 +422,13 @@ public class FnMusicApi implements MusicSourceApi {
                     : String.valueOf(e.getMessage());
             Log.e(TAG, "login failed", e);
         }
-        loginFailed = true;
         return null;
     }
 
     @Override
     public boolean ping() {
         userToken = null;
-        loginFailed = false;
+        lastLoginAttemptMs = 0; // 手动测试连接:清掉冷却,立即重新登录
         lastError = null;
         return ensureToken() != null;
     }
@@ -452,7 +467,28 @@ public class FnMusicApi implements MusicSourceApi {
 
     // ==================== 响应解析 ====================
 
+    /**
+     * GET 请求并解析出 data。
+     *
+     * 遇到 token 失效(错误码 99999 / 120001)时会立即重新登录并重试一次。
+     * 旧实现只是把 token 清掉、这次请求直接返回 null,而调用方(同步)会把它
+     * 理解成"这个专辑没有歌" —— 一次 token 失效就能悄悄吃掉一批歌曲。
+     */
     private JSONObject requestJsonGet(String endpoint, Map<String, String> params) {
+        tokenExpired = false;
+        JSONObject data = requestJsonGetOnce(endpoint, params);
+        if (data == null && tokenExpired) {
+            Log.w(TAG, endpoint + " token 失效,重新登录后重试一次");
+            tokenExpired = false;
+            userToken = null;
+            lastLoginAttemptMs = 0; // 清掉登录冷却,立即重登
+            data = requestJsonGetOnce(endpoint, params);
+        }
+        return data;
+    }
+
+    /** 单次 GET + 解析(不含 token 失效重试) */
+    private JSONObject requestJsonGetOnce(String endpoint, Map<String, String> params) {
         if (ensureToken() == null) {
             return null;
         }
@@ -465,8 +501,9 @@ public class FnMusicApi implements MusicSourceApi {
             int code = root.optInt("code", -1);
             if (code != 0) {
                 Log.w(TAG, endpoint + " code=" + code + " msg=" + root.optString("msg"));
-                // token 失效:清掉缓存,允许下次重试
+                // token 失效:标记出来让上层重登后重试,并清掉缓存 token
                 if (code == 99999 || code == 120001) {
+                    tokenExpired = true;
                     userToken = null;
                 }
                 return null;

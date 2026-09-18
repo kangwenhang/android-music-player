@@ -20,12 +20,26 @@ import java.util.Set;
  * 4. 预扫描已存在文件,跳过已下载的歌曲
  * 5. 只下载不存在的文件(增量同步)
  *
+ * 【重要】拉取歌曲列表时绝不能把"某一页取到 0 首"当作"已经取完":
+ * 单页请求失败(网络抖动 / 超时 / 会话过期)会被 API 层吞掉、返回空列表,
+ * 一旦据此 break,整个同步就会在这里静默截断(如 815 首只同步出 233 首)。
+ * 因此列表拉取以"服务器专辑总数"为循环边界,并对单页/单专辑做重试与补取。
+ *
  * 文件命名规则:
  *   {同步目录}/{艺术家}/{专辑}/{歌名.后缀}
  */
 public class MusicSyncManager {
 
     private static final String TAG = "MusicSyncManager";
+
+    /** 单页 / 单专辑取数据的最大尝试次数(首次 + 重试) */
+    private static final int FETCH_ATTEMPTS = 3;
+    /** 重试前的退避等待(毫秒) */
+    private static final long RETRY_BACKOFF_MS = 400L;
+    /** 枚举专辑时的分页大小(只影响进度回调粒度,不影响正确性) */
+    private static final int ALBUM_PAGE_SIZE = 20;
+    /** 兜底路径:连续多少页为空才判定"已经取完"(防止单页抖动被误当成结束) */
+    private static final int EMPTY_PAGE_TOLERANCE = 3;
 
     private final Context context;
     private final MusicSourceApi api;
@@ -311,7 +325,20 @@ public class MusicSyncManager {
     }
 
     /**
-     * 从服务器获取全部歌曲列表(通过专辑分页)
+     * 从服务器获取全部歌曲列表
+     *
+     * 【为什么重写】旧实现把"这一页取到 0 首歌"当成"服务器没有更多歌"并 break,
+     * 而单页请求失败会被 API 层吞掉、返回空列表,所以任意一次网络抖动 / 超时 /
+     * 会话过期都会让整个同步在此处静默截断 —— 表现为"总数偏少"
+     * (例如实际 815 首,只同步出 233 首),界面还把它当成功显示。
+     *
+     * 新实现:
+     * 1. 先取全量专辑列表,用"专辑总数"当循环边界,不再用"本页有没有歌"当结束条件;
+     * 2. 单张专辑取歌失败会重试;仍失败只跳过这一张并记下,不影响其他专辑;
+     * 3. 首轮结束后对失败的专辑补取一次;
+     * 4. 再用数据源的"一次性全量列表"补漏(只做加法,少了/失败了就忽略);
+     * 5. 最后用"专辑声称的歌曲数"做交叉校验,数量对不上会打 WARN 方便定位。
+     *
      * 使用 HashSet 去重(O(1)复杂度)
      * @return 歌曲列表;返回 null 表示获取失败(网络错误等),空列表表示服务器无歌曲
      */
@@ -319,33 +346,235 @@ public class MusicSyncManager {
         List<MusicBean> allSongs = new ArrayList<>();
         Set<String> seenIds = new HashSet<>(); // O(1) 去重
 
-        int albumOffset = 0;
-        int albumPageSize = 20;
-        boolean gotAnyData = false;
-
-        while (!cancelled) {
-            List<MusicBean> batch = api.getSongsByAlbumPage(albumOffset, albumPageSize);
-            if (batch == null || batch.isEmpty()) {
-                break;
-            }
-            gotAnyData = true;
-            // 用 HashSet 去重(比线性扫描快得多)
-            for (MusicBean b : batch) {
-                String streamId = b.getStreamId();
-                if (streamId != null && !seenIds.contains(streamId)) {
-                    seenIds.add(streamId);
-                    allSongs.add(b);
+        // ---- 1. 全量专辑列表:库到底有多大,以专辑数为准 ----
+        List<AlbumBean> albums = fetchAllAlbumsWithRetry();
+        int totalAlbums = (albums == null) ? 0 : albums.size();
+        int expectedSongs = 0;
+        if (albums != null) {
+            for (AlbumBean a : albums) {
+                if (a != null && a.getSongCount() > 0) {
+                    expectedSongs += a.getSongCount();
                 }
             }
-            albumOffset += albumPageSize;
+        }
+        Log.d(TAG, "服务器专辑总数=" + totalAlbums + ", 专辑声称歌曲数合计=" + expectedSongs);
+
+        if (totalAlbums == 0) {
+            // ---- 2. 兜底:拿不到专辑列表时退化为按专辑分页(连续多页为空才停) ----
+            Log.w(TAG, "取不到专辑列表,退化为按专辑分页拉取");
+            List<MusicBean> fallback = fetchByAlbumPagesTolerant(callback, allSongs, seenIds);
+            if (fallback == null) {
+                return null;
+            }
+            topUpFromBulkList(allSongs, seenIds);
+            return allSongs;
+        }
+
+        // ---- 3. 逐张专辑取歌:循环边界是专辑总数,单张失败不会终止整体 ----
+        List<AlbumBean> missedAlbums = new ArrayList<>();
+        for (int offset = 0; offset < totalAlbums && !cancelled; offset += ALBUM_PAGE_SIZE) {
+            int end = Math.min(offset + ALBUM_PAGE_SIZE, totalAlbums);
+            for (int i = offset; i < end && !cancelled; i++) {
+                AlbumBean album = albums.get(i);
+                if (album == null || album.getId() == null || album.getId().isEmpty()) {
+                    continue;
+                }
+                List<MusicBean> songs = fetchAlbumWithRetry(album);
+                if (songs == null || songs.isEmpty()) {
+                    // 专辑自称有歌却一首都没取到 → 记下来,稍后补取
+                    if (album.getSongCount() > 0) {
+                        missedAlbums.add(album);
+                    }
+                    continue;
+                }
+                addDeduped(allSongs, seenIds, songs);
+            }
             callback.onProgress(0, allSongs.size(),
                     "正在获取歌曲列表(" + allSongs.size() + ")...");
         }
 
-        // 一页都没获取到,返回 null 表示获取失败(可能网络问题)
+        // ---- 4. 首轮没取到歌的专辑,再补取一次(多为网络抖动) ----
+        if (!missedAlbums.isEmpty() && !cancelled) {
+            Log.w(TAG, "首轮有 " + missedAlbums.size() + " 张专辑未取到歌曲,开始补取");
+            int repaired = 0;
+            for (AlbumBean album : missedAlbums) {
+                if (cancelled) break;
+                List<MusicBean> songs = fetchAlbumWithRetry(album);
+                if (songs != null && !songs.isEmpty()) {
+                    int before = allSongs.size();
+                    addDeduped(allSongs, seenIds, songs);
+                    if (allSongs.size() > before) {
+                        repaired++;
+                    }
+                }
+            }
+            Log.d(TAG, "补取成功 " + repaired + " 张专辑");
+        }
+
+        if (allSongs.isEmpty()) {
+            // 专辑列表拿到了却一首都没取到 → 视为获取失败,让上层回退缓存
+            Log.w(TAG, "专辑列表已获取但一首歌都没取到,判定为获取失败");
+            return null;
+        }
+
+        // ---- 5. 用一次性全量列表补漏,并交叉校验数量 ----
+        topUpFromBulkList(allSongs, seenIds);
+
+        if (expectedSongs > 0 && allSongs.size() < expectedSongs) {
+            Log.w(TAG, "歌曲数校验不一致:实际取到 " + allSongs.size()
+                    + " 首 < 专辑合计 " + expectedSongs
+                    + " 首(可能是同一首歌归属多张专辑,或仍有专辑取歌失败)");
+        } else {
+            Log.d(TAG, "歌曲数校验通过:实际 " + allSongs.size() + " 首");
+        }
+        return allSongs;
+    }
+
+    /**
+     * 兜底路径:按专辑分页拉取,连续 {@link #EMPTY_PAGE_TOLERANCE} 页为空才判定到底
+     * @return 取到过数据则返回 allSongs;一页都没成功返回 null(获取失败)
+     */
+    private List<MusicBean> fetchByAlbumPagesTolerant(SyncCallback callback,
+                                                      List<MusicBean> allSongs,
+                                                      Set<String> seenIds) {
+        int albumOffset = 0;
+        int consecutiveEmpty = 0;
+        boolean gotAnyData = false;
+
+        while (!cancelled && consecutiveEmpty < EMPTY_PAGE_TOLERANCE) {
+            List<MusicBean> batch = fetchAlbumPageWithRetry(albumOffset, ALBUM_PAGE_SIZE);
+            if (batch == null || batch.isEmpty()) {
+                consecutiveEmpty++;
+                albumOffset += ALBUM_PAGE_SIZE;
+                continue;
+            }
+            consecutiveEmpty = 0;
+            gotAnyData = true;
+            addDeduped(allSongs, seenIds, batch);
+            albumOffset += ALBUM_PAGE_SIZE;
+            callback.onProgress(0, allSongs.size(),
+                    "正在获取歌曲列表(" + allSongs.size() + ")...");
+        }
+
         if (!gotAnyData) {
             return null;
         }
         return allSongs;
+    }
+
+    /** 带重试获取全量专辑列表;取不到返回 null */
+    private List<AlbumBean> fetchAllAlbumsWithRetry() {
+        for (int attempt = 0; attempt < FETCH_ATTEMPTS && !cancelled; attempt++) {
+            List<AlbumBean> albums = api.getAllAlbums();
+            if (albums != null && !albums.isEmpty()) {
+                return albums;
+            }
+            if (attempt < FETCH_ATTEMPTS - 1) {
+                sleepQuietly(RETRY_BACKOFF_MS);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 带重试获取单张专辑的歌曲
+     * 专辑自称没有歌曲(songCount &lt;= 0)时不重试,避免对空专辑做无谓请求
+     */
+    private List<MusicBean> fetchAlbumWithRetry(AlbumBean album) {
+        if (album == null || album.getId() == null || album.getId().isEmpty()) {
+            return null;
+        }
+        boolean mayHaveSongs = album.getSongCount() > 0;
+        List<MusicBean> last = null;
+        for (int attempt = 0; attempt < FETCH_ATTEMPTS && !cancelled; attempt++) {
+            last = api.getAlbum(album.getId());
+            if (last != null && !last.isEmpty()) {
+                return last;
+            }
+            if (!mayHaveSongs) {
+                return last; // 专辑本身就没歌,重试没有意义
+            }
+            if (attempt < FETCH_ATTEMPTS - 1) {
+                sleepQuietly(RETRY_BACKOFF_MS);
+            }
+        }
+        return last;
+    }
+
+    /** 带重试按专辑分页取歌;取不到返回 null */
+    private List<MusicBean> fetchAlbumPageWithRetry(int albumOffset, int albumCount) {
+        for (int attempt = 0; attempt < FETCH_ATTEMPTS && !cancelled; attempt++) {
+            List<MusicBean> batch = api.getSongsByAlbumPage(albumOffset, albumCount);
+            if (batch != null && !batch.isEmpty()) {
+                return batch;
+            }
+            if (attempt < FETCH_ATTEMPTS - 1) {
+                sleepQuietly(RETRY_BACKOFF_MS);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 用数据源的"一次性全量列表"把按专辑取歌时漏掉的歌补进来。
+     * 只做加法:它失败、返回空、或者并不比已取到的多时,一律忽略。
+     * 这样即便某些数据源的该接口本身结果不全,也不会把已经拿到的正确结果弄坏。
+     */
+    private void topUpFromBulkList(List<MusicBean> allSongs, Set<String> seenIds) {
+        List<MusicBean> bulk = null;
+        for (int attempt = 0; attempt < FETCH_ATTEMPTS && !cancelled; attempt++) {
+            try {
+                bulk = api.getAllSongs();
+            } catch (Exception e) {
+                Log.w(TAG, "全量列表补漏请求失败(忽略)", e);
+                bulk = null;
+            }
+            if (bulk != null && !bulk.isEmpty()) {
+                break;
+            }
+            if (attempt < FETCH_ATTEMPTS - 1) {
+                sleepQuietly(RETRY_BACKOFF_MS);
+            }
+        }
+        if (bulk == null || bulk.isEmpty()) {
+            return;
+        }
+        int before = allSongs.size();
+        addDeduped(allSongs, seenIds, bulk);
+        int added = allSongs.size() - before;
+        if (added > 0) {
+            Log.w(TAG, "补漏:全量列表比按专辑取到的多 " + added + " 首,已补入");
+        } else {
+            Log.d(TAG, "补漏:全量列表未发现遗漏(共 " + bulk.size() + " 首)");
+        }
+    }
+
+    /** 按 streamId 去重后追加(保持与旧实现一致的判空语义) */
+    private static void addDeduped(List<MusicBean> target, Set<String> seenIds,
+                                   List<MusicBean> src) {
+        if (src == null || src.isEmpty()) {
+            return;
+        }
+        for (MusicBean b : src) {
+            if (b == null) {
+                continue;
+            }
+            String streamId = b.getStreamId();
+            if (streamId == null) {
+                continue;
+            }
+            if (seenIds.add(streamId)) {
+                target.add(b);
+            }
+        }
+    }
+
+    /** 静默休眠(重试退避用,不向上抛中断异常) */
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
