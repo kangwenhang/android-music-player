@@ -166,6 +166,9 @@ public class PerfLogger {
                     log("滑动统计: 耗时" + duration + "ms, 渲染" + frameCount + "帧, 掉帧" + droppedFrameCount
                             + ", 实际FPS=" + String.format("%.1f", fps) + fpsFlag);
                 }
+                // 关键:滑动停止时清空上一帧时间戳。否则下次滑动首帧会把"两次滑动之间的空闲间隔"
+                // 误判成一次巨长掉帧(出现 1~2 秒的假 🔴严重)。首帧因 lastFrameTimeNanos>0 守卫会被跳过。
+                lastFrameTimeNanos = 0;
             }
         }
     }
