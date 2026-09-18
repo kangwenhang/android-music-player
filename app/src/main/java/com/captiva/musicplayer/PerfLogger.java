@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * 性能日志工具
  *
  * 功能:
- * 1. Choreographer 帧率监控:检测掉帧(>16ms=1帧,>33ms=丢2帧)
+ * 1. Choreographer 帧率监控(加严):单帧 >20ms 记一次卡顿(>=33ms 标🔴);滑动平均 FPS<55 告警
  * 2. 主线程操作耗时打点:onBindViewHolder / 封面磁盘读取 / onDraw 等
  * 3. 日志写入U盘文件,方便导出分析
  * 4. 环形缓冲区,避免内存无限增长
@@ -46,8 +46,13 @@ public class PerfLogger {
     private static int frameCount = 0;
     private static int droppedFrameCount = 0;
     private static long monitorStartTime = 0;
-    private static final long FRAME_INTERVAL_16MS = 16_000_000L;  // 16ms in nanos
-    private static final long FRAME_INTERVAL_33MS = 33_000_000L;  // 33ms (dropped 2 frames)
+    // 帧率监控:调试版"加严"判定阈值(电脑性能好,需更敏感才能暴露车机上的真实卡顿)
+    private static final long FRAME_INTERVAL_16MS = 16_000_000L;  // 16ms in nanos(单帧预算,60fps)
+    private static final long FRAME_INTERVAL_33MS = 33_000_000L;  // 33ms = 严重卡顿边界(>=即🔴)
+    private static final long FRAME_HITCH_MS = 20_000_000L;      // 加严:单帧 >20ms 即记为一次卡顿
+    private static final int OP_WARN_MS = 8;                     // 主线程操作 >8ms 标 ⚠️
+    private static final int OP_SEVERE_MS = 16;                  // 主线程操作 >16ms 标 🔴
+    private static final float FPS_FLOOR = 55f;                  // 滑动平均 FPS 低于此值告警(PC 应≈60)
 
     // 滚动状态标记
     private static volatile boolean scrolling = false;
@@ -115,8 +120,9 @@ public class PerfLogger {
     public static void log(String tag, long elapsedMs) {
         if (!enabled) return;
         String time = sdf.format(new Date());
-        // 标记是否超时(>16ms 会掉帧)
-        String flag = elapsedMs > 16 ? " ⚠️" : "";
+        // 加严:>8ms 标 ⚠️,>16ms 标 🔴(车机上这些会被放大成明显卡顿)
+        String flag = elapsedMs > OP_SEVERE_MS ? " 🔴"
+                : elapsedMs > OP_WARN_MS ? " ⚠️" : "";
         String entry = time + " [" + tag + "] " + elapsedMs + "ms" + flag;
         enqueue(entry);
     }
@@ -155,8 +161,10 @@ public class PerfLogger {
                 long duration = System.currentTimeMillis() - monitorStartTime;
                 if (duration > 0 && frameCount > 0) {
                     float fps = frameCount * 1000f / duration;
+                    // 加严:滑动平均 FPS 低于下限即告警(电脑应≈60,低于 55 说明列表渲染有压力)
+                    String fpsFlag = fps < FPS_FLOOR ? " ⚠️(FPS偏低)" : "";
                     log("滑动统计: 耗时" + duration + "ms, 渲染" + frameCount + "帧, 掉帧" + droppedFrameCount
-                            + ", 实际FPS=" + String.format("%.1f", fps));
+                            + ", 实际FPS=" + String.format("%.1f", fps) + fpsFlag);
                 }
             }
         }
@@ -172,13 +180,13 @@ public class PerfLogger {
 
         if (lastFrameTimeNanos > 0) {
             long delta = frameTimeNanos - lastFrameTimeNanos;
-            if (delta > FRAME_INTERVAL_33MS) {
-                // 严重掉帧(>33ms,丢了至少2帧)
-                int dropped = (int) (delta / FRAME_INTERVAL_16MS) - 1;
-                droppedFrameCount += dropped;
+            // 加严:单帧超过 20ms 即记为一次卡顿(车机上会被放大成明显卡顿)
+            if (delta > FRAME_HITCH_MS) {
+                droppedFrameCount++;
                 if (scrolling) {
-                    log("掉帧", "delta=" + (delta / 1_000_000) + "ms, 丢" + dropped + "帧"
-                            + (dropped >= 3 ? " 🔴" : ""));
+                    boolean severe = delta >= FRAME_INTERVAL_33MS; // >=33ms 视为严重卡顿
+                    log("掉帧", "delta=" + (delta / 1_000_000) + "ms"
+                            + (severe ? " 🔴严重" : " ⚠️"));
                 }
             }
         }
