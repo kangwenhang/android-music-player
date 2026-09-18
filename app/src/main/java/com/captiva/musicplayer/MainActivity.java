@@ -593,7 +593,8 @@ public class MainActivity extends AppCompatActivity {
      * 刷新索引条三件事:
      * 1. 统计哪些字母有歌 —— 没歌的置灰,手指按上去会自动落到最近的字母
      * 2. 记录每个字母在列表里的首个位置 —— 拖动时直接跳,不用每次全表扫描
-     * 3. 搜索 / 收藏夹模式下隐藏 —— 那时列表已不是完整排序结果,字母索引会错位
+     * 3. 有搜索关键词或显示列表为空时隐藏;普通 / 收藏夹模式都显示
+     *    (收藏夹模式下列表仍按标题 A-Z 排序,字母索引不会错位,故不再隐藏)
      */
     private void refreshIndexBar() {
         if (sideIndexBar == null || adapter == null) return;
@@ -607,7 +608,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void refreshIndexBarInternal() {
         boolean searchEmpty = currentSearchQuery == null || currentSearchQuery.trim().isEmpty();
-        if (favoritesOnly || !searchEmpty || musicList.isEmpty()) {
+        // 收藏夹模式下列表仍按标题 A-Z 排序,字母索引不会错位,因此不再隐藏;
+        // 仅在有搜索关键词(子集过滤)或当前显示列表为空时隐藏。
+        List<MusicBean> list = adapter.getDisplayList();
+        if (!searchEmpty || list == null || list.isEmpty()) {
             sideIndexBar.setVisibility(View.GONE);
             updateIndexBarTouchDelegate();
             return;
@@ -618,8 +622,6 @@ public class MainActivity extends AppCompatActivity {
         }
         boolean[] hasSong = new boolean[SideIndexBar.LETTERS.length];
 
-        List<MusicBean> list = adapter.getDisplayList();
-        if (list == null || list.isEmpty()) list = musicList;
         for (int i = 0; i < list.size(); i++) {
             MusicBean b = list.get(i);
             if (b == null) continue;
