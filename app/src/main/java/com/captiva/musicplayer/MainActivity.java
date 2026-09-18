@@ -191,19 +191,8 @@ public class MainActivity extends AppCompatActivity {
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
 
-    /** 右侧 A-Z 快速索引条 */
+    /** 右侧 A-Z 快速索引条(可滚动大字母滚轮) */
     private SideIndexBar sideIndexBar;
-    /** 拖动索引条时居中显示的当前字母 */
-    private TextView tvIndexLetter;
-    /** 延迟隐藏居中字母提示 */
-    private final Runnable hideIndexLetterTask = new Runnable() {
-        @Override
-        public void run() {
-            if (tvIndexLetter != null) {
-                tvIndexLetter.setVisibility(View.GONE);
-            }
-        }
-    };
     /** 每个字母在列表中的起始位置(与 SideIndexBar.LETTERS 对应,无歌为 -1),避免每次拖动都重扫全表 */
     private final int[] letterPositions = new int[SideIndexBar.LETTERS.length];
 
@@ -437,7 +426,6 @@ public class MainActivity extends AppCompatActivity {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
         sideIndexBar = findViewById(R.id.side_index_bar);
-        tvIndexLetter = findViewById(R.id.tv_index_letter);
         tvCount = findViewById(R.id.tv_count);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
         etSearch = findViewById(R.id.et_search);
@@ -574,13 +562,12 @@ public class MainActivity extends AppCompatActivity {
         sideIndexBar.setOnLetterChangedListener(new SideIndexBar.OnLetterChangedListener() {
             @Override
             public void onLetterChanged(String letter) {
-                showIndexLetter(letter);
                 scrollToLetter(letter);
             }
 
             @Override
             public void onTouchUp() {
-                hideIndexLetterDelayed();
+                // 滚轮松手时已自行吸附到最近字母,无需额外处理
             }
         });
         // 全量刷新(setData / filter / filterFavorites 都会走 notifyDataSetChanged)时重算
@@ -712,20 +699,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 居中显示当前字母 */
-    private void showIndexLetter(String letter) {
-        if (tvIndexLetter == null) return;
-        handler.removeCallbacks(hideIndexLetterTask);
-        tvIndexLetter.setText(letter);
-        tvIndexLetter.setVisibility(View.VISIBLE);
-    }
-
-    /** 抬起手指后延迟隐藏居中字母 */
-    private void hideIndexLetterDelayed() {
-        if (tvIndexLetter == null) return;
-        handler.removeCallbacks(hideIndexLetterTask);
-        handler.postDelayed(hideIndexLetterTask, 600);
-    }
+    // 注:居中字母气泡(tv_index_letter)已移除,索引反馈由 SideIndexBar 大字母滚轮自身承担。
 
     private void setupListeners() {
         // 搜索栏:实时搜索

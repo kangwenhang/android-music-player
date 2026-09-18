@@ -149,19 +149,6 @@
                 android:layout_marginEnd="6dp"
                 android:background="@drawable/bg_side_index"
                 android:visibility="gone" />
-
-            <!-- 拖动索引条时居中显示的当前字母 -->
-            <TextView
-                android:id="@+id/tv_index_letter"
-                android:layout_width="@dimen/index_letter_size"
-                android:layout_height="@dimen/index_letter_size"
-                android:layout_gravity="center"
-                android:gravity="center"
-                android:background="@drawable/bg_index_letter"
-                android:textColor="@color/accent"
-                android:textSize="34sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
         </FrameLayout>
 
         <!-- 右侧:歌词区(封面放大模糊作为底色,歌词叠加在上) -->
