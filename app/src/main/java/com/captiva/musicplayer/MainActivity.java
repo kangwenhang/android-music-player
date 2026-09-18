@@ -2722,7 +2722,12 @@ public class MainActivity extends AppCompatActivity {
                             @Override
                             public void run() {
                                 isAutoSyncing = false;
-                                refreshSyncList();
+                                // 仅当本次同步真正下载了新歌(downloaded>0)才刷新歌曲列表。
+                                // "已是最新"(无新歌)时跳过整目录重扫,避免无谓的 IO 与列表抖动(车机性能弱)。
+                                // 下载过程中 onSongDownloaded 已按批次增量刷新,这里再兜底补齐末尾不足一批的歌曲。
+                                if (downloaded > 0) {
+                                    refreshSyncList();
+                                }
                                 // 同步完成:清除无封面黑名单,允许重新尝试(新文件可能带封面)
                                 CoverLoader.getInstance().clearNoCoverCache();
                                 // 预提取新同步歌曲的封面到内部存储
