@@ -2448,7 +2448,15 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        tvSyncStatus.setVisibility(View.GONE);
+                        // 若后台同步仍在进行,不要隐藏同步状态:
+                        // 刷新列表只是本地扫描,不应打断正在运行的同步指示。
+                        // 否则同步其实仍在继续,但左上角的"同步中"会凭空消失。
+                        if (isAutoSyncing) {
+                            tvSyncStatus.setVisibility(View.VISIBLE);
+                            tvSyncStatus.setText("同步中...");
+                        } else {
+                            tvSyncStatus.setVisibility(View.GONE);
+                        }
 
                         if (fullList.isEmpty()) {
                             Toast.makeText(MainActivity.this, "未找到音乐文件", Toast.LENGTH_SHORT).show();
