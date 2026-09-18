@@ -27,8 +27,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.WindowManager;
-import android.graphics.Rect;
-import android.view.TouchDelegate;
 import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -192,10 +190,8 @@ public class MainActivity extends AppCompatActivity {
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
 
-    /** 右侧 A-Z 快速索引条(可滚动大字母滚轮) */
+    /** 右侧 A-Z 索引条(被动显示:跟随列表滚动高亮"当前字母") */
     private SideIndexBar sideIndexBar;
-    /** 每个字母在列表中的起始位置(与 SideIndexBar.LETTERS 对应,无歌为 -1),避免每次拖动都重扫全表 */
-    private final int[] letterPositions = new int[SideIndexBar.LETTERS.length];
 
     /** 服务器状态监控器 */
     private ServerStatusMonitor statusMonitor;
@@ -550,6 +546,12 @@ public class MainActivity extends AppCompatActivity {
                     CoverLoader.getInstance().preloadAllToMemory(musicList);
                 }
             }
+
+            @Override
+            public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                // 被动索引条:随列表滚动更新"当前字母"高亮(字母不变时内部不会重绘)
+                updateCurrentLetterFromScroll();
+            }
         });
         tvEmpty.setText("正在扫描本地音乐...");
         tvEmpty.setVisibility(View.VISIBLE);
@@ -560,18 +562,8 @@ public class MainActivity extends AppCompatActivity {
     /** 索引条初始化:绑定监听 + 数据变化自动刷新 */
     private void setupIndexBar() {
         if (sideIndexBar == null) return;
-        sideIndexBar.setOnLetterChangedListener(new SideIndexBar.OnLetterChangedListener() {
-            @Override
-            public void onLetterChanged(String letter) {
-                scrollToLetter(letter);
-            }
-
-            @Override
-            public void onTouchUp() {
-                // 滚轮松手时已自行吸附到最近字母,无需额外处理
-            }
-        });
-        // 全量刷新(setData / filter / filterFavorites 都会走 notifyDataSetChanged)时重算
+        // 被动显示模式:索引条只跟随列表滚动显示"当前字母",不再响应拖动(车机电阻屏拖动卡顿)。
+        // 仍监听数据变化以重算哪些字母有歌(置灰)。
         adapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
             @Override
             public void onChanged() {
@@ -617,31 +609,25 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        for (int i = 0; i < letterPositions.length; i++) {
-            letterPositions[i] = -1;
-        }
         boolean[] hasSong = new boolean[SideIndexBar.LETTERS.length];
-
         for (int i = 0; i < list.size(); i++) {
             MusicBean b = list.get(i);
             if (b == null) continue;
             int idx = indexOfLetter(PinyinUtils.firstLetter(b.getTitle()));
             if (idx < 0) continue;
             hasSong[idx] = true;
-            if (letterPositions[idx] < 0) {
-                letterPositions[idx] = i;
-            }
         }
 
         sideIndexBar.setAvailableLetters(hasSong);
         sideIndexBar.setVisibility(View.VISIBLE);
         updateIndexBarTouchDelegate();
+        // 被动模式:根据当前顶部可见项高亮"当前字母"
+        updateCurrentLetterFromScroll();
     }
 
     /**
-     * 用 TouchDelegate 把索引条的触摸命中区向左侧列表方向扩出约 18dp,
-     * 这样手指稍微偏出条外(尤其偏左)也能被索引条捕获,电阻屏更好点。
-     * 索引条隐藏(GONE)时清除代理,避免误吞列表的触摸。
+     * 被动显示模式:索引条不再扩展命中区去"抢"列表的触摸(此前该扩展用于拖动滚轮),
+     * 列表可正常手动滑动;这里仅确保父布局没有遗留的 TouchDelegate。
      */
     private void updateIndexBarTouchDelegate() {
         final ViewParent vp = sideIndexBar.getParent();
@@ -650,22 +636,7 @@ public class MainActivity extends AppCompatActivity {
         parent.post(new Runnable() {
             @Override
             public void run() {
-                if (sideIndexBar.getVisibility() != View.VISIBLE) {
-                    parent.setTouchDelegate(null);
-                    return;
-                }
-                Rect r = new Rect();
-                sideIndexBar.getHitRect(r);
-                if (r.isEmpty()) {
-                    parent.setTouchDelegate(null);
-                    return;
-                }
-                float density = getResources().getDisplayMetrics().density;
-                int expandLeft = (int) (18 * density);   // 向列表方向扩,捕获偏左的手指
-                int expandRight = (int) (6 * density);   // 贴右边略扩
-                r.left -= expandLeft;
-                r.right += expandRight;
-                parent.setTouchDelegate(new TouchDelegate(r, sideIndexBar));
+                parent.setTouchDelegate(null);
             }
         });
     }
@@ -677,32 +648,22 @@ public class MainActivity extends AppCompatActivity {
         return -1;
     }
 
-    /** 滚动到某个字母的第一首歌 */
-    private void scrollToLetter(String letter) {
-        if (letter == null || letter.length() == 0 || adapter == null) return;
-        int idx = -1;
-        for (int i = 0; i < SideIndexBar.LETTERS.length; i++) {
-            if (SideIndexBar.LETTERS[i].equals(letter)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx < 0) return;
-        int pos = letterPositions[idx];
-        if (pos < 0) return;
-
-        // 分批加载机制下,列表后半部分可能还没进显示区,先补齐再滚
-        adapter.ensureLoaded(pos);
-        rvList.stopScroll();
+    /**
+     * 被动模式:根据列表当前顶部可见项,更新索引条高亮的"当前字母"。
+     * 字母仅在跨过边界时变化,因此只在变化时触发一次重绘,开销极小(车机友好)。
+     */
+    private void updateCurrentLetterFromScroll() {
+        if (sideIndexBar == null || sideIndexBar.getVisibility() != View.VISIBLE) return;
         RecyclerView.LayoutManager lm = rvList.getLayoutManager();
-        if (lm instanceof LinearLayoutManager) {
-            ((LinearLayoutManager) lm).scrollToPositionWithOffset(pos, 0);
-        } else {
-            rvList.scrollToPosition(pos);
-        }
+        if (!(lm instanceof LinearLayoutManager)) return;
+        int pos = ((LinearLayoutManager) lm).findFirstVisibleItemPosition();
+        if (pos < 0) return;
+        MusicBean b = adapter.getFilteredItem(pos);
+        if (b == null) return;
+        char c = PinyinUtils.firstLetter(b.getTitle());
+        String letter = (c == '#') ? "#" : String.valueOf(c);
+        sideIndexBar.setCurrentLetter(letter);
     }
-
-    // 注:居中字母气泡(tv_index_letter)已移除,索引反馈由 SideIndexBar 大字母滚轮自身承担。
 
     private void setupListeners() {
         // 搜索栏:实时搜索
