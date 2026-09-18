@@ -2362,7 +2362,7 @@ public class MainActivity extends AppCompatActivity {
                             updateCount();
                             tvEmpty.setVisibility(View.GONE);
                             // 设置播放列表(service 可能还没绑定,onServiceConnected 会再设一次)
-                            if (service != null) {
+                            if (service != null && !service.isPlaying()) {
                                 int lastIndex = navidromeConfig.getLastPlayIndex();
                                 if (lastIndex < 0 || lastIndex >= musicList.size()) {
                                     lastIndex = 0;
@@ -2400,7 +2400,7 @@ public class MainActivity extends AppCompatActivity {
                             tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
                         } else {
                             tvEmpty.setVisibility(View.GONE);
-                            if (service != null) {
+                            if (service != null && !service.isPlaying()) {
                                 int lastIndex = navidromeConfig.getLastPlayIndex();
                                 if (lastIndex < 0 || lastIndex >= musicList.size()) {
                                     lastIndex = 0;
@@ -2860,7 +2860,22 @@ public class MainActivity extends AppCompatActivity {
                             adapter.setData(musicList);
                             applyFavoritesFilter();
                             if (service != null && !musicList.isEmpty()) {
-                                service.setPlayList(musicList, 0);
+                                // 关键:播放队列必须用收藏夹列表,而不是全部曲目。
+                                // 否则后台扫描补全完成后会把正在播放的收藏夹队列悄悄换成
+                                // 全部曲目,导致当前歌曲播完跳回"所有曲目"继续播放。
+                                List<MusicBean> favList = adapter.getDisplayList();
+                                int startIdx = 0;
+                                MusicBean cur = service.getCurrentMusic();
+                                if (cur != null) {
+                                    String curKey = getSongKey(cur);
+                                    for (int i = 0; i < favList.size(); i++) {
+                                        if (curKey.equals(getSongKey(favList.get(i)))) {
+                                            startIdx = i;
+                                            break;
+                                        }
+                                    }
+                                }
+                                service.setPlayList(favList, startIdx);
                             }
                         } else if (currentSearchQuery.isEmpty()) {
                             if (!toAdd.isEmpty()) {
