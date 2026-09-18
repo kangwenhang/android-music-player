@@ -7,6 +7,7 @@ import android.graphics.Paint;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.View.MeasureSpec;
 
 /**
  * 右侧 A-Z 快速索引条(可滚动大字母滚轮)
