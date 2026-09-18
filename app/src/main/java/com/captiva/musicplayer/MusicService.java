@@ -267,6 +267,16 @@ public class MusicService extends Service {
         currentIndex = startIndex >= 0 && startIndex < playList.size() ? startIndex : 0;
     }
 
+    /**
+     * 增量追加歌曲到播放队列末尾(不改变 currentIndex、不重启当前播放)。
+     * 用于同步下载新歌时:只把新歌接到队列末尾,供当前歌曲播完后继续播放,
+     * 完全不重设/重排现有队列,确保正在播放的歌不跳变、不被打断。
+     */
+    public void appendToPlayList(List<MusicBean> songs) {
+        if (songs == null || songs.isEmpty()) return;
+        playList.addAll(songs);
+    }
+
     public List<MusicBean> getPlayList() {
         return playList;
     }

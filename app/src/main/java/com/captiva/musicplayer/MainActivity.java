@@ -2846,22 +2846,27 @@ public class MainActivity extends AppCompatActivity {
                                 musicList.addAll(toAdd);
                                 java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
                                 adapter.setData(musicList);
-                                // 关键:同步新增歌曲后重设队列时,必须用"当前正在播放的歌在 musicList 中的位置"
-                                // 作为起点,而不是第 0 首 —— 否则播放中途同步会把队列重置到开头,打断续播
-                                // (与收藏夹分支保持一致的逻辑)。
+                                // 关键:同步新增歌曲后要更新播放队列。
+                                // - 正在播放:只把新歌增量追加到队列末尾(appendToPlayList),绝不重设/重排整个队列,
+                                //   当前歌照常播放、不被打断;新歌播完当前歌后续播(与收藏夹分支目标一致)。
+                                // - 未在播放:用完整列表以"当前歌所在位置"为起点重设队列,避免重置到第 0 首。
                                 if (service != null && !musicList.isEmpty()) {
-                                    int startIdx = 0;
-                                    MusicBean cur = service.getCurrentMusic();
-                                    if (cur != null) {
-                                        String curKey = getSongKey(cur);
-                                        for (int i = 0; i < musicList.size(); i++) {
-                                            if (curKey.equals(getSongKey(musicList.get(i)))) {
-                                                startIdx = i;
-                                                break;
+                                    if (service.isPlaying()) {
+                                        service.appendToPlayList(toAdd);
+                                    } else {
+                                        int startIdx = 0;
+                                        MusicBean cur = service.getCurrentMusic();
+                                        if (cur != null) {
+                                            String curKey = getSongKey(cur);
+                                            for (int i = 0; i < musicList.size(); i++) {
+                                                if (curKey.equals(getSongKey(musicList.get(i)))) {
+                                                    startIdx = i;
+                                                    break;
+                                                }
                                             }
                                         }
+                                        service.setPlayList(musicList, startIdx);
                                     }
-                                    service.setPlayList(musicList, startIdx);
                                 }
                             }
                             // 更新高亮:数据更新后重新定位当前播放歌曲
