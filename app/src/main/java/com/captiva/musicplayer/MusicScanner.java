@@ -108,6 +108,7 @@ public class MusicScanner {
                         bean.setUri(Uri.withAppendedPath(
                                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                                 String.valueOf(bean.getId())).toString());
+                        attachStreamId(context, bean);
                         list.add(bean);
                     } catch (Exception e) {
                         // 跳过单首解析失败的
@@ -151,7 +152,7 @@ public class MusicScanner {
 
         for (File file : audioFiles) {
             try {
-                MusicBean bean = createBeanFromFile(file, minDurationMs);
+                MusicBean bean = createBeanFromFile(file, minDurationMs, context);
                 if (bean != null) {
                     list.add(bean);
                 }
@@ -190,6 +191,30 @@ public class MusicScanner {
         } catch (Exception e) {
             // getCanonicalPath 失败,退而求其次只做简单替换
             return path.replace("/sdcard/", "/storage/emulated/0/");
+        }
+    }
+
+    /**
+     * 按规范化路径从 StreamIdIndex 回填 Navidrome streamId。
+     * 这样本地扫描出的 MusicBean 也带上服务端身份,使 MainActivity.getDedupKey
+     * 的 net_<streamId> 分支生效(等价于 Navidrome 稳定 ID 去重)。
+     * 不影响播放:播放仍以 bean.isNetwork() 判定,streamId 仅用于歌词与去重。
+     */
+    private static void attachStreamId(Context context, MusicBean bean) {
+        if (bean == null || context == null) {
+            return;
+        }
+        String data = bean.getData();
+        if (data == null || data.isEmpty()) {
+            return;
+        }
+        // 已带身份(理论上不会发生)则不覆盖
+        if (bean.getStreamId() != null && !bean.getStreamId().isEmpty()) {
+            return;
+        }
+        String sid = StreamIdIndex.lookup(context, normalizePath(data));
+        if (sid != null && !sid.isEmpty()) {
+            bean.setStreamId(sid);
         }
     }
 
@@ -264,10 +289,10 @@ public class MusicScanner {
         for (File file : audioFiles) {
             try {
                 // 尝试从 MediaStore 查询该文件的元数据
-                MusicBean bean = queryFromMediaStoreByPath(resolver, file.getAbsolutePath(), minDurationMs);
+                MusicBean bean = queryFromMediaStoreByPath(resolver, file.getAbsolutePath(), minDurationMs, context);
                 if (bean == null) {
                     // MediaStore 没有记录,手动创建
-                    bean = createBeanFromFile(file, minDurationMs);
+                    bean = createBeanFromFile(file, minDurationMs, context);
                 }
                 if (bean != null) {
                     list.add(bean);
@@ -319,7 +344,7 @@ public class MusicScanner {
     }
 
     /** 通过文件路径从 MediaStore 查询元数据 */
-    private static MusicBean queryFromMediaStoreByPath(ContentResolver resolver, String filePath, long minDurationMs) {
+    private static MusicBean queryFromMediaStoreByPath(ContentResolver resolver, String filePath, long minDurationMs, Context context) {
         try {
             String selection = MediaStore.Audio.Media.DATA + "=?"
                     + " AND " + MediaStore.Audio.Media.IS_MUSIC + "=1"
@@ -353,6 +378,7 @@ public class MusicScanner {
                         bean.setUri(Uri.withAppendedPath(
                                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                                 String.valueOf(bean.getId())).toString());
+                        attachStreamId(context, bean);
                         return bean;
                     }
                 } finally {
@@ -368,7 +394,7 @@ public class MusicScanner {
     /** 手动从文件创建 MusicBean(无 MediaStore 记录时)
      *  安全保护:OOM 时跳过当前文件,不崩溃
      */
-    private static MusicBean createBeanFromFile(File file, long minDurationMs) {
+    private static MusicBean createBeanFromFile(File file, long minDurationMs, Context context) {
         if (file == null || !file.exists()) {
             return null;
         }
@@ -409,6 +435,7 @@ public class MusicScanner {
             bean.setData(filePath);
             // 没有 content uri,用文件路径作为 uri
             bean.setUri(filePath);
+            attachStreamId(context, bean);
             return bean;
         } catch (OutOfMemoryError e) {
             // 车机内存不足,跳过此文件,不崩溃
@@ -422,6 +449,7 @@ public class MusicScanner {
                 bean.setDuration(0);
                 bean.setData(filePath);
                 bean.setUri(filePath);
+                attachStreamId(context, bean);
                 return bean;
             }
             return null;
@@ -436,6 +464,7 @@ public class MusicScanner {
                 bean.setDuration(0);
                 bean.setData(filePath);
                 bean.setUri(filePath);
+                attachStreamId(context, bean);
                 return bean;
             }
             return null;
@@ -501,6 +530,7 @@ public class MusicScanner {
                     bean.setUri(Uri.withAppendedPath(
                             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                             String.valueOf(bean.getId())).toString());
+                    attachStreamId(context, bean);
                     list.add(bean);
                 }
             }

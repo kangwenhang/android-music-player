@@ -150,6 +150,21 @@ public class MusicSyncManager {
     }
 
     /**
+     * 计算歌曲的本地规范化路径键(供 StreamIdIndex 建立 路径→streamId 映射)。
+     * 必须与 buildLocalFile 的命名规则完全一致,否则和磁盘真实路径对不上。
+     */
+    public static String localPathKey(MusicBean song, String syncPath) {
+        if (song == null || syncPath == null || syncPath.isEmpty()) {
+            return "";
+        }
+        File f = new File(new File(new File(syncPath,
+                        sanitizeFileName(song.getArtist())),
+                        sanitizeFileName(song.getAlbum())),
+                sanitizeFileName(song.getTitle()) + "." + song.getLocalSuffix());
+        return MusicScanner.normalizePath(f.getAbsolutePath());
+    }
+
+    /**
      * 开始同步(在后台线程调用)
      * 每次从服务器获取最新列表,用HashSet去重,跳过已存在文件
      * @param callback 进度回调
@@ -205,6 +220,10 @@ public class MusicSyncManager {
 
         // 3. 用最新服务器列表更新缓存
         cache.save(allSongs);
+
+        // 3.1 用同步列表(每个 song 带 streamId)重建 路径→streamId 索引,
+        //     让 MusicScanner 扫描本地文件时能回填 streamId,启用稳定的服务端身份去重。
+        StreamIdIndex.build(context, allSongs, syncPath);
 
         Log.d(TAG, "同步开始: 共 " + allSongs.size() + " 首歌曲");
 
