@@ -2620,44 +2620,54 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 列表去重:移除 musicList 中"同一首歌多次出现"的条目,保留首次出现。
-     * 必须在主线程调用(会修改 musicList 与 adapter)。
-     *
-     * 去重键(挂载点无关,避免 U盘重新挂载后挂载路径变化导致整库重复):
-     * - 网络歌曲: net_<streamId>
-     * - 本地歌曲: local_<艺术家>|<专辑>|<标题>|<文件名>
-     *   同一首歌无论在哪个挂载点,艺术家/专辑/标题/文件名都一致,因此能跨挂载点折叠成一条;
-     *   仅当两首歌这四项完全相同才会被误并(个人曲库极罕见,远优于整库重复)。
-     */
-    /**
      * 列表去重:移除 musicList 中"同一首歌多次出现"的条目,保留质量更高的一条。
      * 必须在主线程调用(会修改 musicList 与 adapter)。
      *
-     * 去重键优先级(见 getDedupKey):
-     *   1. 规范化文件路径 path_<canonical> —— 最权威。本应用 musicList 中每个条目都对应
-     *      磁盘上一个真实文件,同一文件(无论挂载点前缀、是否已被 MediaStore 索引)路径规范化后
-     *      必然一致,因此能一次性覆盖三大重复来源:
+     * 两层去重(先按路径、再按逻辑身份),可同时覆盖"同文件重复"与"跨文件夹同名歌":
+     *   第一层(路径,见 getDedupKey):规范化文件路径 path_<canonical> 最权威。
+     *      本应用 musicList 每条目都对应磁盘一个真实文件,同一文件(无论挂载点前缀、
+     *      是否已被 MediaStore 索引)路径规范化后必一致,覆盖:
      *        (a) 同步期间 refreshSyncList 被多次并发调用,同一批刚下载的文件被加了两遍;
      *        (b) 刚下载完 MediaStore 尚未索引,首扫用"文件名当标题"、再扫用"真实标题",
      *            元数据不同导致旧键无法合并 —— 现在同路径直接合并;
      *        (c) U盘重新挂载导致路径前缀变化(如 /sdcard/ ↔ /storage/emulated/0/)。
-     *   2. 服务器身份 net_<streamId> —— 兜底(理论上 musicList 条目都不带 streamId)。
-     *   3. 元数据键 meta_<艺术家|专辑|标题|文件名> —— 无路径时的最后兜底。
+     *   第二层(逻辑身份,见 getLogicalKey):忽略文件夹,按 标题+歌手+时长(秒) 判定同一首。
+     *      同一首歌放在不同文件夹 / 两个不同文件名,只要标题、歌手、时长一致就折叠成一条;
+     *      时长作第三道保险,同名同歌手但时长不同的"不同歌"不会误并。
      *
-     * 同键冲突时,保留"质量更高"的条目(带真实歌手/标题优先于"未知艺术家"/文件名标题),
+     * 两层冲突时均保留"质量更高"的条目(带真实歌手/标题优先于"未知艺术家"/文件名标题),
      * 避免把"七里香.mp3"这种文件名标题残留进缓存。
      */
     private void dedupeMusicList() {
         if (musicList == null || musicList.isEmpty()) return;
-        java.util.Map<String, MusicBean> best = new java.util.LinkedHashMap<>();
+        int removed = dedupeByKey(false);  // 第一层:同一文件(路径)合并
+        removed += dedupeByKey(true);      // 第二层:跨文件夹同名歌(标题+歌手+时长)合并
+        if (removed > 0) {
+            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
+        }
+    }
+
+    /**
+     * 按指定维度对 musicList 去重,保留质量更高的条目,返回移除的条数。
+     * @param useLogical true=按逻辑身份(标题+歌手+时长,忽略文件夹)去重;
+     *                  false=按 getDedupKey(路径/streamId)去重。
+     */
+    private int dedupeByKey(boolean useLogical) {
+        if (musicList == null || musicList.isEmpty()) return 0;
+        java.util.LinkedHashMap<String, MusicBean> best = new java.util.LinkedHashMap<>();
         int removed = 0;
+        int uniqueCounter = 0;
         for (MusicBean b : musicList) {
-            String key = getDedupKey(b);
+            String key = useLogical ? getLogicalKey(b) : getDedupKey(b);
+            if (key == null) {
+                // 缺少可比对字段(如逻辑去重缺时长)不参与合并,原样保留
+                best.put("__u" + (uniqueCounter++), b);
+                continue;
+            }
             MusicBean prev = best.get(key);
             if (prev == null) {
                 best.put(key, b);
             } else {
-                // 同键:保留质量更高的那条
                 if (beanQuality(b) > beanQuality(prev)) {
                     best.put(key, b);
                 }
@@ -2665,12 +2675,25 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (removed > 0) {
-            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
             musicList.clear();
             for (MusicBean b : best.values()) {
                 musicList.add(b);
             }
         }
+        return removed;
+    }
+
+    /** 逻辑身份键:忽略文件夹,按 标题+歌手+时长(秒,四舍五入) 判定同一首歌,用于跨文件夹去重 */
+    private String getLogicalKey(MusicBean b) {
+        if (b == null) return null;
+        long dur = b.getDuration();
+        if (dur <= 0) return null;   // 时长缺失不参与逻辑去重,避免无元数据文件被误并
+        String title = b.getTitle();
+        String artist = b.getArtist();
+        String t = (title != null ? title : "").trim().replaceAll("\\s+", " ");
+        String a = (artist != null ? artist : "").trim().replaceAll("\\s+", " ");
+        long sec = (dur + 500) / 1000;   // 归到秒,容忍不同编码间 <1s 的时长抖动
+        return "meta_" + t + "|" + a + "|" + sec;
     }
 
     /** 条目质量评分,用于同键去重时择优保留(分数越高越优) */
