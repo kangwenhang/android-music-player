@@ -216,6 +216,57 @@
                 android:focusable="false"
                 android:clickable="true" />
 
+            <!-- 播放自动缓存设置 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="播放自动缓存(云端歌曲播放时下载到本地,断网可听)"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="6dp" />
+
+            <CheckBox
+                android:id="@+id/cb_auto_cache"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="播放云端歌曲时自动下载缓存(默认关)"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/sub_text_size" />
+
+            <CheckBox
+                android:id="@+id/cb_auto_cache_wifi"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="仅 Wi-Fi 下自动缓存(默认开)"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginTop="4dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="自动缓存上限(MB, 0=不限)"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="6dp" />
+
+            <EditText
+                android:id="@+id/et_auto_cache_max"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/search_height"
+                android:background="@drawable/bg_search"
+                android:hint="2048"
+                android:textColorHint="@color/search_hint"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/search_text_size"
+                android:paddingLeft="@dimen/search_padding"
+                android:paddingRight="@dimen/search_padding"
+                android:gravity="center_vertical"
+                android:singleLine="true"
+                android:inputType="number" />
+
             <!-- 按钮区 -->
             <LinearLayout
                 android:layout_width="match_parent"

@@ -44,6 +44,10 @@ public class MusicService extends Service {
     public static final int NOTIF_ID = 1001;
     private static final String CHANNEL_ID = "captiva_music_channel";
 
+    /** 自动缓存完成广播:通知界面刷新来源标识(云端→本地) */
+    public static final String ACTION_CACHE_AVAILABILITY_CHANGED =
+            "com.captiva.musicplayer.CACHE_AVAILABILITY_CHANGED";
+
     // 对外广播 action
     public static final String ACTION_STATE_CHANGED = "com.captiva.musicplayer.STATE_CHANGED";
     public static final String ACTION_PROGRESS = "com.captiva.musicplayer.PROGRESS";
@@ -94,6 +98,11 @@ public class MusicService extends Service {
 
     /** 歌词加载线程池(单线程,可取消,避免Service销毁后线程泄漏) */
     private final ExecutorService lyricsExecutor = Executors.newSingleThreadExecutor();
+
+    /** 自动缓存下载线程池(单线程,串行避免并发打爆服务器与存储) */
+    private final ExecutorService cacheExecutor = Executors.newSingleThreadExecutor();
+    /** 配置(读取自动缓存开关/配额等) */
+    private NavidromeConfig navidromeConfig;
 
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
@@ -855,6 +864,8 @@ public class MusicService extends Service {
                 }
             });
             player.prepareAsync();
+            // 云端歌曲:按设置异步下载到本地(自动缓存),不影响当前播放
+            maybeAutoCache(bean);
         } catch (Exception e) {
             Log.e(TAG, "prepareAndPlay failed", e);
             isPrepared = false;
@@ -867,6 +878,74 @@ public class MusicService extends Service {
                     }
                 }
             }, 1000);
+        }
+    }
+
+    /**
+     * 播放云端歌曲时,按设置异步下载到本地(自动缓存)。
+     * 下载到与手动同步相同的固定路径,完成后即时把当前 bean 标记为本地可用,
+     * 并广播通知界面刷新来源标识。任何不满足前置条件(未开启/非 Wi-Fi/缺信息)
+     * 的情况都直接返回,绝不影响正在进行的播放。
+     */
+    private void maybeAutoCache(final MusicBean bean) {
+        if (bean == null || !bean.isNetwork() || bean.getStreamUrl() == null) {
+            return;
+        }
+        if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
+            return;
+        }
+        if (navidromeConfig.isAutoCacheWifiOnly() && !isWifiConnected()) {
+            return;
+        }
+        final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+        if (api == null || bean.getStreamId() == null || bean.getStreamId().isEmpty()) {
+            return;
+        }
+        final String syncPath = navidromeConfig.getSyncPath();
+        if (syncPath == null || syncPath.isEmpty()) {
+            return;
+        }
+        final long maxBytes = navidromeConfig.getAutoCacheMaxMb() > 0
+                ? (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L : 0L;
+        cacheExecutor.submit(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean ok = MusicSyncManager.autoCacheSong(
+                            getApplicationContext(), api, bean, syncPath, maxBytes);
+                    if (ok) {
+                        // 即时把当前播放条目标记为本地可用(与手动同步后行为一致)。
+                        // bean 是 service.playList 与界面列表共享的同一对象,原地修改即生效。
+                        java.io.File localFile =
+                                MusicSyncManager.buildLocalFile(bean, syncPath);
+                        bean.setNetwork(false);
+                        bean.setData(localFile.getAbsolutePath());
+                        bean.setUri(null);
+                        // 通知界面刷新来源标识(云端→本地)
+                        Intent i = new Intent(ACTION_CACHE_AVAILABILITY_CHANGED);
+                        i.putExtra("streamId", bean.getStreamId());
+                        sendBroadcast(i);
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "auto cache failed: " + bean.getTitle(), e);
+                }
+            }
+        });
+    }
+
+    /** 当前是否通过 Wi-Fi 联网(仅需 ACCESS_NETWORK_STATE,已在清单声明) */
+    private boolean isWifiConnected() {
+        try {
+            ConnectivityManager cm =
+                    (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                return false;
+            }
+            NetworkInfo ni = cm.getActiveNetworkInfo();
+            return ni != null && ni.isConnected()
+                    && ni.getType() == ConnectivityManager.TYPE_WIFI;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -1108,6 +1187,10 @@ public class MusicService extends Service {
         try {
             lyricsExecutor.awaitTermination(2, TimeUnit.SECONDS);
         } catch (InterruptedException ignored) {
+        }
+        // 取消未完成的自动缓存下载任务
+        if (cacheExecutor != null) {
+            cacheExecutor.shutdownNow();
         }
         // 反注册媒体按键接收器(补充修复:之前缺少此调用)
         try {

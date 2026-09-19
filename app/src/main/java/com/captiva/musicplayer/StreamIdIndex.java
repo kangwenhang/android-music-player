@@ -97,6 +97,37 @@ public class StreamIdIndex {
         Log.d(TAG, "索引已重建[" + serverType + "]: " + newMap.size() + " 条 路径→streamId");
     }
 
+    /**
+     * 单首登记:某首歌下载/自动缓存完成后,把其 路径→streamId 映射写入当前服务器的索引。
+     * 这样即便之后进入本地模式扫描 syncPath,MusicScanner 也能按路径回填 streamId,
+     * 使 net_<streamId> 稳定去重身份保持一致(与手动同步的产出等价)。
+     */
+    public static void registerSong(Context context, MusicBean song, String syncPath) {
+        if (context == null || song == null || syncPath == null) {
+            return;
+        }
+        String sid = song.getStreamId();
+        if (sid == null || sid.isEmpty()) {
+            return;
+        }
+        String key = MusicSyncManager.localPathKey(song, syncPath);
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+        String serverType = currentServerType(context);
+        synchronized (LOCK) {
+            ensureLoaded(context, serverType);
+            Map<String, String> m = maps.get(serverType);
+            if (m == null) {
+                m = new HashMap<String, String>();
+                maps.put(serverType, m);
+            }
+            m.put(key, sid);
+            save(context, serverType, m);
+        }
+        Log.d(TAG, "索引已登记[" + serverType + "]: " + key + " -> " + sid);
+    }
+
     /** 按规范化路径查 streamId;查不到返回 null */
     public static String lookup(Context context, String normalizedPath) {
         if (normalizedPath == null || normalizedPath.isEmpty()) {

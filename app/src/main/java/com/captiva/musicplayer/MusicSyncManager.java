@@ -136,17 +136,21 @@ public class MusicSyncManager {
     }
 
     /**
-     * 构建本地文件路径
+     * 构建本地文件路径(静态版,供自动缓存等场景复用,保证命名规则唯一来源)。
      * 格式: {syncPath}/{艺术家}/{专辑}/{歌名.后缀}
      */
-    private File buildLocalFile(MusicBean song) {
+    public static File buildLocalFile(MusicBean song, String syncPath) {
         String artist = sanitizeFileName(song.getArtist());
         String album = sanitizeFileName(song.getAlbum());
         String title = sanitizeFileName(song.getTitle());
         String suffix = song.getLocalSuffix();
-
         return new File(new File(new File(syncPath, artist), album),
                 title + "." + suffix);
+    }
+
+    /** 实例版:用当前 syncPath 构建本地文件路径 */
+    private File buildLocalFile(MusicBean song) {
+        return buildLocalFile(song, syncPath);
     }
 
     /**
@@ -157,11 +161,48 @@ public class MusicSyncManager {
         if (song == null || syncPath == null || syncPath.isEmpty()) {
             return "";
         }
-        File f = new File(new File(new File(syncPath,
-                        sanitizeFileName(song.getArtist())),
-                        sanitizeFileName(song.getAlbum())),
-                sanitizeFileName(song.getTitle()) + "." + song.getLocalSuffix());
-        return MusicScanner.normalizePath(f.getAbsolutePath());
+        return MusicScanner.normalizePath(buildLocalFile(song, syncPath).getAbsolutePath());
+    }
+
+    /**
+     * 自动缓存单首云端歌曲:把它下载到与手动同步完全相同的固定路径,
+     * 这样 buildCloudDrivenList 的 file.exists() 检查会自动把它识别为"本地可用",
+     * 下次播放走本地文件;同时登记 StreamIdIndex(供本地模式扫描回填身份)并受配额约束。
+     *
+     * 与手动同步的区别:本方法单首触发、异步友好、不做整库扫描,且受 maxBytes 配额约束,
+     * 避免车机存储被"随手播放"撑满。
+     *
+     * @param maxBytes 配额上限(字节);<=0 表示不限。超过时按最旧优先清理自动缓存文件。
+     * @return true 表示最终本地可用(已存在或下载成功)
+     */
+    public static boolean autoCacheSong(Context context, MusicSourceApi api,
+                                        MusicBean song, String syncPath, long maxBytes) {
+        if (context == null || api == null || song == null || syncPath == null
+                || syncPath.isEmpty() || song.getStreamId() == null
+                || song.getStreamId().isEmpty()) {
+            return false;
+        }
+        File target = buildLocalFile(song, syncPath);
+        if (target.exists() && target.length() > 1024) {
+            return true; // 已缓存,无需重复下载
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs();
+        }
+        long bytes = api.downloadFile(song.getStreamId(), target);
+        if (bytes <= 0) {
+            return false;
+        }
+        // 登记 路径→streamId,使本地模式扫描时身份对齐(稳定去重)
+        StreamIdIndex.registerSong(context, song, syncPath);
+        // 记入自动缓存清单(仅清单内的文件会被配额清理,手动同步文件不受影响)
+        AutoCacheManifest.add(context, target.getAbsolutePath(), target.length());
+        // 配额约束:超出则按最旧优先删除自动缓存文件
+        if (maxBytes > 0) {
+            AutoCacheManifest.evictToFit(context, syncPath, maxBytes);
+        }
+        return true;
     }
 
     /**

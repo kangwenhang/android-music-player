@@ -33,7 +33,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private static final String HINT_FN = "FN ID(如 k495378412)或 http://192.168.1.100:5666";
     private static final String HINT_NAVIDROME = "http://192.168.1.100:4533";
 
-    private EditText etUrl, etUser, etPass, etSyncPath, etLocalPath;
+    private EditText etUrl, etUser, etPass, etSyncPath, etLocalPath, etAutoCacheMax;
+    private CheckBox cbAutoCache, cbAutoCacheWifi;
     /** 目录选择器当前目标:false=同步目录,true=本地模式目录 */
     private boolean pickingLocalPath = false;
     private TextView tvResult;
@@ -135,6 +136,11 @@ public class ServerSettingsActivity extends AppCompatActivity {
                 && !savedLocalPath.equals(syncPathDefault)) {
             etLocalPath.setText(savedLocalPath);
         }
+
+        // 回填自动缓存设置(默认:关闭 / 仅 Wi-Fi / 上限 2048MB)
+        cbAutoCache.setChecked(config.isAutoCacheOnPlay());
+        cbAutoCacheWifi.setChecked(config.isAutoCacheWifiOnly());
+        etAutoCacheMax.setText(String.valueOf(config.getAutoCacheMaxMb()));
     }
 
     // ==================== 目录选择器 ====================
@@ -561,6 +567,20 @@ public class ServerSettingsActivity extends AppCompatActivity {
         config.setServerType(getCurrentServerType());
         config.setFnId(fnId);
         config.setFnRelay(relay);
+        // 自动缓存设置(播放云端歌曲时下载到本地)
+        config.setAutoCacheOnPlay(cbAutoCache.isChecked());
+        config.setAutoCacheWifiOnly(cbAutoCacheWifi.isChecked());
+        String maxStr = etAutoCacheMax.getText().toString().trim();
+        int maxMb = 2048;
+        try {
+            maxMb = Integer.parseInt(maxStr);
+        } catch (Exception e) {
+            maxMb = 2048;
+        }
+        if (maxMb < 0) {
+            maxMb = 0;
+        }
+        config.setAutoCacheMaxMb(maxMb);
         config.setEnabled(true);
 
         // 确保目录存在

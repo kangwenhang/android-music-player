@@ -252,6 +252,21 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    // 自动缓存完成广播接收:云端歌曲下载到本地后,刷新来源标识(云端→本地)
+    private final BroadcastReceiver cacheReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (MusicService.ACTION_CACHE_AVAILABILITY_CHANGED.equals(intent.getAction())) {
+                // bean 已由 MusicService 原地翻转为本地可用(与界面列表共享同一对象),
+                // 这里只刷新列表视图与高亮,无需重新构建列表。
+                if (adapter != null) {
+                    adapter.notifyDataSetChanged();
+                }
+                updatePlayingHighlight();
+            }
+        }
+    };
+
     // 播放状态广播接收
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -3558,6 +3573,9 @@ public class MainActivity extends AppCompatActivity {
 
         IntentFilter f = new IntentFilter(MusicService.ACTION_STATE_CHANGED);
         registerReceiver(stateReceiver, f);
+        // 注册自动缓存完成接收器(刷新来源标识)
+        IntentFilter cf = new IntentFilter(MusicService.ACTION_CACHE_AVAILABILITY_CHANGED);
+        registerReceiver(cacheReceiver, cf);
         handler.post(progressTask);
 
         // 同步当前播放状态:从桌面返回时可能已自动切歌,需更新UI
@@ -3596,6 +3614,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         unregisterReceiver(stateReceiver);
+        try {
+            unregisterReceiver(cacheReceiver);
+        } catch (Exception ignored) {
+        }
         handler.removeCallbacks(progressTask);
     }
 

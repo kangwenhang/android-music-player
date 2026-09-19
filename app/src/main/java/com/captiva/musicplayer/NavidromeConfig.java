@@ -184,6 +184,36 @@ public class NavidromeConfig {
         prefs.edit().putBoolean(KEY_LOCAL_MODE, local).apply();
     }
 
+    /** 播放云端歌曲时是否自动下载缓存到本地(默认关,避免车机存储与流量失控) */
+    public boolean isAutoCacheOnPlay() {
+        return prefs.getBoolean(KEY_AUTO_CACHE_ON_PLAY, false);
+    }
+
+    /** 设置是否开启播放时自动缓存 */
+    public void setAutoCacheOnPlay(boolean on) {
+        prefs.edit().putBoolean(KEY_AUTO_CACHE_ON_PLAY, on).apply();
+    }
+
+    /** 自动缓存是否仅限 Wi-Fi(默认开,避免消耗车载流量) */
+    public boolean isAutoCacheWifiOnly() {
+        return prefs.getBoolean(KEY_AUTO_CACHE_WIFI_ONLY, true);
+    }
+
+    /** 设置是否仅 Wi-Fi 下自动缓存 */
+    public void setAutoCacheWifiOnly(boolean wifiOnly) {
+        prefs.edit().putBoolean(KEY_AUTO_CACHE_WIFI_ONLY, wifiOnly).apply();
+    }
+
+    /** 自动缓存上限(MB);0=不限。默认 2048MB(2GB) */
+    public int getAutoCacheMaxMb() {
+        return prefs.getInt(KEY_AUTO_CACHE_MAX_MB, 2048);
+    }
+
+    /** 设置自动缓存上限(MB),负数按 0(不限)处理 */
+    public void setAutoCacheMaxMb(int mb) {
+        prefs.edit().putInt(KEY_AUTO_CACHE_MAX_MB, mb < 0 ? 0 : mb).apply();
+    }
+
     /** 判断是否已配置完整的服务器信息 */
     public boolean isConfigured() {
         String url = getServerUrl();
