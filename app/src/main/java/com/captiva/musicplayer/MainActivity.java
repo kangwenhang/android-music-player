@@ -177,8 +177,6 @@ public class MainActivity extends AppCompatActivity {
     private final List<MusicBean> musicList = new ArrayList<>();
 
     private NavidromeConfig navidromeConfig;
-    /** 网络歌曲列表缓存(同步后保存,下次秒开) */
-    private SongCache songCache;
     /** 本地歌曲列表缓存(扫描后保存,下次秒开) */
     private LocalMusicCache localMusicCache;
     /** 收藏管理器 */
@@ -341,7 +339,6 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         navidromeConfig = new NavidromeConfig(this);
-        songCache = new SongCache(this);
         localMusicCache = new LocalMusicCache(this);
         favoriteManager = new FavoriteManager(this);
         lyricOffsetManager = new LyricOffsetManager(this);
@@ -1219,11 +1216,13 @@ public class MainActivity extends AppCompatActivity {
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
-        boolean hasNetCache = songCache.exists();
+        // 按当前服务器类型取对应的网络缓存(切服务器后清的是当前服务器的缓存)
+        SongCache curNetCache = new SongCache(this, navidromeConfig.getServerType());
+        boolean hasNetCache = curNetCache.exists();
         boolean hasLocalCache = localMusicCache.exists();
         StringBuilder sb = new StringBuilder();
         if (hasNetCache) {
-            sb.append("网络缓存: ").append(formatCacheTime(songCache.getCachedAt())).append("\n");
+            sb.append("网络缓存: ").append(formatCacheTime(curNetCache.getCachedAt())).append("\n");
         }
         if (hasLocalCache) {
             sb.append("本地缓存: ").append(formatCacheTime(localMusicCache.getCachedAt())).append("\n");
@@ -1240,7 +1239,7 @@ public class MainActivity extends AppCompatActivity {
             btnClear.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    songCache.clear();
+                    curNetCache.clear();
                     localMusicCache.clear();
                     Toast.makeText(MainActivity.this, "缓存已清除", Toast.LENGTH_SHORT).show();
                     dRef[0].dismiss();

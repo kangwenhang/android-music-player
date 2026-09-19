@@ -208,10 +208,9 @@ public class MusicScanner {
         if (data == null || data.isEmpty()) {
             return;
         }
-        // 已带身份(理论上不会发生)则不覆盖
-        if (bean.getStreamId() != null && !bean.getStreamId().isEmpty()) {
-            return;
-        }
+        // 始终以"当前服务器"的索引为准:StreamIdIndex 按 serverType 隔离,
+        // 切换服务器后这里会填回新服务器对应的 streamId(旧服务器的 streamId 自然失效)。
+        // 仅当当前服务器索引里查不到该路径时,才保留 bean 已有的 streamId(通常来自本地缓存)。
         String sid = StreamIdIndex.lookup(context, normalizePath(data));
         if (sid != null && !sid.isEmpty()) {
             bean.setStreamId(sid);

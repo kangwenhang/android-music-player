@@ -15,9 +15,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 网络歌曲列表缓存
- * 将 Navidrome 歌曲列表序列化为 JSON 存到本地文件
- * 切换到网络模式时先从缓存加载(秒开),再后台从服务器更新
+ * 网络歌曲列表缓存(按服务器类型隔离)
+ * 将当前服务器(Navidrome / 飞牛 FN Music)的歌曲列表序列化为 JSON 存到本地文件,
+ * 文件名随服务器类型变化(navidrome_songs.json / fn_songs.json),
+ * 切换服务器即切换缓存,两种服务器的歌曲列表互不串味。
+ * 切换到网络模式时先从对应缓存加载(秒开),再后台从服务器更新
  *
  * 线程安全:
  * - save/saveAsync 内部同步,防止并发写文件
@@ -26,8 +28,8 @@ import java.util.List;
 public class SongCache {
 
     private static final String TAG = "SongCache";
-    private static final String CACHE_FILE = "navidrome_songs.json";
-    private static final String CACHE_FILE_TMP = "navidrome_songs.json.tmp";
+    private static final String CACHE_FILE_NAVIDROME = "navidrome_songs.json";
+    private static final String CACHE_FILE_FNMUSIC = "fn_songs.json";
 
     private final File cacheFile;
     /** 同步锁,防止并发写缓存 */
@@ -35,8 +37,22 @@ public class SongCache {
     /** 上次保存的歌曲数,避免重复保存相同数据 */
     private volatile int lastSavedCount = 0;
 
-    public SongCache(Context context) {
-        cacheFile = new File(context.getCacheDir(), CACHE_FILE);
+    /**
+     * 按服务器类型取缓存文件名,实现"切服务器即切缓存"。
+     */
+    private static String cacheFileNameFor(String serverType) {
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(serverType)) {
+            return CACHE_FILE_FNMUSIC;
+        }
+        return CACHE_FILE_NAVIDROME;
+    }
+
+    /**
+     * 构造按服务器类型隔离的歌曲列表缓存。
+     * @param serverType {@link MusicSourceFactory#TYPE_NAVIDROME} 或 {@link MusicSourceFactory#TYPE_FNMUSIC}
+     */
+    public SongCache(Context context, String serverType) {
+        cacheFile = new File(context.getCacheDir(), cacheFileNameFor(serverType));
     }
 
     /**
@@ -78,7 +94,8 @@ public class SongCache {
     /** 实际执行保存逻辑 */
     private void doSave(List<MusicBean> songs) {
         // 先写临时文件,再重命名,防止写一半中断导致缓存损坏
-        File tmpFile = new File(cacheFile.getParent(), CACHE_FILE_TMP);
+        // 临时文件名随缓存文件走,避免两种服务器的临时文件互相覆盖
+        File tmpFile = new File(cacheFile.getParent(), cacheFile.getName() + ".tmp");
         OutputStreamWriter writer = null;
         try {
             JSONArray arr = new JSONArray();

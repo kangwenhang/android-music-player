@@ -11,11 +11,13 @@ import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * 路径 → Navidrome streamId 持久化索引
+ * 路径 → 服务端 streamId 持久化索引(按服务器类型隔离)
  *
  * 背景:
  *   MusicScanner 扫描本地文件重建 MusicBean 时,只认得到文件路径与媒体元数据,
@@ -28,17 +30,38 @@ import java.util.Map;
  * 线程安全:
  *   所有读写均在静态锁 LOCK 上同步。build() 在同步线程(后台)调用并落盘,
  *   ensureLoaded()/lookup() 在扫描线程(后台)调用,均不占用主线程做文件 IO。
+ *   索引按 serverType 分文件存储(streamid_index.json / streamid_index_fn.json),
+ *   内存中以 serverType 为键分别持有,切换服务器互不覆盖。
  */
 public class StreamIdIndex {
 
     private static final String TAG = "StreamIdIndex";
-    private static final String INDEX_FILE = "streamid_index.json";
+    private static final String INDEX_FILE_NAVIDROME = "streamid_index.json";
+    private static final String INDEX_FILE_FNMUSIC = "streamid_index_fn.json";
 
     private static final Object LOCK = new Object();
-    private static Map<String, String> map = new HashMap<String, String>();
-    private static boolean loaded = false;
+    /** serverType -> (规范化路径 -> streamId),每个服务器独立一份,切换不互相覆盖 */
+    private static Map<String, Map<String, String>> maps = new HashMap<String, Map<String, String>>();
+    /** 已加载过的 serverType 集合,避免重复读文件 */
+    private static Set<String> loaded = new HashSet<String>();
 
     private StreamIdIndex() {
+    }
+
+    /** 按服务器类型取索引文件名 */
+    private static String indexFileFor(String serverType) {
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(serverType)) {
+            return INDEX_FILE_FNMUSIC;
+        }
+        return INDEX_FILE_NAVIDROME;
+    }
+
+    /** 从配置取当前服务器类型(默认 Navidrome) */
+    private static String currentServerType(Context context) {
+        if (context == null) {
+            return MusicSourceFactory.TYPE_NAVIDROME;
+        }
+        return new NavidromeConfig(context).getServerType();
     }
 
     /**
@@ -50,6 +73,7 @@ public class StreamIdIndex {
         if (context == null || songs == null || syncPath == null) {
             return;
         }
+        String serverType = currentServerType(context);
         Map<String, String> newMap = new HashMap<String, String>();
         for (MusicBean song : songs) {
             if (song == null) {
@@ -66,11 +90,11 @@ public class StreamIdIndex {
             newMap.put(key, sid);
         }
         synchronized (LOCK) {
-            map = newMap;
-            loaded = true;
-            save(context, newMap);
+            maps.put(serverType, newMap);
+            loaded.add(serverType);
+            save(context, serverType, newMap);
         }
-        Log.d(TAG, "索引已重建: " + newMap.size() + " 条 路径→streamId");
+        Log.d(TAG, "索引已重建[" + serverType + "]: " + newMap.size() + " 条 路径→streamId");
     }
 
     /** 按规范化路径查 streamId;查不到返回 null */
@@ -79,26 +103,29 @@ public class StreamIdIndex {
             return null;
         }
         synchronized (LOCK) {
-            ensureLoaded(context);
-            return map.get(normalizedPath);
+            String serverType = currentServerType(context);
+            ensureLoaded(context, serverType);
+            Map<String, String> m = maps.get(serverType);
+            return m == null ? null : m.get(normalizedPath);
         }
     }
 
-    /** 确保索引已加载(最多加载一次) */
-    private static void ensureLoaded(Context context) {
-        if (loaded) {
+    /** 确保某服务器的索引已加载(最多加载一次) */
+    private static void ensureLoaded(Context context, String serverType) {
+        if (loaded.contains(serverType)) {
             return;
         }
-        load(context);
-        loaded = true;
+        load(context, serverType);
+        loaded.add(serverType);
     }
 
-    private static void load(Context context) {
-        map = new HashMap<String, String>();
+    private static void load(Context context, String serverType) {
+        Map<String, String> target = new HashMap<String, String>();
+        maps.put(serverType, target);
         if (context == null) {
             return;
         }
-        File file = new File(context.getFilesDir(), INDEX_FILE);
+        File file = new File(context.getFilesDir(), indexFileFor(serverType));
         if (!file.exists() || file.length() == 0) {
             return;
         }
@@ -119,14 +146,14 @@ public class StreamIdIndex {
                     String k = it.next();
                     String v = m.optString(k, "");
                     if (!v.isEmpty()) {
-                        map.put(k, v);
+                        target.put(k, v);
                     }
                 }
             }
-            Log.d(TAG, "索引已加载: " + map.size() + " 条");
+            Log.d(TAG, "索引已加载[" + serverType + "]: " + target.size() + " 条");
         } catch (Exception e) {
             Log.w(TAG, "加载 streamId 索引失败(忽略,回退启发式去重)", e);
-            map = new HashMap<String, String>();
+            maps.put(serverType, new HashMap<String, String>());
         } finally {
             if (reader != null) {
                 try {
@@ -137,12 +164,12 @@ public class StreamIdIndex {
         }
     }
 
-    private static void save(Context context, Map<String, String> data) {
-        if (context == null) {
+    private static void save(Context context, String serverType, Map<String, String> data) {
+        if (context == null || data == null) {
             return;
         }
-        File file = new File(context.getFilesDir(), INDEX_FILE);
-        File tmp = new File(context.getFilesDir(), INDEX_FILE + ".tmp");
+        File file = new File(context.getFilesDir(), indexFileFor(serverType));
+        File tmp = new File(context.getFilesDir(), indexFileFor(serverType) + ".tmp");
         OutputStreamWriter writer = null;
         try {
             JSONObject root = new JSONObject();
@@ -162,7 +189,7 @@ public class StreamIdIndex {
             }
             tmp.renameTo(file);
         } catch (Exception e) {
-            Log.e(TAG, "保存 streamId 索引失败", e);
+            Log.e(TAG, "保存 streamId 索引[" + serverType + "]失败", e);
         } finally {
             if (writer != null) {
                 try {

@@ -191,7 +191,8 @@ public class MusicSyncManager {
             return;
         }
 
-        SongCache cache = new SongCache(context);
+        // 按当前服务器类型隔离缓存:切服务器即切缓存,互不串味
+        SongCache cache = new SongCache(context, new NavidromeConfig(context).getServerType());
         List<MusicBean> allSongs = null;
 
         // 1. 每次都从服务器获取最新歌曲列表(确保能发现新加的歌)
