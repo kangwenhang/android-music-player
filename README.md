@@ -2,12 +2,16 @@
 
 专为 **安卓 4.2.2(API 17)** 车机设计的音乐播放器(科帕奇 2015 款改装车机,7 寸 1024×600 横屏)。
 
+<img width="1081" height="590" alt="image" src="https://github.com/user-attachments/assets/cf6dd66b-4ba9-4852-96f0-6511b45fb7a9" />
+<img width="1075" height="582" alt="image" src="https://github.com/user-attachments/assets/f6f76f17-c3dc-4e8d-ba22-ceadcebdd22b" />
+<img width="1069" height="560" alt="image" src="https://github.com/user-attachments/assets/ef60fdb2-1b18-4c1a-841a-be86fbbd9bf1" />
+
 ## 功能特性
 
 ### 播放核心
 - 本地音乐扫描与播放(MediaStore + MediaPlayer)
-- **Navidrome 服务器对接**(Subsonic API,支持网络流式播放)
-- 本地/网络音乐来源一键切换
+- **Navidrome 服务器同步**(Subsonic API,同步服务器歌曲列表到本地)
+- 播放模式记忆:顺序 / 单曲循环 / 随机,状态自动保存
 - **开机自动播放**(可开关,记忆上次播放歌曲和进度,断点续播)
 - 播放模式:顺序 / 单曲循环 / 随机
 - 后台播放 + 通知栏控制
@@ -75,13 +79,13 @@
 2. 选择"服务器设置"
 3. 输入服务器地址(如 `http://192.168.1.100:4533`)、用户名和密码
 4. 点击"测试连接"验证,然后"保存"
-5. 点击顶栏"本地/网络"按钮切换到网络来源即可浏览播放
+5. 点击"同步歌曲"按钮,将服务器歌曲列表同步到本地
 
 ## 版本说明
 
 - **main 分支**:正式版,推送后自动构建并创建 GitHub Release
 - **local-test 分支**:测试版,推送后自动构建并创建预发布(Pre-release)
-- 版本号基于 git tag,正式版如 `v4.5`,预发布如 `v4.5.190-pre`
+- 版本号基于 git tag,正式版如 `v4.6`,预发布如 `v4.6.190-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
 
 ### v5.7 更新内容(local-test)
@@ -115,11 +119,30 @@
 - **修复封面双读性能问题**:在loadFromDiskCache中优先查询SQLite缓存,miss时一次性读取文件到内存,解码Bitmap时避免重复访问文件
 - **批量操作支持**:CoverDatabase支持putCoversBatch()批量写入,使用SQLite事务保证性能一致性
 
+### v5.2 更新内容
+
+- **修复从桌面返回黑屏**:封面缩放(Bitmap.createScaledBitmap)移到后台线程,消除主线程 80-141ms 阻塞
+- **修复收藏切换卡顿**:缓存 song key,避免重复调用 getCanonicalPath() 文件系统 I/O,收藏过滤从 274ms 降至 18ms
+- **修复搜索卡顿**:缓存小写标题/艺术家,搜索过滤从 41ms 降至 2-5ms
+- **搜索空内容优化**:空搜索时清除焦点+收起键盘,不再触发列表重绘
+- **播放模式文字显示**:顺序/随机/单曲循环用文字(顺/随/单)显示
+
+### v5.1 更新内容
+
+- **播放模式改回文字显示**:将顺序/随机/单曲循环按钮从图形图标改回文字模式(顺/随/单),更清晰直观
+- **清理无用矢量图标**:移除 ic_play_sequence/ic_play_shuffle/ic_play_repeat_one 三个矢量 drawable,减少 APK 体积
+
+### v5.0 更新内容
+
+- **播放模式记忆**:顺序/随机/单曲循环状态自动保存,重启 app 后恢复上次播放模式
+- **Navidrome 功能调整**:服务器对接改为仅同步歌曲列表,不再支持网络流式播放
+
 ### v4.7 更新内容
 
 - **修复搜索关闭后高亮丢失**:清除搜索后当前播放歌曲在分批加载范围外时,高亮不再丢失,自动加载到该位置
 - **修复车机歌词不同步**:安卓 4.x 老设备 MediaPlayer 对 VBR MP3 位置报告不准,新增混合位置追踪(系统时钟 + MediaPlayer),自动校正 VBR 偏差
 - **歌词偏移手动调整**:长按歌词区弹出偏移调整对话框,可逐 200ms 微调个别歌曲的歌词同步,设置自动保存
+- **更新 Navidrome 说明**:服务器功能从"网络流式播放"改为"同步到本地"
 
 ### v4.6 更新内容
 
