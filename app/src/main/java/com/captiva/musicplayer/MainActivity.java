@@ -2312,6 +2312,48 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 0. 云端为主(纯镜像):列表以云端歌单(SongCache 离线缓存)为准,
+                //    每首歌按固定本地路径判断是否在本地,决定本地播还是联网播。
+                //    列表只有云端一份枚举,重复在结构上不存在;本地扫描仅作回退。
+                final String serverType = navidromeConfig.getServerType();
+                List<MusicBean> cloudList = buildCloudDrivenList(serverType, syncPath);
+                if (cloudList != null && !cloudList.isEmpty()) {
+                    java.util.Collections.sort(cloudList, MusicTitleComparator.INSTANCE);
+                    final List<MusicBean> finalList = cloudList;
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            musicList.clear();
+                            musicList.addAll(finalList);
+                            dedupeMusicList();
+                            adapter.setData(musicList);
+                            updateCount();
+                            if (musicList.isEmpty()) {
+                                tvEmpty.setVisibility(View.VISIBLE);
+                                tvEmpty.setText("未找到音乐\n请在设置中配置服务器并同步");
+                            } else {
+                                tvEmpty.setVisibility(View.GONE);
+                                if (service != null && !service.isPlaying()) {
+                                    int lastIndex = navidromeConfig.getLastPlayIndex();
+                                    if (lastIndex < 0 || lastIndex >= musicList.size()) {
+                                        lastIndex = 0;
+                                    }
+                                    service.setPlayList(musicList, lastIndex);
+                                    if (autoPlayPending && !service.isPlaying()) {
+                                        autoPlayPending = false;
+                                        int lastPos = navidromeConfig.getLastPlayPosition();
+                                        service.playIndexWithSeek(lastIndex, lastPos);
+                                    }
+                                }
+                            }
+                            // 后台刷新云端缓存(发现新歌);下载完成的歌下次重开即转为本地播
+                            startBackgroundSync();
+                        }
+                    });
+                    return;
+                }
+
+                // ---- 云端列表不可用(无缓存/未同步/未配置):回退本地扫描,保证不空白 ----
                 // 0. 优先从本地缓存加载(秒开,完全不读U盘)
                 List<MusicBean> cachedList = localMusicCache.load();
                 if (cachedList != null && !cachedList.isEmpty()) {
@@ -2389,6 +2431,44 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         }, "LoadMusic").start();
+    }
+
+    /**
+     * 云端为主构建列表(纯云端镜像):读按服务器隔离的 SongCache(云端歌单离线缓存),
+     * 每首歌按固定本地路径判断是否在本地,决定"本地播"还是"联网播"。
+     *
+     * 为什么能根治重复:列表只有云端一份枚举,同一首歌不可能出现两条;
+     * 跨文件夹 / 重命名都不影响,因为云端条目只认一个规范本地路径。
+     * 本地扫描退化为回退(见 loadMusic),不再作为列表来源。
+     *
+     * @return 云端列表(已按本地可用性设好 network/data);云端列表不可用时返回 null
+     *         (调用方应回退到本地扫描,保证界面不空白)。
+     */
+    private List<MusicBean> buildCloudDrivenList(String serverType, String syncPath) {
+        SongCache cloudCache = new SongCache(this, serverType);
+        List<MusicBean> cloud = cloudCache.load();
+        if (cloud == null || cloud.isEmpty()) {
+            return null;
+        }
+        for (MusicBean b : cloud) {
+            if (b == null) {
+                continue;
+            }
+            // 本地固定路径(与 MusicSyncManager.buildLocalFile 命名规则一致)
+            String localPath = MusicSyncManager.localPathKey(b, syncPath);
+            File f = new File(localPath);
+            if (f.exists() && f.length() > 1024) {
+                // 本地已下载:改本地播放,用真实文件路径;
+                // 清掉服务端 uri(MusicService 会优先用 uri,可能误指向服务端地址)
+                b.setNetwork(false);
+                b.setData(localPath);
+                b.setUri(null);
+            } else {
+                // 未下载:保持联网播放(streamUrl 已在缓存中)
+                b.setNetwork(true);
+            }
+        }
+        return cloud;
     }
 
     /**
