@@ -2325,6 +2325,8 @@ public class MainActivity extends AppCompatActivity {
                         public void run() {
                             musicList.clear();
                             musicList.addAll(finalList);
+                            dedupeMusicList();
+                            localMusicCache.forceSaveAsync(musicList);
                             adapter.setData(musicList);
                             updateCount();
                             tvEmpty.setVisibility(View.GONE);
@@ -2359,6 +2361,7 @@ public class MainActivity extends AppCompatActivity {
                     public void run() {
                         musicList.clear();
                         musicList.addAll(quickList);
+                        dedupeMusicList();
                         adapter.setData(musicList);
                         updateCount();
 
@@ -2438,6 +2441,7 @@ public class MainActivity extends AppCompatActivity {
                         // 用扫描结果替换当前列表
                         musicList.clear();
                         musicList.addAll(fullList);
+                        dedupeMusicList();
                         adapter.setData(musicList);
                         updateCount();
 
@@ -2569,6 +2573,7 @@ public class MainActivity extends AppCompatActivity {
 
                         // 排序
                         java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
+                        dedupeMusicList();
                         adapter.setData(musicList);
                         updateCount();
                         if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
@@ -2612,6 +2617,55 @@ public class MainActivity extends AppCompatActivity {
     private String getSongKey(MusicBean b) {
         if (b == null) return "";
         return b.getCachedKey();
+    }
+
+    /**
+     * 列表去重:移除 musicList 中"同一首歌多次出现"的条目,保留首次出现。
+     * 必须在主线程调用(会修改 musicList 与 adapter)。
+     *
+     * 去重键(挂载点无关,避免 U盘重新挂载后挂载路径变化导致整库重复):
+     * - 网络歌曲: net_<streamId>
+     * - 本地歌曲: local_<艺术家>|<专辑>|<标题>|<文件名>
+     *   同一首歌无论在哪个挂载点,艺术家/专辑/标题/文件名都一致,因此能跨挂载点折叠成一条;
+     *   仅当两首歌这四项完全相同才会被误并(个人曲库极罕见,远优于整库重复)。
+     */
+    private void dedupeMusicList() {
+        if (musicList == null || musicList.isEmpty()) return;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        java.util.List<MusicBean> out = new java.util.ArrayList<>(musicList.size());
+        int removed = 0;
+        for (MusicBean b : musicList) {
+            String key = getDedupKey(b);
+            if (seen.add(key)) {
+                out.add(b);
+            } else {
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
+            musicList.clear();
+            musicList.addAll(out);
+        }
+    }
+
+    /** 计算去重键(见 dedupeMusicList 说明) */
+    private String getDedupKey(MusicBean b) {
+        if (b == null) return "";
+        String sid = b.getStreamId();
+        if (sid != null && !sid.isEmpty()) {
+            return "net_" + sid;
+        }
+        String artist = b.getArtist() != null ? b.getArtist() : "";
+        String album = b.getAlbum() != null ? b.getAlbum() : "";
+        String title = b.getTitle() != null ? b.getTitle() : "";
+        String fname = "";
+        String data = b.getData();
+        if (data != null && !data.isEmpty()) {
+            int idx = data.lastIndexOf('/');
+            fname = idx >= 0 ? data.substring(idx + 1) : data;
+        }
+        return "local_" + artist + "|" + album + "|" + title + "|" + fname;
     }
 
     /**
@@ -2826,6 +2880,7 @@ public class MainActivity extends AppCompatActivity {
                             if (!toAdd.isEmpty()) {
                                 musicList.addAll(toAdd);
                                 java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
+                                dedupeMusicList();
                             }
                             adapter.setData(musicList);
                             applyFavoritesFilter();
@@ -2851,6 +2906,7 @@ public class MainActivity extends AppCompatActivity {
                             if (!toAdd.isEmpty()) {
                                 musicList.addAll(toAdd);
                                 java.util.Collections.sort(musicList, MusicTitleComparator.INSTANCE);
+                                dedupeMusicList();
                                 adapter.setData(musicList);
                                 // 关键:同步新增歌曲后要更新播放队列。
                                 // - 正在播放:只把新歌增量追加到队列末尾(appendToPlayList),绝不重设/重排整个队列,
@@ -2880,6 +2936,7 @@ public class MainActivity extends AppCompatActivity {
                         } else {
                             musicList.clear();
                             musicList.addAll(newList);
+                            dedupeMusicList();
                             adapter.setData(musicList);
                             adapter.filter(currentSearchQuery);
                             // 重设队列时同样保留当前播放位置,避免重置到第 0 首打断续播
