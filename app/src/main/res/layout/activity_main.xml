@@ -83,6 +83,19 @@
             android:textColor="@color/btn_text"
             android:textSize="@dimen/sub_text_size" />
 
+        <!-- 本地/云端切换按钮:云端=云端歌单全部(已下载本地播,未下载联网播);本地=仅已下载的歌 -->
+        <Button
+            android:id="@+id/btn_source_toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/top_btn_height"
+            android:layout_marginStart="8dp"
+            android:layout_marginLeft="8dp"
+            android:minWidth="@dimen/top_btn_min_width"
+            android:background="@drawable/bg_btn"
+            android:text="云端"
+            android:textColor="@color/btn_text"
+            android:textSize="@dimen/sub_text_size" />
+
         <!-- 设置(均衡器+服务器统一入口,电阻屏加大) -->
         <Button
             android:id="@+id/btn_settings"

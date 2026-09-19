@@ -153,7 +153,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvEmpty, tvCount, tvSyncStatus;
     // UI - 顶栏
     private EditText etSearch;
-    private Button btnSettings, btnFavorites, btnEq;
+    private Button btnSettings, btnFavorites, btnEq, btnSourceToggle;
     private TextView tvServerStatus;
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
@@ -185,6 +185,8 @@ public class MainActivity extends AppCompatActivity {
     private LyricOffsetManager lyricOffsetManager;
     /** 是否正在只显示收藏(收藏夹模式) */
     private boolean favoritesOnly = false;
+    /** 本地/云端切换:false=云端模式(默认,云端歌单全部,已下载本地播/未下载联网播);true=本地模式(仅已下载的歌) */
+    private boolean localOnlyMode = false;
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
 
@@ -425,6 +427,7 @@ public class MainActivity extends AppCompatActivity {
         etSearch = findViewById(R.id.et_search);
         btnSettings = findViewById(R.id.btn_settings);
         btnFavorites = findViewById(R.id.btn_favorites);
+        btnSourceToggle = findViewById(R.id.btn_source_toggle);
         btnEq = findViewById(R.id.btn_eq);
         tvServerStatus = findViewById(R.id.tv_server_status);
         tvNowTitle = findViewById(R.id.tv_now_title);
@@ -757,6 +760,14 @@ public class MainActivity extends AppCompatActivity {
             if (PerfLogger.isEnabled()) {
                 PerfLogger.log("FavToggle", "总=" + (System.currentTimeMillis() - t0) + "ms favoritesOnly=" + favoritesOnly);
             }
+        });
+
+        // 本地/云端切换:云端=云端歌单全部(已下载本地播,未下载联网播);本地=仅已下载的歌。
+        // 每次切换都重建列表,顺带把后台同步刚下载完成的歌刷新为本地播。
+        btnSourceToggle.setOnClickListener(v -> {
+            localOnlyMode = !localOnlyMode;
+            updateSourceToggleUi();
+            applySourceMode();
         });
 
         // 点击服务器状态可手动刷新
@@ -2471,10 +2482,89 @@ public class MainActivity extends AppCompatActivity {
         return cloud;
     }
 
+    /** 更新本地/云端切换按钮外观与文案(云端=普通底色,本地=高亮底色) */
+    private void updateSourceToggleUi() {
+        if (localOnlyMode) {
+            btnSourceToggle.setBackgroundResource(R.drawable.bg_btn_play);
+            btnSourceToggle.setText("本地");
+        } else {
+            btnSourceToggle.setBackgroundResource(R.drawable.bg_btn);
+            btnSourceToggle.setText("云端");
+        }
+    }
+
     /**
-     * 手动刷新歌曲列表:从U盘重新扫描
-     * 适用场景:用户在U盘新增/删除了歌曲,需要更新列表
-     * 扫描在后台线程执行,不阻塞UI
+     * 按当前模式重建列表(后台算本地可用性,主线程刷新):
+     * 云端模式 = 云端歌单全部(已下载的本地播,未下载的联网播);
+     * 本地模式 = 仅已下载到本地的歌。
+     * 每次切换都重新执行 buildCloudDrivenList,顺带把后台同步刚下载完成的歌刷新为本地播,
+     * 解决"同步完成后需重开才生效"的问题。播放队列不动,当前歌曲继续播。
+     */
+    private void applySourceMode() {
+        final String syncPath = navidromeConfig.getSyncPath();
+        final String serverType = navidromeConfig.getServerType();
+        final boolean toLocal = localOnlyMode;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<MusicBean> list = buildCloudDrivenList(serverType, syncPath);
+                if (list == null) {
+                    // 云端不可用:回退按钮状态并提示
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            localOnlyMode = !toLocal;
+                            updateSourceToggleUi();
+                            Toast.makeText(MainActivity.this,
+                                    "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    return;
+                }
+                if (toLocal) {
+                    List<MusicBean> localOnly = new ArrayList<>();
+                    for (MusicBean b : list) {
+                        if (b != null && !b.isNetwork()) {
+                            localOnly.add(b);
+                        }
+                    }
+                    list = localOnly;
+                }
+                java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
+                final List<MusicBean> finalList = list;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        musicList.clear();
+                        musicList.addAll(finalList);
+                        dedupeMusicList();
+                        adapter.setData(musicList);
+                        // 重新应用收藏/搜索过滤,保持各过滤维度一致
+                        if (favoritesOnly) {
+                            applyFavoritesFilter();
+                        } else {
+                            adapter.filter(currentSearchQuery);
+                        }
+                        updateCount();
+                        if (musicList.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText(toLocal
+                                    ? "本地还没有已下载的歌曲\n切到\"云端\"查看全部歌曲"
+                                    : "未找到音乐\n请在设置中配置服务器并同步");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+                        updatePlayingHighlight();
+                    }
+                });
+            }
+        }, "SourceModeToggle").start();
+    }
+
+    /**
+     * 手动刷新歌曲列表:云端为主 —— 重新执行云端列表构建(已下载→本地播,未下载→联网播),
+     * 顺带把后台同步刚下载完成的歌刷新为本地播;同时触发一次后台同步刷新云端缓存(发现新歌)。
+     * 云端不可用(无缓存/未同步/未配置)时回退为本地扫描,保证界面不空白。
      */
     private void refreshMusicList() {
         final String syncPath = navidromeConfig.getSyncPath();
@@ -2483,13 +2573,98 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // 显示扫描进度
+        // 显示刷新进度
         tvSyncStatus.setVisibility(View.VISIBLE);
-        tvSyncStatus.setText("正在扫描U盘...");
+        tvSyncStatus.setText("正在刷新...");
 
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // ---- 云端为主:重新构建云端列表(按当前 本地/云端 模式过滤) ----
+                List<MusicBean> cloudList = buildCloudDrivenList(navidromeConfig.getServerType(), syncPath);
+                if (cloudList != null) {
+                    if (localOnlyMode) {
+                        List<MusicBean> localOnly = new ArrayList<>();
+                        for (MusicBean b : cloudList) {
+                            if (b != null && !b.isNetwork()) {
+                                localOnly.add(b);
+                            }
+                        }
+                        cloudList = localOnly;
+                    }
+                    java.util.Collections.sort(cloudList, MusicTitleComparator.INSTANCE);
+                    final List<MusicBean> finalList = cloudList;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            // 若后台同步仍在进行,不要隐藏同步状态
+                            if (isAutoSyncing) {
+                                tvSyncStatus.setVisibility(View.VISIBLE);
+                                tvSyncStatus.setText("同步中...");
+                            } else {
+                                tvSyncStatus.setVisibility(View.GONE);
+                            }
+
+                            int oldCount = musicList.size();
+                            musicList.clear();
+                            musicList.addAll(finalList);
+                            dedupeMusicList();
+                            adapter.setData(musicList);
+                            if (favoritesOnly) {
+                                applyFavoritesFilter();
+                            } else {
+                                adapter.filter(currentSearchQuery);
+                            }
+                            updateCount();
+                            if (musicList.isEmpty()) {
+                                tvEmpty.setVisibility(View.VISIBLE);
+                                tvEmpty.setText(localOnlyMode
+                                        ? "本地还没有已下载的歌曲\n切到\"云端\"查看全部歌曲"
+                                        : "未找到音乐\n请在设置中配置服务器并同步");
+                            } else {
+                                tvEmpty.setVisibility(View.GONE);
+                            }
+
+                            // 更新播放列表(保留当前播放歌曲位置)
+                            if (service != null && !musicList.isEmpty()) {
+                                MusicBean currentSong = service.getCurrentMusic();
+                                int newIndex = 0;
+                                if (currentSong != null) {
+                                    String curKey = getSongKey(currentSong);
+                                    for (int i = 0; i < musicList.size(); i++) {
+                                        if (curKey.equals(getSongKey(musicList.get(i)))) {
+                                            newIndex = i;
+                                            break;
+                                        }
+                                    }
+                                }
+                                service.setPlayList(musicList, newIndex);
+                                updatePlayingHighlight();
+                            }
+
+                            // 云端列表不写本地扫描缓存(localMusicCache 仅服务回退路径)
+                            CoverLoader.getInstance().clearNoCoverCache();
+                            int coverSize = (int) getResources().getDimension(R.dimen.cover_size_list);
+                            CoverLoader.getInstance().preloadAllCovers(musicList, coverSize);
+
+                            int diff = musicList.size() - oldCount;
+                            String msg;
+                            if (diff > 0) {
+                                msg = "刷新完成: " + musicList.size() + " 首(新增 " + diff + " 首)";
+                            } else if (diff < 0) {
+                                msg = "刷新完成: " + musicList.size() + " 首(减少 " + (-diff) + " 首)";
+                            } else {
+                                msg = "刷新完成: " + musicList.size() + " 首";
+                            }
+                            Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    // 顺带后台同步一次,刷新云端缓存(发现服务器新增/删除的歌)
+                    startBackgroundSync();
+                    return;
+                }
+
+                // ---- 云端不可用:回退本地扫描(原逻辑) ----
                 // 完整扫描U盘目录
                 final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
 
