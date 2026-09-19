@@ -41,10 +41,28 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp/
           echo "/tmp/gradle-7.5/bin" >> $GITHUB_PATH
 
-      - name: Build Debug APK
+      # ========== 决定构建类型 ==========
+      # main      -> assembleRelease  (BuildConfig.DEBUG=false -> PerfLogger 性能监控关闭 = 关闭调试)
+      # local-test-> assembleDebug    (BuildConfig.DEBUG=true  -> PerfLogger 性能监控开启, 用于卡顿分析)
+      - name: Determine build type (main=Release 关闭调试 / local-test=Debug 性能监控)
+        id: buildinfo
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "gradle_task=assembleRelease" >> "$GITHUB_OUTPUT"
+            echo "apk_dir=app/build/outputs/apk/release" >> "$GITHUB_OUTPUT"
+            echo "build_label=Release(调试关闭 / 性能监控禁用)" >> "$GITHUB_OUTPUT"
+            echo "artifact_suffix=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "gradle_task=assembleDebug" >> "$GITHUB_OUTPUT"
+            echo "apk_dir=app/build/outputs/apk/debug" >> "$GITHUB_OUTPUT"
+            echo "build_label=Debug(性能监控开启)" >> "$GITHUB_OUTPUT"
+            echo "artifact_suffix=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
-        run: gradle assembleDebug --no-daemon --no-build-cache
+        run: gradle ${{ steps.buildinfo.outputs.gradle_task }} --no-daemon --no-build-cache
 
       - name: Zipalign + Re-sign APK (v1 only, for Android 4.2.2)
         env:
@@ -54,9 +72,10 @@ jobs:
           echo "Build tools: ${BUILD_TOOLS:-not found}"
           ZIPALIGN="${BUILD_TOOLS}zipalign"
           APKSIGNER="${BUILD_TOOLS}apksigner"
-          APK_SRC=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK_DIR="${{ steps.buildinfo.outputs.apk_dir }}"
+          APK_SRC=$(find "$APK_DIR" -name "*.apk" | head -1)
           APK_ALIGNED="/tmp/app-aligned.apk"
-          APK_FINAL=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK_FINAL="$APK_SRC"
 
           # 1. Zipalign(4字节边界对齐,安卓 4.2.2 要求)
           echo "=== Step 1: Zipalign ==="
@@ -100,8 +119,8 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: captiva-music-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: captiva-music-${{ steps.buildinfo.outputs.artifact_suffix }}
+          path: ${{ steps.buildinfo.outputs.apk_dir }}/*.apk
 
       # ========== local-test: 创建预发布(调试用) ==========
       - name: Create Prerelease (local-test)
@@ -109,7 +128,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK_PATH=$(find ${{ steps.buildinfo.outputs.apk_dir }} -name "*.apk" | head -1)
 
           # 查询最新正式版(prerelease=false)的 tag 作为基础版本
           LATEST_STABLE=""
@@ -172,6 +191,7 @@ jobs:
           - 版本标签: ${TAG}
           - 基于正式版: ${LATEST_STABLE:-无}
           - 分支: local-test
+          - 构建类型: Debug(性能监控开启)
           - 版本信息: ${APK_INFO}
 
           ## 本次更新
@@ -196,7 +216,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          APK_PATH=$(find ${{ steps.buildinfo.outputs.apk_dir }} -name "*.apk" | head -1)
 
           # 优先使用 HEAD 上的 git tag 作为 Release 标签(如 v2.1)
           # 没有标签时回退到时间戳标签
@@ -241,12 +261,13 @@ jobs:
 
           BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S %Z')
           APK_INFO=$(aapt dump badging "$APK_PATH" 2>/dev/null | grep -E "versionCode|versionName" | head -1 || echo "")
+          BUILD_LABEL="${{ steps.buildinfo.outputs.build_label }}"
 
           cat > /tmp/release_notes.md << EOF
           ## 构建信息
           - 构建时间: ${BUILD_TIME}
           - 版本标签: ${TAG}
-          - 构建类型: Debug
+          - 构建类型: ${BUILD_LABEL}
           - 版本信息: ${APK_INFO}
 
           ## 本次更新
