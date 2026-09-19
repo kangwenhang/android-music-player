@@ -2629,43 +2629,97 @@ public class MainActivity extends AppCompatActivity {
      *   同一首歌无论在哪个挂载点,艺术家/专辑/标题/文件名都一致,因此能跨挂载点折叠成一条;
      *   仅当两首歌这四项完全相同才会被误并(个人曲库极罕见,远优于整库重复)。
      */
+    /**
+     * 列表去重:移除 musicList 中"同一首歌多次出现"的条目,保留质量更高的一条。
+     * 必须在主线程调用(会修改 musicList 与 adapter)。
+     *
+     * 去重键优先级(见 getDedupKey):
+     *   1. 规范化文件路径 path_<canonical> —— 最权威。本应用 musicList 中每个条目都对应
+     *      磁盘上一个真实文件,同一文件(无论挂载点前缀、是否已被 MediaStore 索引)路径规范化后
+     *      必然一致,因此能一次性覆盖三大重复来源:
+     *        (a) 同步期间 refreshSyncList 被多次并发调用,同一批刚下载的文件被加了两遍;
+     *        (b) 刚下载完 MediaStore 尚未索引,首扫用"文件名当标题"、再扫用"真实标题",
+     *            元数据不同导致旧键无法合并 —— 现在同路径直接合并;
+     *        (c) U盘重新挂载导致路径前缀变化(如 /sdcard/ ↔ /storage/emulated/0/)。
+     *   2. 服务器身份 net_<streamId> —— 兜底(理论上 musicList 条目都不带 streamId)。
+     *   3. 元数据键 meta_<艺术家|专辑|标题|文件名> —— 无路径时的最后兜底。
+     *
+     * 同键冲突时,保留"质量更高"的条目(带真实歌手/标题优先于"未知艺术家"/文件名标题),
+     * 避免把"七里香.mp3"这种文件名标题残留进缓存。
+     */
     private void dedupeMusicList() {
         if (musicList == null || musicList.isEmpty()) return;
-        java.util.Set<String> seen = new java.util.HashSet<>();
-        java.util.List<MusicBean> out = new java.util.ArrayList<>(musicList.size());
+        java.util.Map<String, MusicBean> best = new java.util.LinkedHashMap<>();
         int removed = 0;
         for (MusicBean b : musicList) {
             String key = getDedupKey(b);
-            if (seen.add(key)) {
-                out.add(b);
+            MusicBean prev = best.get(key);
+            if (prev == null) {
+                best.put(key, b);
             } else {
+                // 同键:保留质量更高的那条
+                if (beanQuality(b) > beanQuality(prev)) {
+                    best.put(key, b);
+                }
                 removed++;
             }
         }
         if (removed > 0) {
             Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
             musicList.clear();
-            musicList.addAll(out);
+            for (MusicBean b : best.values()) {
+                musicList.add(b);
+            }
         }
+    }
+
+    /** 条目质量评分,用于同键去重时择优保留(分数越高越优) */
+    private int beanQuality(MusicBean b) {
+        if (b == null) return -1;
+        int score = 0;
+        String sid = b.getStreamId();
+        if (sid != null && !sid.isEmpty()) score += 4;          // 服务器身份最权威
+        String artist = b.getArtist();
+        if (artist != null && !artist.isEmpty() && !"未知艺术家".equals(artist)) score += 2;
+        String title = b.getTitle();
+        String data = b.getData();
+        String fname = "";
+        if (data != null && !data.isEmpty()) {
+            int idx = data.lastIndexOf('/');
+            fname = idx >= 0 ? data.substring(idx + 1) : data;
+            int dot = fname.lastIndexOf('.');
+            if (dot > 0) fname = fname.substring(0, dot);
+        }
+        if (title != null && !title.isEmpty() && !title.equals(fname)) score += 1; // 真实标题优于"文件名当标题"
+        return score;
     }
 
     /** 计算去重键(见 dedupeMusicList 说明) */
     private String getDedupKey(MusicBean b) {
         if (b == null) return "";
+        // 1. 服务器身份(最权威)
         String sid = b.getStreamId();
         if (sid != null && !sid.isEmpty()) {
             return "net_" + sid;
         }
+        // 2. 磁盘身份:同一文件规范化路径必一致 —— 主要去重依据
+        String data = b.getData();
+        if (data != null && !data.isEmpty()) {
+            String cp = MusicScanner.normalizePath(data);
+            if (!cp.isEmpty()) {
+                return "path_" + cp;
+            }
+        }
+        // 3. 兜底:无路径时用 艺术家|专辑|标题|文件名 折叠
         String artist = b.getArtist() != null ? b.getArtist() : "";
         String album = b.getAlbum() != null ? b.getAlbum() : "";
         String title = b.getTitle() != null ? b.getTitle() : "";
         String fname = "";
-        String data = b.getData();
         if (data != null && !data.isEmpty()) {
             int idx = data.lastIndexOf('/');
             fname = idx >= 0 ? data.substring(idx + 1) : data;
         }
-        return "local_" + artist + "|" + album + "|" + title + "|" + fname;
+        return "meta_" + artist + "|" + album + "|" + title + "|" + fname;
     }
 
     /**
@@ -2875,6 +2929,22 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
+                        // 防竞态:同步期间 refreshSyncList 可能被并发触发多次(每批下载 + 完成各一次),
+                        // 多个后台扫描会对着同一份尚未更新的 musicList 各自算出重叠的 toAdd,
+                        // 导致同一文件被 addAll 两遍。这里在 UI 线程用"最新的 musicList"再过滤一次。
+                        {
+                            java.util.Set<String> livePaths = new java.util.HashSet<String>();
+                            for (MusicBean b : musicList) {
+                                String p = MusicScanner.normalizePath(b.getData());
+                                if (!p.isEmpty()) livePaths.add(p);
+                            }
+                            java.util.Iterator<MusicBean> it = toAdd.iterator();
+                            while (it.hasNext()) {
+                                MusicBean b = it.next();
+                                String p = MusicScanner.normalizePath(b.getData());
+                                if (p.isEmpty() || livePaths.contains(p)) it.remove();
+                            }
+                        }
                         if (favoritesOnly) {
                             // 收藏夹模式:重新设置数据后重新过滤收藏
                             if (!toAdd.isEmpty()) {
