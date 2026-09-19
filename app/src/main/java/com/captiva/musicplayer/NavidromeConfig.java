@@ -22,6 +22,8 @@ public class NavidromeConfig {
     private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)
     private static final String KEY_PLAY_MODE = "play_mode"; // 播放模式(0=顺序,1=单曲循环,2=随机)
     private static final String KEY_SERVER_TYPE = "server_type"; // 服务器类型:navidrome / fnmusic
+    private static final String KEY_LOCAL_SCAN_PATH = "local_scan_path"; // 本地模式自定义扫描目录
+    private static final String KEY_LOCAL_MODE = "local_mode"; // 列表模式:true=本地列表,false=云端列表
     private static final String KEY_FNID = "fn_id";           // 原始 FN ID(用户填的,可为空)
     private static final String KEY_FN_RELAY = "fn_relay";    // 上次解析出的地址是否走飞牛中继
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
@@ -153,6 +155,33 @@ public class NavidromeConfig {
     /** 设置网络音乐同步下载目录 */
     public void setSyncPath(String path) {
         prefs.edit().putString(KEY_SYNC_PATH, path != null ? path.trim() : "").apply();
+    }
+
+    /**
+     * 本地模式扫描目录(本地列表的数据来源,与云端/同步目录相互独立)。
+     * 未设置时回退为同步目录(向后兼容:老用户本地列表 = 同步目录)。
+     */
+    public String getLocalScanPath() {
+        String path = prefs.getString(KEY_LOCAL_SCAN_PATH, "");
+        if (path == null || path.isEmpty()) {
+            return getSyncPath();
+        }
+        return path;
+    }
+
+    /** 设置本地模式扫描目录;传空串表示回退为同步目录 */
+    public void setLocalScanPath(String path) {
+        prefs.edit().putString(KEY_LOCAL_SCAN_PATH, path != null ? path.trim() : "").apply();
+    }
+
+    /** 列表模式:true=本地列表(扫描本地目录),false=云端列表(云端歌单,默认) */
+    public boolean isLocalMode() {
+        return prefs.getBoolean(KEY_LOCAL_MODE, false);
+    }
+
+    /** 设置列表模式(持久化,下次启动保持) */
+    public void setLocalMode(boolean local) {
+        prefs.edit().putBoolean(KEY_LOCAL_MODE, local).apply();
     }
 
     /** 判断是否已配置完整的服务器信息 */

@@ -33,7 +33,9 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private static final String HINT_FN = "FN ID(如 k495378412)或 http://192.168.1.100:5666";
     private static final String HINT_NAVIDROME = "http://192.168.1.100:4533";
 
-    private EditText etUrl, etUser, etPass, etSyncPath;
+    private EditText etUrl, etUser, etPass, etSyncPath, etLocalPath;
+    /** 目录选择器当前目标:false=同步目录,true=本地模式目录 */
+    private boolean pickingLocalPath = false;
     private TextView tvResult;
     private Button btnTest, btnSave, btnBack;
     private RadioGroup rgServerType;
@@ -53,6 +55,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         etUser = findViewById(R.id.et_username);
         etPass = findViewById(R.id.et_password);
         etSyncPath = findViewById(R.id.et_sync_path);
+        etLocalPath = findViewById(R.id.et_local_path);
         tvResult = findViewById(R.id.tv_test_result);
         btnTest = findViewById(R.id.btn_test);
         btnSave = findViewById(R.id.btn_save);
@@ -117,8 +120,21 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
         // 点击同步路径输入框 → 弹出目录选择器(含手动输入选项)
         etSyncPath.setOnClickListener(v -> {
+            pickingLocalPath = false;
             showDirectoryPicker();
         });
+        // 点击本地路径输入框 → 同款目录选择器,目标为本地模式目录
+        etLocalPath.setOnClickListener(v -> {
+            pickingLocalPath = true;
+            showDirectoryPicker();
+        });
+        // 回填本地模式目录(留空表示默认与同步目录相同,由 hint 提示)
+        String savedLocalPath = config.getLocalScanPath();
+        String syncPathDefault = config.getSyncPath();
+        if (savedLocalPath != null && !savedLocalPath.isEmpty()
+                && !savedLocalPath.equals(syncPathDefault)) {
+            etLocalPath.setText(savedLocalPath);
+        }
     }
 
     // ==================== 目录选择器 ====================
@@ -197,7 +213,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         String[] labels = quickLabels.toArray(new String[0]);
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("选择同步目录");
+        builder.setTitle(pickingLocalPath ? "选择本地目录" : "选择同步目录");
         builder.setItems(labels, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
@@ -206,7 +222,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
                 } else if (which == quickLabels.size() - 2) {
                     showManualPathInput();
                 } else {
-                    setSyncPath(quickPaths.get(which));
+                    applyPickedPath(quickPaths.get(which));
                 }
             }
         });
@@ -218,7 +234,12 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private void showManualPathInput() {
         final EditText etInput = new EditText(this);
         etInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
-        String currentPath = etSyncPath.getText().toString().trim();
+        String currentPath;
+        if (pickingLocalPath) {
+            currentPath = etLocalPath.getText().toString().trim();
+        } else {
+            currentPath = etSyncPath.getText().toString().trim();
+        }
         if (currentPath.isEmpty()) {
             currentPath = Environment.getExternalStorageDirectory()
                     .getAbsolutePath() + "/CaptivaMusic";
@@ -232,7 +253,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         etInput.setBackgroundResource(R.drawable.bg_search);
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("手动输入同步目录");
+        builder.setTitle(pickingLocalPath ? "手动输入本地目录" : "手动输入同步目录");
         builder.setMessage("请输入完整的目录路径\n路径必须以 / 开头");
         builder.setView(etInput);
         builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
@@ -249,7 +270,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
                             "路径必须以 / 开头", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                setSyncPath(path);
+                applyPickedPath(path);
             }
         });
         builder.setNegativeButton("取消", null);
@@ -296,7 +317,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 if (which == 0) {
-                    setSyncPath(startDir.getAbsolutePath());
+                    applyPickedPath(startDir.getAbsolutePath());
                 } else if (which == 1 && parent != null && parent.canRead()) {
                     showDirectoryBrowser(parent);
                 } else {
@@ -324,6 +345,26 @@ public class ServerSettingsActivity extends AppCompatActivity {
             dir.mkdirs();
         }
         Toast.makeText(this, "已设置同步目录: " + path, Toast.LENGTH_LONG).show();
+    }
+
+    /** 目录选择器统一落点:按当前目标写入 同步目录 或 本地目录 */
+    private void applyPickedPath(String path) {
+        if (pickingLocalPath) {
+            setLocalScanTarget(path);
+        } else {
+            setSyncPath(path);
+        }
+    }
+
+    /** 设置本地模式目录:立即持久化 + 更新UI */
+    private void setLocalScanTarget(String path) {
+        config.setLocalScanPath(path);  // 立即保存到 SharedPreferences
+        etLocalPath.setText(path);
+        File dir = new File(path);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        Toast.makeText(this, "已设置本地目录: " + path, Toast.LENGTH_LONG).show();
     }
 
     // ==================== 测试连接 ====================

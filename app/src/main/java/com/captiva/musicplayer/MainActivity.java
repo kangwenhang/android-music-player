@@ -341,6 +341,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         navidromeConfig = new NavidromeConfig(this);
+        // 恢复上次的列表模式(true=本地列表,false=云端列表)
+        localOnlyMode = navidromeConfig.isLocalMode();
         localMusicCache = new LocalMusicCache(this);
         favoriteManager = new FavoriteManager(this);
         lyricOffsetManager = new LyricOffsetManager(this);
@@ -428,6 +430,8 @@ public class MainActivity extends AppCompatActivity {
         btnSettings = findViewById(R.id.btn_settings);
         btnFavorites = findViewById(R.id.btn_favorites);
         btnSourceToggle = findViewById(R.id.btn_source_toggle);
+        // 按持久化的模式设置按钮外观(云端/本地)
+        updateSourceToggleUi();
         btnEq = findViewById(R.id.btn_eq);
         tvServerStatus = findViewById(R.id.tv_server_status);
         tvNowTitle = findViewById(R.id.tv_now_title);
@@ -762,10 +766,11 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 本地/云端切换:云端=云端歌单全部(已下载本地播,未下载联网播);本地=仅已下载的歌。
-        // 每次切换都重建列表,顺带把后台同步刚下载完成的歌刷新为本地播。
+        // 本地/云端切换:云端=云端歌单(已下载本地播,未下载联网播);本地=扫描本地目录的全部歌曲。
+        // 两个列表相互独立,各有各的数据来源与缓存;模式持久化,下次启动保持。
         btnSourceToggle.setOnClickListener(v -> {
             localOnlyMode = !localOnlyMode;
+            navidromeConfig.setLocalMode(localOnlyMode);
             updateSourceToggleUi();
             applySourceMode();
         });
@@ -2304,9 +2309,8 @@ public class MainActivity extends AppCompatActivity {
      */
     private void loadMusic() {
         final String syncPath = navidromeConfig.getSyncPath();
-
-        // 设置扫描路径为同步目录
-        navidromeConfig.setScanPath(syncPath);
+        // 本地模式扫描目录(可在设置中自定义;未设置时与同步目录相同)
+        final String localDir = navidromeConfig.getLocalScanPath();
 
         // 性能日志:仅调试版(BuildConfig.DEBUG)开启,自动写入 perf_log.txt 用于分析卡顿
         if (BuildConfig.DEBUG) {
@@ -2323,9 +2327,11 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // 0. 云端为主(纯镜像):列表以云端歌单(SongCache 离线缓存)为准,
+                // 0. 云端模式:列表以云端歌单(SongCache 离线缓存)为准,
                 //    每首歌按固定本地路径判断是否在本地,决定本地播还是联网播。
-                //    列表只有云端一份枚举,重复在结构上不存在;本地扫描仅作回退。
+                //    列表只有云端一份枚举,重复在结构上不存在。
+                //    本地模式(localOnlyMode)跳过此分支,走下方本地扫描流程。
+                if (!localOnlyMode) {
                 final String serverType = navidromeConfig.getServerType();
                 List<MusicBean> cloudList = buildCloudDrivenList(serverType, syncPath);
                 if (cloudList != null && !cloudList.isEmpty()) {
@@ -2363,8 +2369,9 @@ public class MainActivity extends AppCompatActivity {
                     });
                     return;
                 }
+                } // end if (!localOnlyMode)
 
-                // ---- 云端列表不可用(无缓存/未同步/未配置):回退本地扫描,保证不空白 ----
+                // ---- 本地模式,或云端列表不可用(无缓存/未同步/未配置):走本地扫描 ----
                 // 0. 优先从本地缓存加载(秒开,完全不读U盘)
                 List<MusicBean> cachedList = localMusicCache.load();
                 if (cachedList != null && !cachedList.isEmpty()) {
@@ -2406,7 +2413,7 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 // 1. 无缓存:用 MediaStore 快速加载(后台线程,不阻塞UI)
-                final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(MainActivity.this, syncPath);
+                final List<MusicBean> quickList = MusicScanner.scanMediaStoreOnly(MainActivity.this, localDir);
 
                 handler.post(new Runnable() {
                     @Override
@@ -2437,7 +2444,7 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         // 2. 后台递归扫描补全 + 同步
-                        backgroundScanAndMerge(syncPath, quickList, false);
+                        backgroundScanAndMerge(localDir, quickList, false);
                     }
                 });
             }
@@ -2494,41 +2501,38 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 按当前模式重建列表(后台算本地可用性,主线程刷新):
-     * 云端模式 = 云端歌单全部(已下载的本地播,未下载的联网播);
-     * 本地模式 = 仅已下载到本地的歌。
-     * 每次切换都重新执行 buildCloudDrivenList,顺带把后台同步刚下载完成的歌刷新为本地播,
-     * 解决"同步完成后需重开才生效"的问题。播放队列不动,当前歌曲继续播。
+     * 按当前模式重建列表(后台构建,主线程刷新)。两个列表相互独立:
+     * 云端模式 = 云端歌单全部(已下载的本地播,未下载的联网播),来源 SongCache;
+     * 本地模式 = 扫描本地自定义目录的全部歌曲(与云端无关),来源本地扫描,缓存 local_songs.json。
+     * 播放队列不动,当前歌曲继续播。
      */
     private void applySourceMode() {
         final String syncPath = navidromeConfig.getSyncPath();
+        final String localDir = navidromeConfig.getLocalScanPath();
         final String serverType = navidromeConfig.getServerType();
         final boolean toLocal = localOnlyMode;
         new Thread(new Runnable() {
             @Override
             public void run() {
-                List<MusicBean> list = buildCloudDrivenList(serverType, syncPath);
-                if (list == null) {
-                    // 云端不可用:回退按钮状态并提示
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            localOnlyMode = !toLocal;
-                            updateSourceToggleUi();
-                            Toast.makeText(MainActivity.this,
-                                    "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                    return;
-                }
+                List<MusicBean> list;
                 if (toLocal) {
-                    List<MusicBean> localOnly = new ArrayList<>();
-                    for (MusicBean b : list) {
-                        if (b != null && !b.isNetwork()) {
-                            localOnly.add(b);
-                        }
+                    // 本地模式:扫描本地目录的全部歌曲(与云端无关)
+                    list = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
+                } else {
+                    list = buildCloudDrivenList(serverType, syncPath);
+                    if (list == null) {
+                        // 云端不可用:回退按钮状态并提示
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                localOnlyMode = !toLocal;
+                                updateSourceToggleUi();
+                                Toast.makeText(MainActivity.this,
+                                        "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                        return;
                     }
-                    list = localOnly;
                 }
                 java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
                 final List<MusicBean> finalList = list;
@@ -2549,10 +2553,14 @@ public class MainActivity extends AppCompatActivity {
                         if (musicList.isEmpty()) {
                             tvEmpty.setVisibility(View.VISIBLE);
                             tvEmpty.setText(toLocal
-                                    ? "本地还没有已下载的歌曲\n切到\"云端\"查看全部歌曲"
+                                    ? "本地目录没有找到歌曲\n可在设置中自定义本地模式目录"
                                     : "未找到音乐\n请在设置中配置服务器并同步");
                         } else {
                             tvEmpty.setVisibility(View.GONE);
+                        }
+                        // 本地模式:保存本地扫描缓存(local_songs.json,与云端缓存隔离)
+                        if (toLocal) {
+                            localMusicCache.forceSaveAsync(musicList);
                         }
                         updatePlayingHighlight();
                     }
@@ -2562,12 +2570,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 手动刷新歌曲列表:云端为主 —— 重新执行云端列表构建(已下载→本地播,未下载→联网播),
-     * 顺带把后台同步刚下载完成的歌刷新为本地播;同时触发一次后台同步刷新云端缓存(发现新歌)。
-     * 云端不可用(无缓存/未同步/未配置)时回退为本地扫描,保证界面不空白。
+     * 手动刷新歌曲列表:按当前模式刷新对应列表。
+     * 本地模式 = 重新扫描本地自定义目录(全部歌曲,缓存 local_songs.json);
+     * 云端模式 = 重新执行云端列表构建(已下载→本地播,未下载→联网播),
+     *            并触发一次后台同步刷新云端缓存(发现新歌);
+     *            云端不可用(无缓存/未同步/未配置)时回退为本地扫描,保证界面不空白。
      */
     private void refreshMusicList() {
         final String syncPath = navidromeConfig.getSyncPath();
+        final String localDir = navidromeConfig.getLocalScanPath();
         if (syncPath == null || syncPath.isEmpty()) {
             Toast.makeText(this, "未配置扫描目录", Toast.LENGTH_SHORT).show();
             return;
@@ -2580,18 +2591,10 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                // ---- 云端为主:重新构建云端列表(按当前 本地/云端 模式过滤) ----
+                // ---- 云端模式:重新构建云端列表(本地模式跳过,走下方本地重扫) ----
+                if (!localOnlyMode) {
                 List<MusicBean> cloudList = buildCloudDrivenList(navidromeConfig.getServerType(), syncPath);
                 if (cloudList != null) {
-                    if (localOnlyMode) {
-                        List<MusicBean> localOnly = new ArrayList<>();
-                        for (MusicBean b : cloudList) {
-                            if (b != null && !b.isNetwork()) {
-                                localOnly.add(b);
-                            }
-                        }
-                        cloudList = localOnly;
-                    }
                     java.util.Collections.sort(cloudList, MusicTitleComparator.INSTANCE);
                     final List<MusicBean> finalList = cloudList;
                     runOnUiThread(new Runnable() {
@@ -2663,10 +2666,11 @@ public class MainActivity extends AppCompatActivity {
                     startBackgroundSync();
                     return;
                 }
+                } // end if (!localOnlyMode)
 
-                // ---- 云端不可用:回退本地扫描(原逻辑) ----
-                // 完整扫描U盘目录
-                final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
+                // ---- 本地模式,或云端不可用:本地扫描(原逻辑,扫本地自定义目录) ----
+                // 完整扫描本地目录
+                final List<MusicBean> fullList = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
 
                 // 排序
                 java.util.Collections.sort(fullList, MusicTitleComparator.INSTANCE);
@@ -3184,8 +3188,9 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                navidromeConfig.setScanPath(syncPath);
-                final List<MusicBean> newList = MusicScanner.scan(MainActivity.this);
+                // 只扫同步目录(新下载文件落在这里);不再覆写 scan_path 配置
+                // (scan_path 已归"本地模式目录"所有,见 NavidromeConfig.getLocalScanPath)
+                final List<MusicBean> newList = MusicScanner.scanDirectoryOnly(MainActivity.this, syncPath);
 
                 // 计算新增的歌曲(用规范化路径去重,消除符号链接差异)
                 final List<MusicBean> toAdd = new ArrayList<>();
