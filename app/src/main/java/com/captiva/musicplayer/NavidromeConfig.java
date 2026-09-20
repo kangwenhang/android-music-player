@@ -26,6 +26,9 @@ public class NavidromeConfig {
     private static final String KEY_LOCAL_MODE = "local_mode"; // 列表模式:true=本地列表,false=云端列表
     private static final String KEY_FNID = "fn_id";           // 原始 FN ID(用户填的,可为空)
     private static final String KEY_FN_RELAY = "fn_relay";    // 上次解析出的地址是否走飞牛中继
+    private static final String KEY_AUTO_CACHE_ON_PLAY = "auto_cache_on_play"; // 播放时自动缓存
+    private static final String KEY_AUTO_CACHE_WIFI_ONLY = "auto_cache_wifi_only"; // 自动缓存仅限Wi-Fi
+    private static final String KEY_AUTO_CACHE_MAX_MB = "auto_cache_max_mb"; // 自动缓存上限(MB)
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;

@@ -7,6 +7,7 @@ import android.os.Environment;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
@@ -64,6 +65,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
         rgServerType = findViewById(R.id.rg_server_type);
         rbTypeNavidrome = findViewById(R.id.rb_type_navidrome);
         rbTypeFnMusic = findViewById(R.id.rb_type_fnmusic);
+        cbAutoCache = findViewById(R.id.cb_auto_cache);
+        cbAutoCacheWifi = findViewById(R.id.cb_auto_cache_wifi);
 
         // 回填服务器类型
         if (MusicSourceFactory.TYPE_FNMUSIC.equals(config.getServerType())) {

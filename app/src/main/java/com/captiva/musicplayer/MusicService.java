@@ -14,6 +14,8 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.RemoteControlClient;
 import android.media.audiofx.Equalizer;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Build;
 import android.os.Binder;
 import android.os.IBinder;
