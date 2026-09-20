@@ -67,6 +67,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         rbTypeFnMusic = findViewById(R.id.rb_type_fnmusic);
         cbAutoCache = findViewById(R.id.cb_auto_cache);
         cbAutoCacheWifi = findViewById(R.id.cb_auto_cache_wifi);
+        etAutoCacheMax = findViewById(R.id.et_auto_cache_max);
 
         // 回填服务器类型
         if (MusicSourceFactory.TYPE_FNMUSIC.equals(config.getServerType())) {
