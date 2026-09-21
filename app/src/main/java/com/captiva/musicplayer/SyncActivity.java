@@ -51,7 +51,7 @@ public class SyncActivity extends AppCompatActivity {
         btnBack = findViewById(R.id.btn_back);
 
         // 显示同步路径
-        tvSyncPath.setText(config.getSyncPath());
+        tvSyncPath.setText(config.getCloudDir());
 
         // 统计已同步数量
         updateSyncedCount();
@@ -76,13 +76,13 @@ public class SyncActivity extends AppCompatActivity {
         super.onResume();
         hideSystemUI();
         // 更新同步路径(可能从设置修改过)
-        tvSyncPath.setText(config.getSyncPath());
+        tvSyncPath.setText(config.getCloudDir());
         updateSyncedCount();
     }
 
     /** 更新已同步文件数 */
     private void updateSyncedCount() {
-        int count = MusicSyncManager.countSyncedFiles(config.getSyncPath());
+        int count = MusicSyncManager.countSyncedFiles(config.getCloudDir());
         tvSyncedCount.setText("已同步: " + count + " 首");
     }
 
@@ -95,7 +95,7 @@ public class SyncActivity extends AppCompatActivity {
         }
 
         // 检查同步目录
-        String path = config.getSyncPath();
+        String path = config.getCloudDir();
         if (path == null || path.isEmpty()) {
             Toast.makeText(this, "请先设置同步目录", Toast.LENGTH_LONG).show();
             return;

@@ -898,7 +898,7 @@ public class MusicService extends Service {
         if (api == null || bean.getStreamId() == null || bean.getStreamId().isEmpty()) {
             return;
         }
-        final String syncPath = navidromeConfig.getSyncPath();
+        final String syncPath = navidromeConfig.getCloudDir();
         if (syncPath == null || syncPath.isEmpty()) {
             return;
         }

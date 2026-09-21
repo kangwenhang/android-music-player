@@ -3,6 +3,8 @@ package com.captiva.musicplayer;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.io.File;
+
 /**
  * 应用配置管理
  * 使用 SharedPreferences 存储服务器地址、用户名、密码、时长过滤等设置
@@ -140,18 +142,50 @@ public class NavidromeConfig {
     }
 
     /**
-     * 获取网络音乐同步下载目录
-     * 网络模式会把服务器所有音乐下载到此目录,然后从本地播放
-     * 空表示使用默认路径(外部存储/CaptivaMusic)
+     * 获取音乐根目录(本地与云端共用的父目录)。
+     * 云端歌曲存放在根目录下的服务器子目录(getCloudDir),本地歌曲存放在 getLocalScanPath(),
+     * 二者互不串味。空表示使用默认路径(外部存储/Music)。
      */
     public String getSyncPath() {
         String path = prefs.getString(KEY_SYNC_PATH, "");
         if (path == null || path.isEmpty()) {
-            // 默认路径
+            // 默认路径(父目录;云端/本地各占其下的子目录)
             path = android.os.Environment.getExternalStorageDirectory()
-                    .getAbsolutePath() + "/CaptivaMusic";
+                    .getAbsolutePath() + "/Music";
         }
         return path;
+    }
+
+    /**
+     * 云端歌曲实际存储目录:在共享父目录(getSyncPath)下,按服务器类型派生的子目录。
+     * - 飞牛(fn音乐): "飞牛"
+     * - Navidrome 及其他: "na" + 服务器地址 3 位哈希(如 na3f9),多服务器自动隔离。
+     * 本地歌曲走 getLocalScanPath()(根目录/本地文件夹),与云端子目录相互独立。
+     */
+    public String getCloudDir() {
+        return new File(getSyncPath(), getCloudSubfolder()).getAbsolutePath();
+    }
+
+    /** 根据服务器类型派生云端子目录名(文件系统安全、同一服务器稳定) */
+    private String getCloudSubfolder() {
+        String type = getServerType();
+        if (MusicSourceFactory.TYPE_FNMUSIC.equals(type)) {
+            return "飞牛";
+        }
+        // NAVIDROME 及其他:na + 服务器地址 3 位十六进制哈希,保证多服务器互不重叠
+        return "na" + shortHash(getServerUrl());
+    }
+
+    /** 对字符串做稳定的 3 位十六进制哈希(取低 12 位),用于云端子目录名 */
+    private static String shortHash(String s) {
+        if (s == null) {
+            s = "";
+        }
+        // 去掉协议头与末尾斜杠,统一大小写,避免同服务器不同写法生成不同目录
+        String norm = s.replaceFirst("^[Hh][Tt][Tt][Pp][Ss]?://", "")
+                .replaceAll("/+$", "").toLowerCase();
+        int h = norm.hashCode();
+        return String.format("%03x", h & 0xFFF);
     }
 
     /** 设置网络音乐同步下载目录 */
@@ -160,13 +194,13 @@ public class NavidromeConfig {
     }
 
     /**
-     * 本地模式扫描目录(本地列表的数据来源,与云端/同步目录相互独立)。
-     * 未设置时回退为同步目录(向后兼容:老用户本地列表 = 同步目录)。
+     * 本地模式扫描目录(本地列表的数据来源,与云端子目录相互独立)。
+     * 未设置时回退为 根目录/本地文件夹(本地歌曲统一放在此处,与云端歌曲分家)。
      */
     public String getLocalScanPath() {
         String path = prefs.getString(KEY_LOCAL_SCAN_PATH, "");
         if (path == null || path.isEmpty()) {
-            return getSyncPath();
+            return getSyncPath() + "/本地文件夹";
         }
         return path;
     }

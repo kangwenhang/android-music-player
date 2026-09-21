@@ -2323,8 +2323,8 @@ public class MainActivity extends AppCompatActivity {
      * 注意:缓存加载和 MediaStore 扫描都在后台线程,避免阻塞主线程导致点击无响应
      */
     private void loadMusic() {
-        final String syncPath = navidromeConfig.getSyncPath();
-        // 本地模式扫描目录(可在设置中自定义;未设置时与同步目录相同)
+        final String syncPath = navidromeConfig.getCloudDir();
+        // 本地模式扫描目录(可在设置中自定义;未设置时 = 根目录/本地文件夹)
         final String localDir = navidromeConfig.getLocalScanPath();
 
         // 性能日志:仅调试版(BuildConfig.DEBUG)开启,自动写入 perf_log.txt 用于分析卡顿
@@ -2522,7 +2522,7 @@ public class MainActivity extends AppCompatActivity {
      * 播放队列不动,当前歌曲继续播。
      */
     private void applySourceMode() {
-        final String syncPath = navidromeConfig.getSyncPath();
+        final String syncPath = navidromeConfig.getCloudDir();
         final String localDir = navidromeConfig.getLocalScanPath();
         final String serverType = navidromeConfig.getServerType();
         final boolean toLocal = localOnlyMode;
@@ -2592,7 +2592,7 @@ public class MainActivity extends AppCompatActivity {
      *            云端不可用(无缓存/未同步/未配置)时回退为本地扫描,保证界面不空白。
      */
     private void refreshMusicList() {
-        final String syncPath = navidromeConfig.getSyncPath();
+        final String syncPath = navidromeConfig.getCloudDir();
         final String localDir = navidromeConfig.getLocalScanPath();
         if (syncPath == null || syncPath.isEmpty()) {
             Toast.makeText(this, "未配置扫描目录", Toast.LENGTH_SHORT).show();
@@ -3035,8 +3035,13 @@ public class MainActivity extends AppCompatActivity {
         if (isAutoSyncing) {
             return; // 已在同步中
         }
+        // 本地模式下不触发云端后台同步:本地列表与云端目录相互独立,
+        // 避免本地浏览时仍去连服务器/写云端子目录,造成切换不协调。
+        if (localOnlyMode) {
+            return;
+        }
 
-        final String syncPath = navidromeConfig.getSyncPath();
+        final String syncPath = navidromeConfig.getCloudDir();
 
         // 切到主线程执行(startAutoSync 内部操作了 UI 控件)
         runOnUiThread(new Runnable() {
@@ -3197,7 +3202,7 @@ public class MainActivity extends AppCompatActivity {
      * 重新扫描同步目录,将新下载的文件加入列表
      */
     private void refreshSyncList() {
-        final String syncPath = navidromeConfig.getSyncPath();
+        final String syncPath = navidromeConfig.getCloudDir();
         if (syncPath == null || syncPath.isEmpty()) return;
 
         new Thread(new Runnable() {

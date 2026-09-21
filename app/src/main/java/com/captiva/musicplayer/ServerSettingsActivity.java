@@ -103,7 +103,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         // 显示同步路径(如果是默认路径,也显示出来)
         String syncPath = config.getSyncPath();
         String defaultPath = Environment.getExternalStorageDirectory()
-                .getAbsolutePath() + "/CaptivaMusic";
+                .getAbsolutePath() + "/Music";
         if (syncPath.isEmpty() || syncPath.equals(defaultPath)) {
             etSyncPath.setText(defaultPath);
         } else {
@@ -157,7 +157,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
 
         // 默认路径
         String defaultPath = Environment.getExternalStorageDirectory()
-                .getAbsolutePath() + "/CaptivaMusic";
+                .getAbsolutePath() + "/Music";
         quickPaths.add(defaultPath);
         quickLabels.add("默认目录: " + defaultPath);
 
@@ -250,7 +250,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         }
         if (currentPath.isEmpty()) {
             currentPath = Environment.getExternalStorageDirectory()
-                    .getAbsolutePath() + "/CaptivaMusic";
+                    .getAbsolutePath() + "/Music";
         }
         etInput.setText(currentPath);
         etInput.setSelection(currentPath.length());
