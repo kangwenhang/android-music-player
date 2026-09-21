@@ -74,6 +74,8 @@ public class PerfLogger {
             Log.w(TAG, "context 为空,性能日志不可用");
             return;
         }
+        // 同步打印到 logcat,便于 'adb logcat -s PerfLogger' 直接看到初始化结果(无需先找文件)
+        Log.i(TAG, "init() 调用, syncPath=" + syncPath);
         File dir;
         if (syncPath != null && !syncPath.isEmpty()) {
             dir = new File(syncPath);
@@ -91,6 +93,7 @@ public class PerfLogger {
                 Log.w(TAG, "无法删除旧日志文件,将追加写入");
             }
             enabled = true;
+            Log.i(TAG, "init 成功, 日志文件: " + (logFile != null ? logFile.getAbsolutePath() : "null"));
             log("=== PerfLogger 初始化(调试版),日志文件: " + logFile.getAbsolutePath() + " ===");
             log("设备信息: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
                     + " Android " + android.os.Build.VERSION.RELEASE
@@ -125,6 +128,13 @@ public class PerfLogger {
                 : elapsedMs > OP_WARN_MS ? " ⚠️" : "";
         String entry = time + " [" + tag + "] " + elapsedMs + "ms" + flag;
         enqueue(entry);
+        // 同步镜像到 logcat:严重(🔴)>16ms 用 Log.e,告警(⚠️)>8ms 用 Log.w,
+        // 这样即使文件没找到,也能在 'adb logcat -s PerfLogger' 实时看到关键耗时
+        if (elapsedMs > OP_SEVERE_MS) {
+            Log.e(TAG, "[" + tag + "] " + elapsedMs + "ms 🔴");
+        } else if (elapsedMs > OP_WARN_MS) {
+            Log.w(TAG, "[" + tag + "] " + elapsedMs + "ms ⚠️");
+        }
     }
 
     /** 记录一条普通日志(无耗时) */

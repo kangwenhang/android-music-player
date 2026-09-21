@@ -1,6 +1,9 @@
 package com.captiva.musicplayer;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -11,8 +14,11 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.DiffUtil;
 
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -63,6 +69,21 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 是否正在加载更多(防止重复触发) */
     private boolean isLoading = false;
 
+    // ===== 异步过滤 / DiffUtil 增量刷新相关字段 =====
+    // 过滤遍历 + Diff 计算放到后台单线程,避免主线程遍历几百上千首导致掉帧
+    private final ExecutorService filterExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    /** 过滤请求代际:每次新请求 +1,过期的异步结果直接丢弃,避免旧结果覆盖新结果 */
+    private int filterGeneration = 0;
+    /** 当前过滤模式:false=普通搜索过滤,true=仅收藏 */
+    private boolean favoritesMode = false;
+    /** 收藏过滤使用的 FavoriteManager(异步计算时需要) */
+    private FavoriteManager pendingFm = null;
+    /** 防抖窗口:相同签名的过滤请求在此窗口内合并,避免输入/滑动抖动引发主线程重复刷新 */
+    private static final long FILTER_DEBOUNCE_MS = 120;
+    private String lastFilterSignature = "";
+    private long lastFilterSubmitTime = 0;
+
     // 缓存颜色和尺寸(避免每次 onBindViewHolder 重复查询 Resources)
     private final int colorPlayingBg;
     private final int colorListItemBg;
@@ -105,8 +126,16 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /**
      * 设置完整数据(主线程调用)
      * 替换 fullData,重建 filteredData,加载第一批到 data
+     * 使用 DiffUtil 增量刷新(只重绑变化行),替代 notifyDataSetChanged
      */
     public synchronized void setData(List<MusicBean> list) {
+        // 标记代际,使任何在途的异步过滤结果失效,避免覆盖本次新数据
+        filterGeneration++;
+        // 重置防抖签名,避免重载后一次相同关键词过滤被误判为重复而跳过
+        lastFilterSignature = "";
+        // 重新载入完整列表时回到普通模式(历史行为:setData 不应用收藏过滤)
+        favoritesMode = false;
+        pendingFm = null;
         fullData.clear();
         fullDataKeys.clear();
         if (list != null) {
@@ -119,8 +148,24 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             }
         }
         loadedCount = 0;
+        List<MusicBean> oldData = new ArrayList<>(data);
+        FilterResult r = computeFilteredUnsafe(favoritesMode, pendingFm);
         data.clear();
-        applyFilterAndLoadFirstBatch();
+        data.addAll(r.firstBatch);
+        filteredData.clear();
+        filteredData.addAll(r.filtered);
+        loadedCount = r.loadCount;
+        hasMore = loadedCount < filteredData.size();
+        long t0 = System.currentTimeMillis();
+        DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new FilterDiffCallback(oldData, r.firstBatch), false);
+        diff.dispatchUpdatesTo(this);
+        long elapsed = System.currentTimeMillis() - t0;
+        Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
+                + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
+        if (PerfLogger.isEnabled()) {
+            PerfLogger.log("setData", "fullData=" + fullData.size() + " filtered=" + r.filtered.size()
+                    + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
+        }
     }
 
     /**
@@ -175,21 +220,21 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return b.getCachedKey();
     }
 
-    /** 搜索过滤(主线程) */
-    public synchronized void filter(String keyword) {
-        long t0 = System.currentTimeMillis();
-        String oldKeyword = filterKeyword;
-        filterKeyword = keyword == null ? "" : keyword.trim().toLowerCase();
-        loadedCount = 0;
-        data.clear();
-        applyFilterAndLoadFirstBatch();
-        long elapsed = System.currentTimeMillis() - t0;
-        Log.i(TAG, "[filter] keyword='" + filterKeyword + "' fullData=" + fullData.size()
-                + " filtered=" + filteredData.size() + " loaded=" + loadedCount + " " + elapsed + "ms");
-        if (PerfLogger.isEnabled()) {
-            PerfLogger.log("filter", "keyword='" + filterKeyword + "' fullData=" + fullData.size()
-                    + " filtered=" + filteredData.size() + " " + elapsed + "ms");
+    /** 搜索过滤(主线程入口,遍历/diff 在后台线程执行) */
+    public void filter(String keyword) {
+        String kw = keyword == null ? "" : keyword.trim().toLowerCase();
+        filterKeyword = kw; // 立即更新,保证 matchesFilter 一致性(后台线程会读取)
+        // 防抖:相同签名且窗口内重复提交 → 跳过(典型场景:空关键词连续触发 / 输入抖动)
+        String signature = "f:" + kw;
+        long now = System.currentTimeMillis();
+        if (signature.equals(lastFilterSignature) && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
+            Log.d(TAG, "[filter] 防抖跳过重复请求 keyword='" + kw + "'");
+            return;
         }
+        lastFilterSignature = signature;
+        lastFilterSubmitTime = now;
+        Log.i(TAG, "[filter] 提交异步过滤 keyword='" + kw + "' fullData=" + fullData.size());
+        requestFilter(false, null);
     }
 
     /**
@@ -205,7 +250,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 只按歌名和歌手匹配,不搜专辑名(避免误匹配)
      */
     private boolean matchesFilter(MusicBean b) {
-        if (filterKeyword.isEmpty()) {
+        if (TextUtils.isEmpty(filterKeyword)) {
             return true;
         }
         // 使用缓存的小写值,避免每次过滤都对 810 首歌调用 toLowerCase()
@@ -213,70 +258,139 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     }
 
     /**
-     * 只显示收藏的歌曲(主线程)
+     * 只显示收藏的歌曲(主线程入口)
      * 同时应用当前搜索关键词过滤(如果有的话)
+     * 遍历/diff 在后台线程执行,主线程只做增量 dispatch
      */
-    public synchronized void filterFavorites(FavoriteManager fm) {
-        long t0 = System.currentTimeMillis();
-        loadedCount = 0;
-        data.clear();
-        filteredData.clear();
-        if (fm != null) {
-            for (MusicBean b : fullData) {
-                if (fm.isFavorite(b) && matchesFilter(b)) {
-                    filteredData.add(b);
+    public void filterFavorites(FavoriteManager fm) {
+        String signature = "v:" + filterKeyword;
+        long now = System.currentTimeMillis();
+        if (signature.equals(lastFilterSignature) && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
+            Log.d(TAG, "[filterFavorites] 防抖跳过重复请求");
+            return;
+        }
+        lastFilterSignature = signature;
+        lastFilterSubmitTime = now;
+        pendingFm = fm;
+        requestFilter(true, fm);
+    }
+
+    /**
+     * 提交一次过滤请求(异步):
+     * 后台线程遍历 fullData 计算过滤结果并计算 Diff,主线程只做增量 dispatchUpdatesTo,
+     * 避免 notifyDataSetChanged 触发全量重绑导致车机掉帧。
+     */
+    private void requestFilter(final boolean favMode, final FavoriteManager fm) {
+        final int gen = ++filterGeneration;
+        favoritesMode = favMode;
+        if (fm != null) pendingFm = fm;
+        final long t0 = System.currentTimeMillis();
+        filterExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                // 1. 后台线程:遍历 fullData 计算过滤结果(避免主线程遍历上千首)
+                final List<MusicBean> oldData;
+                final FilterResult r;
+                synchronized (MusicAdapter.this) {
+                    oldData = new ArrayList<>(data);
+                    r = computeFilteredUnsafe(favMode, fm);
+                }
+                // 2. 后台线程:计算 Diff(数据量小,通常 <1ms)
+                final DiffUtil.DiffResult diff =
+                        DiffUtil.calculateDiff(new FilterDiffCallback(oldData, r.firstBatch), false);
+                final long tCompute = System.currentTimeMillis() - t0;
+                // 3. 主线程:提交增量更新
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (gen != filterGeneration) {
+                            // 已被更新的过滤请求取代,丢弃本次结果
+                            return;
+                        }
+                        long t1 = System.currentTimeMillis();
+                        synchronized (MusicAdapter.this) {
+                            data.clear();
+                            data.addAll(r.firstBatch);
+                            filteredData.clear();
+                            filteredData.addAll(r.filtered);
+                            loadedCount = r.loadCount;
+                            hasMore = loadedCount < filteredData.size();
+                        }
+                        diff.dispatchUpdatesTo(MusicAdapter.this);
+                        long tSwap = System.currentTimeMillis() - t1;
+                        long elapsed = System.currentTimeMillis() - t0;
+                        Log.i(TAG, "[applyFilter-async] 遍历+diff=" + tCompute + "ms swap=" + tSwap + "ms"
+                                + " fullData=" + fullData.size() + " filtered=" + r.filtered.size()
+                                + " loaded=" + r.loadCount + " 总=" + elapsed + "ms");
+                        if (PerfLogger.isEnabled()) {
+                            PerfLogger.log("applyFilter", "遍历+diff=" + tCompute + "ms swap=" + tSwap + "ms"
+                                    + " fullData=" + fullData.size() + " filtered=" + r.filtered.size() + " " + elapsed + "ms");
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * 在持有 this 锁的前提下计算过滤结果(不自带锁,调用方必须同步)。
+     * 同时应用搜索关键词与(可选)收藏过滤。
+     */
+    private FilterResult computeFilteredUnsafe(boolean favMode, FavoriteManager fm) {
+        FilterResult r = new FilterResult();
+        r.filtered = new ArrayList<>();
+        for (MusicBean b : fullData) {
+            if (favMode) {
+                if (fm != null && fm.isFavorite(b) && matchesFilter(b)) {
+                    r.filtered.add(b);
+                }
+            } else {
+                if (matchesFilter(b)) {
+                    r.filtered.add(b);
                 }
             }
         }
-        long tFilter = System.currentTimeMillis() - t0;
-        // 加载第一批
-        int loadCount = Math.min(BATCH_SIZE, filteredData.size());
-        for (int i = 0; i < loadCount; i++) {
-            data.add(filteredData.get(i));
-        }
-        loadedCount = loadCount;
-        hasMore = loadedCount < filteredData.size();
-        long t1 = System.currentTimeMillis();
-        notifyDataSetChanged();
-        long tNotify = System.currentTimeMillis() - t1;
-        long elapsed = System.currentTimeMillis() - t0;
-        Log.i(TAG, "[filterFavorites] 遍历=" + tFilter + "ms notify=" + tNotify + "ms"
-                + " fullData=" + fullData.size() + " favorites=" + filteredData.size()
-                + " loaded=" + loadCount + " 总=" + elapsed + "ms");
-        if (PerfLogger.isEnabled()) {
-            PerfLogger.log("filterFavorites", "遍历=" + tFilter + "ms notify=" + tNotify + "ms"
-                    + " fullData=" + fullData.size() + " favorites=" + filteredData.size() + " " + elapsed + "ms");
-        }
+        r.loadCount = Math.min(BATCH_SIZE, r.filtered.size());
+        r.firstBatch = new ArrayList<>(r.filtered.subList(0, r.loadCount));
+        return r;
     }
 
-    /** 过滤并加载第一批(主线程) */
-    private void applyFilterAndLoadFirstBatch() {
-        long t0 = System.currentTimeMillis();
-        filteredData.clear();
-        for (MusicBean b : fullData) {
-            if (matchesFilter(b)) {
-                filteredData.add(b);
-            }
-        }
-        long tFilter = System.currentTimeMillis() - t0;
+    /** 过滤计算结果载体 */
+    private static class FilterResult {
+        List<MusicBean> filtered;   // 过滤后的完整列表
+        List<MusicBean> firstBatch; // 第一批(分批加载)要显示的列表
+        int loadCount;
+    }
 
-        // 加载第一批
-        int loadCount = Math.min(BATCH_SIZE, filteredData.size());
-        for (int i = 0; i < loadCount; i++) {
-            data.add(filteredData.get(i));
+    /**
+     * DiffUtil 回调:以 getCachedKey() 作为稳定身份。
+     * 内容视为相同(只有增/删/移动会被处理,未变化行不被重绑,避免掉帧);
+     * 播放高亮变化通过 setPlayingIndex → notifyItemChanged 单独刷新。
+     */
+    private static class FilterDiffCallback extends DiffUtil.Callback {
+        private final List<MusicBean> oldList;
+        private final List<MusicBean> newList;
+        FilterDiffCallback(List<MusicBean> oldList, List<MusicBean> newList) {
+            this.oldList = oldList;
+            this.newList = newList;
         }
-        loadedCount = loadCount;
-        hasMore = loadedCount < filteredData.size();
-        long t1 = System.currentTimeMillis();
-        notifyDataSetChanged();
-        long tNotify = System.currentTimeMillis() - t1;
-        long elapsed = System.currentTimeMillis() - t0;
-        Log.i(TAG, "[applyFilter] 遍历=" + tFilter + "ms notify=" + tNotify + "ms"
-                + " fullData=" + fullData.size() + " filtered=" + filteredData.size()
-                + " loaded=" + loadCount + " 总=" + elapsed + "ms");
-        if (PerfLogger.isEnabled()) {
-            PerfLogger.log("applyFilter", "遍历=" + tFilter + "ms notify=" + tNotify + "ms"
-                    + " fullData=" + fullData.size() + " filtered=" + filteredData.size() + " " + elapsed + "ms");
+        @Override
+        public int getOldListSize() { return oldList.size(); }
+        @Override
+        public int getNewListSize() { return newList.size(); }
+        @Override
+        public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
+            MusicBean a = oldList.get(oldItemPosition);
+            MusicBean b = newList.get(newItemPosition);
+            if (a == null || b == null) return false;
+            String ka = a.getCachedKey();
+            String kb = b.getCachedKey();
+            if (ka == null || kb == null) return false;
+            return ka.equals(kb);
+        }
+        @Override
+        public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
+            return areItemsTheSame(oldItemPosition, newItemPosition);
         }
     }
 
@@ -438,9 +552,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         this.favoriteManager = fm;
     }
 
-    /** 收藏状态变化后刷新列表显示 */
+    /** 收藏状态变化后刷新列表显示(增量 diff:仅收藏模式会增删行) */
     public void notifyFavoriteChanged() {
-        notifyDataSetChanged();
+        requestFilter(favoritesMode, pendingFm);
     }
 
     @NonNull
