@@ -25,6 +25,9 @@ public class MusicBean {
     /** 缓存的 song key,避免重复调用 getCanonicalPath()(文件系统 I/O) */
     private String cachedKey;
 
+    /** 缓存的规范化路径(即 normalizePath 的磁盘 I/O 结果),供 getCachedKey 与去重键共享,只算一次 */
+    private String cachedCanonicalPath;
+
     /** 缓存的小写标题(搜索过滤用,避免每次 toLowerCase 分配新字符串) */
     private String cachedLowerTitle;
     /** 缓存的小写艺术家(同上) */
@@ -170,14 +173,25 @@ public class MusicBean {
             if (network) {
                 cachedKey = "net_" + streamId;
             } else {
-                if (data != null && !data.isEmpty()) {
-                    cachedKey = "local_" + MusicScanner.normalizePath(data);
-                } else {
-                    cachedKey = "local_" + id;
-                }
+                String cp = getCachedCanonicalPath();
+                cachedKey = (cp != null && !cp.isEmpty()) ? "local_" + cp : "local_" + id;
             }
         }
         return cachedKey;
+    }
+
+    /**
+     * 缓存的规范化路径(等价于 MusicScanner.normalizePath(data) 的返回值)。
+     * getCanonicalPath() 是文件系统 I/O,车机约 0.3ms/次;810 首遍历一次 ≈ 243ms。
+     * 缓存后整条 bean 生命周期内只计算一次,getCachedKey() 与 MainActivity.getDedupKey()
+     * 共用此缓存,避免去重 + setData + filter 各触发一次磁盘 I/O。
+     */
+    public synchronized String getCachedCanonicalPath() {
+        if (cachedCanonicalPath == null) {
+            cachedCanonicalPath = (data != null && !data.isEmpty())
+                    ? MusicScanner.normalizePath(data) : "";
+        }
+        return cachedCanonicalPath;
     }
 
     /**

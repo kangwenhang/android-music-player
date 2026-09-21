@@ -493,6 +493,14 @@ public class MainActivity extends AppCompatActivity {
 
         adapter = new MusicAdapter(this);
         adapter.setFavoriteManager(favoriteManager);
+        // 异步过滤(搜索/收藏/去重)完成后,filteredData 才是最终态,这里刷新计数,
+        // 避免 "updateCount() 跑在 filter() 异步返回之前" 导致的统计数错误。
+        adapter.setOnFilterCompleteListener(new MusicAdapter.OnFilterCompleteListener() {
+            @Override
+            public void onFilterComplete() {
+                updateCount();
+            }
+        });
         adapter.setOnItemClickListener((position, bean) -> {
             if (service != null && bound) {
                 // service 已绑定:直接播放
@@ -590,6 +598,25 @@ public class MainActivity extends AppCompatActivity {
         adapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
             @Override
             public void onChanged() {
+                refreshIndexBar();
+            }
+            // DiffUtil 增量刷新走的是 range 回调(insert/remove/change/move),
+            // 不会触发 onChanged();必须在这里也重算索引条,否则 A-Z 字母栏在
+            // setData / 搜索 / 收藏过滤后不再刷新(表现为"字母滚动不见了")。
+            @Override
+            public void onItemRangeChanged(int positionStart, int itemCount) {
+                refreshIndexBar();
+            }
+            @Override
+            public void onItemRangeInserted(int positionStart, int itemCount) {
+                refreshIndexBar();
+            }
+            @Override
+            public void onItemRangeRemoved(int positionStart, int itemCount) {
+                refreshIndexBar();
+            }
+            @Override
+            public void onItemRangeMoved(int fromPosition, int toPosition, int itemCount) {
                 refreshIndexBar();
             }
         });
@@ -2550,14 +2577,16 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
-                final List<MusicBean> finalList = list;
+                // 去重放到后台线程:getDedupKey 首次触发 normalizePath(getCanonicalPath) 磁盘 I/O,
+                // 810 首约 240ms;放后台避免源模式切换瞬间主线程掉帧。bean 路径已缓存,
+                // 后续 setData / filter 直接复用缓存,不再重复 I/O。
+                final List<MusicBean> finalList = dedupeList(list);
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
                         musicList.clear();
                         musicList.addAll(finalList);
-                        dedupeMusicList();
-                        adapter.setData(musicList);
+                        adapter.setData(finalList);
                         // 重新应用收藏/搜索过滤,保持各过滤维度一致
                         if (favoritesOnly) {
                             applyFavoritesFilter();
@@ -2913,24 +2942,39 @@ public class MainActivity extends AppCompatActivity {
      */
     private void dedupeMusicList() {
         if (musicList == null || musicList.isEmpty()) return;
-        int removed = dedupeByKey(false);  // 第一层:同一文件(路径)合并
-        removed += dedupeByKey(true);      // 第二层:跨文件夹同名歌(标题+歌手+时长)合并
-        if (removed > 0) {
-            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
+        List<MusicBean> out = dedupeByList(musicList, false);  // 第一层:同一文件(路径)合并
+        out = dedupeByList(out, true);                          // 第二层:跨文件夹同名歌(标题+歌手+时长)合并
+        // 未发生变化时 dedupeByList 返回原引用,无需重写;否则写回去重结果
+        if (out != musicList) {
+            musicList.clear();
+            musicList.addAll(out);
         }
     }
 
     /**
-     * 按指定维度对 musicList 去重,保留质量更高的条目,返回移除的条数。
+     * 后台线程安全版去重:对传入列表做两层去重,返回去重后的新列表(不修改入参,
+     * 未变化则返回原引用)。供 applySourceMode 在后台线程调用,避免把
+     * getDedupKey 的 normalizePath 磁盘 I/O(810 首约 240ms)放在主线程造成切换掉帧。
+     */
+    private List<MusicBean> dedupeList(List<MusicBean> src) {
+        if (src == null || src.isEmpty()) return src;
+        List<MusicBean> out = dedupeByList(src, false);
+        out = dedupeByList(out, true);
+        return out;
+    }
+
+    /**
+     * 单层去重:按指定维度对列表去重,保留质量更高的条目,返回去重后的列表。
+     * 若未移除任何条目则返回原列表(同一引用),便于调用方判断是否发生变化。
      * @param useLogical true=按逻辑身份(标题+歌手+时长,忽略文件夹)去重;
      *                  false=按 getDedupKey(路径/streamId)去重。
      */
-    private int dedupeByKey(boolean useLogical) {
-        if (musicList == null || musicList.isEmpty()) return 0;
+    private List<MusicBean> dedupeByList(List<MusicBean> src, boolean useLogical) {
+        if (src == null || src.isEmpty()) return src;
         java.util.LinkedHashMap<String, MusicBean> best = new java.util.LinkedHashMap<>();
         int removed = 0;
         int uniqueCounter = 0;
-        for (MusicBean b : musicList) {
+        for (MusicBean b : src) {
             String key = useLogical ? getLogicalKey(b) : getDedupKey(b);
             if (key == null) {
                 // 缺少可比对字段(如逻辑去重缺时长)不参与合并,原样保留
@@ -2948,12 +2992,10 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (removed > 0) {
-            musicList.clear();
-            for (MusicBean b : best.values()) {
-                musicList.add(b);
-            }
+            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
+            return new ArrayList<>(best.values());
         }
-        return removed;
+        return src;
     }
 
     /** 逻辑身份键:忽略文件夹,按 标题+歌手+时长(秒,四舍五入) 判定同一首歌,用于跨文件夹去重 */
@@ -2999,10 +3041,11 @@ public class MainActivity extends AppCompatActivity {
             return "net_" + sid;
         }
         // 2. 磁盘身份:同一文件规范化路径必一致 —— 主要去重依据
+        //    复用 MusicBean 缓存的规范化路径,Migration 到后台线程后只算一次(避免切换主线程掉帧)
         String data = b.getData();
         if (data != null && !data.isEmpty()) {
-            String cp = MusicScanner.normalizePath(data);
-            if (!cp.isEmpty()) {
+            String cp = b.getCachedCanonicalPath();
+            if (cp != null && !cp.isEmpty()) {
                 return "path_" + cp;
             }
         }

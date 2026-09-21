@@ -48,6 +48,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         void onFavoriteClick(MusicBean bean, boolean isNowFavorite);
     }
 
+    /** 异步过滤完成回调(主线程):DiffUtil 增量刷新已提交,供外部刷新依赖过滤结果的 UI(如歌曲计数) */
+    public interface OnFilterCompleteListener {
+        void onFilterComplete();
+    }
+
     /** 滚动加载每批数量(车机性能弱,小批量) */
     private static final int BATCH_SIZE = 50;
 
@@ -58,6 +63,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private final Context context;
     private OnItemClickListener listener;
     private OnFavoriteClickListener favoriteListener;
+    private OnFilterCompleteListener filterCompleteListener;
     private FavoriteManager favoriteManager;
     private int playingIndex = -1;
     private String filterKeyword = "";
@@ -317,6 +323,12 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             hasMore = loadedCount < filteredData.size();
                         }
                         diff.dispatchUpdatesTo(MusicAdapter.this);
+                        // 过滤完成:通知外部刷新依赖过滤结果的 UI(如歌曲计数)。
+                        // 此时 filteredData 已是最终态,updateCount() 读到的数字才正确,
+                        // 避免"滤后计数滞后一帧"导致的统计数错误。
+                        if (filterCompleteListener != null) {
+                            filterCompleteListener.onFilterComplete();
+                        }
                         long tSwap = System.currentTimeMillis() - t1;
                         long elapsed = System.currentTimeMillis() - t0;
                         Log.i(TAG, "[applyFilter-async] 遍历+diff=" + tCompute + "ms swap=" + tSwap + "ms"
@@ -546,6 +558,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     public void setOnFavoriteClickListener(OnFavoriteClickListener l) {
         this.favoriteListener = l;
+    }
+
+    /** 注册异步过滤完成回调(主线程),用于在 DiffUtil 刷新后刷新计数等依赖过滤结果的 UI */
+    public void setOnFilterCompleteListener(OnFilterCompleteListener l) {
+        this.filterCompleteListener = l;
     }
 
     public void setFavoriteManager(FavoriteManager fm) {
