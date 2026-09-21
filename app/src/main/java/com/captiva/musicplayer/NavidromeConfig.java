@@ -27,7 +27,6 @@ public class NavidromeConfig {
     private static final String KEY_FNID = "fn_id";           // 原始 FN ID(用户填的,可为空)
     private static final String KEY_FN_RELAY = "fn_relay";    // 上次解析出的地址是否走飞牛中继
     private static final String KEY_AUTO_CACHE_ON_PLAY = "auto_cache_on_play"; // 播放时自动缓存
-    private static final String KEY_AUTO_CACHE_WIFI_ONLY = "auto_cache_wifi_only"; // 自动缓存仅限Wi-Fi
     private static final String KEY_AUTO_CACHE_MAX_MB = "auto_cache_max_mb"; // 自动缓存上限(MB)
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
@@ -195,16 +194,6 @@ public class NavidromeConfig {
     /** 设置是否开启播放时自动缓存 */
     public void setAutoCacheOnPlay(boolean on) {
         prefs.edit().putBoolean(KEY_AUTO_CACHE_ON_PLAY, on).apply();
-    }
-
-    /** 自动缓存是否仅限 Wi-Fi(默认开,避免消耗车载流量) */
-    public boolean isAutoCacheWifiOnly() {
-        return prefs.getBoolean(KEY_AUTO_CACHE_WIFI_ONLY, true);
-    }
-
-    /** 设置是否仅 Wi-Fi 下自动缓存 */
-    public void setAutoCacheWifiOnly(boolean wifiOnly) {
-        prefs.edit().putBoolean(KEY_AUTO_CACHE_WIFI_ONLY, wifiOnly).apply();
     }
 
     /** 自动缓存上限(MB);0=不限。默认 2048MB(2GB) */

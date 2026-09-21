@@ -14,8 +14,6 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.media.RemoteControlClient;
 import android.media.audiofx.Equalizer;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
 import android.os.Build;
 import android.os.Binder;
 import android.os.IBinder;
@@ -886,7 +884,7 @@ public class MusicService extends Service {
     /**
      * 播放云端歌曲时,按设置异步下载到本地(自动缓存)。
      * 下载到与手动同步相同的固定路径,完成后即时把当前 bean 标记为本地可用,
-     * 并广播通知界面刷新来源标识。任何不满足前置条件(未开启/非 Wi-Fi/缺信息)
+     * 并广播通知界面刷新来源标识。任何不满足前置条件(未开启/缺信息)
      * 的情况都直接返回,绝不影响正在进行的播放。
      */
     private void maybeAutoCache(final MusicBean bean) {
@@ -894,9 +892,6 @@ public class MusicService extends Service {
             return;
         }
         if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
-            return;
-        }
-        if (navidromeConfig.isAutoCacheWifiOnly() && !isWifiConnected()) {
             return;
         }
         final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
@@ -933,22 +928,6 @@ public class MusicService extends Service {
                 }
             }
         });
-    }
-
-    /** 当前是否通过 Wi-Fi 联网(仅需 ACCESS_NETWORK_STATE,已在清单声明) */
-    private boolean isWifiConnected() {
-        try {
-            ConnectivityManager cm =
-                    (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm == null) {
-                return false;
-            }
-            NetworkInfo ni = cm.getActiveNetworkInfo();
-            return ni != null && ni.isConnected()
-                    && ni.getType() == ConnectivityManager.TYPE_WIFI;
-        } catch (Exception e) {
-            return false;
-        }
     }
 
     private void resetPlayer() {

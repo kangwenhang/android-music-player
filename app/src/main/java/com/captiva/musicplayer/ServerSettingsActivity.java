@@ -35,7 +35,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private static final String HINT_NAVIDROME = "http://192.168.1.100:4533";
 
     private EditText etUrl, etUser, etPass, etSyncPath, etLocalPath, etAutoCacheMax;
-    private CheckBox cbAutoCache, cbAutoCacheWifi;
+    private CheckBox cbAutoCache;
     /** 目录选择器当前目标:false=同步目录,true=本地模式目录 */
     private boolean pickingLocalPath = false;
     private TextView tvResult;
@@ -66,7 +66,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         rbTypeNavidrome = findViewById(R.id.rb_type_navidrome);
         rbTypeFnMusic = findViewById(R.id.rb_type_fnmusic);
         cbAutoCache = findViewById(R.id.cb_auto_cache);
-        cbAutoCacheWifi = findViewById(R.id.cb_auto_cache_wifi);
         etAutoCacheMax = findViewById(R.id.et_auto_cache_max);
 
         // 回填服务器类型
@@ -141,9 +140,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
             etLocalPath.setText(savedLocalPath);
         }
 
-        // 回填自动缓存设置(默认:关闭 / 仅 Wi-Fi / 上限 2048MB)
+        // 回填自动缓存设置(默认:关闭 / 上限 2048MB)
         cbAutoCache.setChecked(config.isAutoCacheOnPlay());
-        cbAutoCacheWifi.setChecked(config.isAutoCacheWifiOnly());
         etAutoCacheMax.setText(String.valueOf(config.getAutoCacheMaxMb()));
     }
 
@@ -573,7 +571,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         config.setFnRelay(relay);
         // 自动缓存设置(播放云端歌曲时下载到本地)
         config.setAutoCacheOnPlay(cbAutoCache.isChecked());
-        config.setAutoCacheWifiOnly(cbAutoCacheWifi.isChecked());
         String maxStr = etAutoCacheMax.getText().toString().trim();
         int maxMb = 2048;
         try {

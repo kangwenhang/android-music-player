@@ -234,15 +234,6 @@
                 android:textColor="@color/text_primary"
                 android:textSize="@dimen/sub_text_size" />
 
-            <CheckBox
-                android:id="@+id/cb_auto_cache_wifi"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="仅 Wi-Fi 下自动缓存(默认开)"
-                android:textColor="@color/text_primary"
-                android:textSize="@dimen/sub_text_size"
-                android:layout_marginTop="4dp" />
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
