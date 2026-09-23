@@ -2385,6 +2385,9 @@ public class MainActivity extends AppCompatActivity {
                 List<MusicBean> cloudList = buildCloudDrivenList(serverType, syncPath);
                 if (cloudList != null && !cloudList.isEmpty()) {
                     java.util.Collections.sort(cloudList, MusicTitleComparator.INSTANCE);
+                    // 后台预热 getCanonicalPath:已下载本地播的云端歌 setData/dedupe 主线程会逐首取路径键,
+                    // 不预热则主线程磁盘 I/O 掉帧(与 applySourceMode 云端分支同一根因)
+                    warmKeys(cloudList);
                     final List<MusicBean> finalList = cloudList;
                     handler.post(new Runnable() {
                         @Override
@@ -2607,7 +2610,13 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
-                applyMusicListToUi(dedupeList(list), false);
+                List<MusicBean> deduped = dedupeList(list);
+                // 后台预热 getCanonicalPath 缓存:已下载、本地播的云端歌在 buildCloudDrivenList 里
+                // 被置为 network=false + 本地路径,setData 主线程会逐首 getCachedKey → getCanonicalPath
+                // 触发磁盘 I/O(810 首约 240ms)造成切换掉帧。dedupeList 因 getDedupKey 对 streamId
+                // 短路返回 "net_"+sid 而不会预热路径,故这里显式 warmKeys 把 I/O 挪到后台线程。
+                warmKeys(deduped);
+                applyMusicListToUi(deduped, false);
             }
         }, "SourceModeToggle").start();
     }
@@ -2825,6 +2834,9 @@ public class MainActivity extends AppCompatActivity {
                 List<MusicBean> cloudList = buildCloudDrivenList(navidromeConfig.getServerType(), syncPath);
                 if (cloudList != null) {
                     java.util.Collections.sort(cloudList, MusicTitleComparator.INSTANCE);
+                    // 后台预热 getCanonicalPath:已下载本地播的云端歌 setData/dedupe 主线程会逐首取路径键,
+                    // 不预热则主线程磁盘 I/O 掉帧(与 applySourceMode 云端分支同一根因)
+                    warmKeys(cloudList);
                     final List<MusicBean> finalList = cloudList;
                     runOnUiThread(new Runnable() {
                         @Override
