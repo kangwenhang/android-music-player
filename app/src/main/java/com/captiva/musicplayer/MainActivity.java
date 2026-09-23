@@ -2564,14 +2564,15 @@ public class MainActivity extends AppCompatActivity {
                     if (cached != null && !cached.isEmpty()) {
                         warmKeys(cached);            // 后台预热 getCanonicalPath,避免 setData 主线程掉帧
                         applyMusicListToUi(cached, true);
-                        // 后台扫描刷新:发现新增/变更文件;数量变化才再刷新 UI,否则只回写缓存
+                        // 后台扫描刷新:扫描完成直接以新结果覆盖显示(不再仅在数量变化时刷新),
+                        // 保证新增/替换/删除的歌即时出现;扫描为空(目录不存在/无音频)则保留缓存,不覆盖
                         List<MusicBean> fresh = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
                         java.util.Collections.sort(fresh, MusicTitleComparator.INSTANCE);
                         List<MusicBean> deduped = dedupeList(fresh);
-                        if (deduped.size() != cached.size()) {
+                        if (!deduped.isEmpty()) {
                             applyMusicListToUi(deduped, true);
                         } else {
-                            localMusicCache.forceSaveAsync(deduped);
+                            Log.w(TAG, "本地目录扫描为空,保留缓存列表");
                         }
                         return;
                     }
