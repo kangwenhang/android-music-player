@@ -14,6 +14,7 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
+import android.os.FileObserver;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.IBinder;
@@ -179,6 +180,10 @@ public class MainActivity extends AppCompatActivity {
     private NavidromeConfig navidromeConfig;
     /** 本地歌曲列表缓存(扫描后保存,下次秒开) */
     private LocalMusicCache localMusicCache;
+    /** 本地目录文件监听器(FileObserver):本地模式放新歌/删歌时自动重扫描并刷新列表 */
+    private FileObserver localDirObserver;
+    /** FileObserver 重扫描防抖间隔:合并大批量拷歌时的连续文件事件,避免反复刷新卡顿 */
+    private static final long LOCAL_DIR_RESCAN_DEBOUNCE_MS = 1000;
     /** 收藏管理器 */
     private FavoriteManager favoriteManager;
     /** 歌词偏移管理器(每首歌可手动调整歌词同步偏移) */
@@ -815,6 +820,8 @@ public class MainActivity extends AppCompatActivity {
             navidromeConfig.setLocalMode(localOnlyMode);
             updateSourceToggleUi();
             applySourceMode();
+            // 模式切换后同步本地目录监听(本地模式启动,云端模式停止)
+            syncLocalDirObserver();
         });
 
         // 点击服务器状态可手动刷新
@@ -2593,6 +2600,8 @@ public class MainActivity extends AppCompatActivity {
                             updateSourceToggleUi();
                             Toast.makeText(MainActivity.this,
                                     "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
+                            // 回退到本地模式,确保本地目录监听随模式同步启动
+                            syncLocalDirObserver();
                         }
                     });
                     return;
@@ -2641,6 +2650,152 @@ public class MainActivity extends AppCompatActivity {
                 updatePlayingHighlight();
             }
         });
+    }
+
+    // ===== 本地目录 FileObserver 监听 =====
+    // 本地模式下监听本地扫描目录的文件增删改,自动重新扫描并刷新列表,
+    // 用户"放新歌/删歌/替换歌"后无需手动刷新即可看到变化。
+    // 云端模式列表由服务端驱动,不监听;监听目录不存在时不启动(避免崩溃)。
+
+    /**
+     * 启动本地目录 FileObserver(幂等)。
+     * 先判断本地模式/存储权限/目录存在,满足才创建并 startWatching;
+     * 创建或停止 FileObserver 必须在主线程执行,调用方需保证在 UI 线程。
+     */
+    private void startLocalDirObserver() {
+        if (localDirObserver != null) {
+            return; // 已启动,幂等
+        }
+        if (!localOnlyMode) {
+            return; // 仅本地模式需要监听
+        }
+        if (!hasStoragePermission()) {
+            return;
+        }
+        final String dir = navidromeConfig.getLocalScanPath();
+        if (dir == null || dir.isEmpty()) {
+            return;
+        }
+        final File dirFile = new File(dir);
+        if (!dirFile.exists() || !dirFile.isDirectory()) {
+            Log.w(TAG, "本地目录不存在,FileObserver 未启动: " + dir);
+            return;
+        }
+        final int mask = FileObserver.CREATE | FileObserver.DELETE
+                | FileObserver.MODIFY | FileObserver.MOVED_TO | FileObserver.MOVED_FROM
+                | FileObserver.CLOSE_WRITE | FileObserver.DELETE_SELF | FileObserver.MOVE_SELF;
+        localDirObserver = new FileObserver(dir, mask) {
+            @Override
+            public void onEvent(int event, String path) {
+                if (event == 0) {
+                    return; // 部分设备会重复上报 0,忽略
+                }
+                // 目录自身被删除/移动:路径已失效,停止监听
+                if ((event & (FileObserver.DELETE_SELF | FileObserver.MOVE_SELF)) != 0) {
+                    Log.w(TAG, "本地目录自身被删除/移动,停止 FileObserver");
+                    stopLocalDirObserver();
+                    return;
+                }
+                // 仅关心会改变列表内容的事件
+                if ((event & (FileObserver.CREATE | FileObserver.DELETE
+                        | FileObserver.MOVED_TO | FileObserver.MOVED_FROM
+                        | FileObserver.CLOSE_WRITE | FileObserver.MODIFY)) == 0) {
+                    return;
+                }
+                scheduleLocalDirRescan();
+            }
+        };
+        localDirObserver.startWatching();
+        Log.i(TAG, "FileObserver 启动,监听本地目录: " + dir);
+    }
+
+    /**
+     * 停止并释放本地目录 FileObserver(幂等)。
+     */
+    private void stopLocalDirObserver() {
+        if (localDirObserver != null) {
+            try {
+                localDirObserver.stopWatching();
+            } catch (Exception ignored) {
+            }
+            localDirObserver = null;
+            Log.i(TAG, "FileObserver 已停止");
+        }
+    }
+
+    /**
+     * 同步 FileObserver 状态:满足监听条件(本地模式 + 已授权 + 目录存在)则启动,否则停止。
+     * 统一入口,可在 onResume/模式切换/云端回退等场景调用,避免重复判断。
+     */
+    private void syncLocalDirObserver() {
+        if (localOnlyMode && hasStoragePermission()) {
+            final String dir = navidromeConfig.getLocalScanPath();
+            if (dir != null && !dir.isEmpty()) {
+                final File dirFile = new File(dir);
+                if (dirFile.exists() && dirFile.isDirectory()) {
+                    startLocalDirObserver();
+                    return;
+                }
+            }
+        }
+        stopLocalDirObserver();
+    }
+
+    /**
+     * 防抖调度:多次连续文件事件合并为一次重新扫描,避免大批量拷歌时反复刷新卡顿。
+     */
+    private void scheduleLocalDirRescan() {
+        handler.removeCallbacks(localDirRescanRunnable);
+        handler.postDelayed(localDirRescanRunnable, LOCAL_DIR_RESCAN_DEBOUNCE_MS);
+    }
+
+    /** 防抖后的实际重扫描任务(由主线程 Handler 调度) */
+    private final Runnable localDirRescanRunnable = new Runnable() {
+        @Override
+        public void run() {
+            rescanLocalDirAndRefresh();
+        }
+    };
+
+    /**
+     * 后台重新扫描本地目录并刷新列表(供 FileObserver 调用)。
+     * 复用与 applySourceMode 相同的 scan → dedupe → applyMusicListToUi 链路,
+     * 保证"放新歌后列表即时更新"。扫描为空则保留当前列表,避免误清空。
+     */
+    private void rescanLocalDirAndRefresh() {
+        if (!localOnlyMode) {
+            return; // 已切回云端,无需刷新本地列表
+        }
+        final String localDir = navidromeConfig.getLocalScanPath();
+        if (localDir == null || localDir.isEmpty()) {
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    List<MusicBean> fresh = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
+                    if (fresh == null || fresh.isEmpty()) {
+                        Log.w(TAG, "FileObserver 重扫描为空,保留当前列表");
+                        return;
+                    }
+                    java.util.Collections.sort(fresh, MusicTitleComparator.INSTANCE);
+                    final List<MusicBean> deduped = dedupeList(fresh);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!localOnlyMode) {
+                                return; // 重扫描期间切回云端,丢弃结果
+                            }
+                            Log.i(TAG, "FileObserver 触发本地列表刷新,共 " + deduped.size() + " 首");
+                            applyMusicListToUi(deduped, true);
+                        }
+                    });
+                } catch (Throwable t) {
+                    Log.e(TAG, "FileObserver 重扫描失败", t);
+                }
+            }
+        }, "LocalDirObserverRescan").start();
     }
 
     /**
@@ -3655,6 +3810,8 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter cf = new IntentFilter(MusicService.ACTION_CACHE_AVAILABILITY_CHANGED);
         registerReceiver(cacheReceiver, cf);
         handler.post(progressTask);
+        // 恢复本地目录监听(仅本地模式会真正启动 FileObserver)
+        syncLocalDirObserver();
 
         // 同步当前播放状态:从桌面返回时可能已自动切歌,需更新UI
         // onPause 期间 stateReceiver 被注销,自动切歌的广播被错过
@@ -3697,6 +3854,8 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
         handler.removeCallbacks(progressTask);
+        // 退到后台时停止目录监听,节省 2 核车机资源(FileObserver 内部 inotify 线程)
+        stopLocalDirObserver();
     }
 
     @Override
@@ -3740,6 +3899,8 @@ public class MainActivity extends AppCompatActivity {
         handler.removeCallbacks(logFlushTask);
         // 清除 Handler 消息队列中所有残留回调(防止 Activity 销毁后 Runnable 仍执行)
         handler.removeCallbacksAndMessages(null);
+        // 停止目录监听,释放 inotify 资源
+        stopLocalDirObserver();
         PerfLogger.shutdown();
         // 取消自动同步
         cancelAutoSync();
