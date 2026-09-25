@@ -11,9 +11,13 @@ import java.util.Set;
 /**
  * 收藏管理器
  * 使用 SharedPreferences 存储收藏的歌曲 key
- * key 规则与 MusicAdapter.getSongKey 一致:
- * - 本地歌曲: local_{规范化路径}
- * - 网络歌曲: net_{streamId}
+ * key 规则与 MusicBean.getIdentityKey 一致(跨云端/本地列表同键):
+ * - 网络歌曲 / 本地已下载(有 streamId): net_{streamId}
+ * - 纯本地歌曲: local_{规范化路径}
+ *
+ * 兼容旧数据:历史版本本地歌曲的收藏键是 local_{规范化路径}。同一首歌下载后
+ * 身份键变为 net_{streamId},旧键仍然保留在集合里 —— isFavorite 会同时匹配
+ * 新旧两个键,取消收藏时两个键一起移除,老用户的收藏不会"消失"。
  */
 public class FavoriteManager {
 
@@ -42,14 +46,29 @@ public class FavoriteManager {
         prefs.edit().putStringSet(KEY_FAVORITES, favoriteSet).apply();
     }
 
-    /** 生成歌曲唯一 key(使用 MusicBean 缓存,避免重复文件系统 I/O) */
+    /** 生成歌曲跨列表身份键(使用 MusicBean 缓存,避免重复文件系统 I/O) */
     public static String getSongKey(MusicBean bean) {
-        return bean.getCachedKey();
+        return bean.getIdentityKey();
     }
 
-    /** 是否已收藏 */
+    /**
+     * 旧版本地收藏键(local_{规范化路径})。
+     * 仅对"本地且有 streamId"的 bean 有意义 —— 身份键已变成 net_{streamId},
+     * 但老收藏数据存的是 local_ 键,匹配/取消时需要兼顾。
+     */
+    private static String legacyLocalKey(MusicBean bean) {
+        if (bean.isNetwork()) return null;
+        String sid = bean.getStreamId();
+        if (sid == null || sid.isEmpty()) return null; // 纯本地:身份键本身就是 local_,无 legacy
+        String cp = bean.getCachedCanonicalPath();
+        return (cp != null && !cp.isEmpty()) ? "local_" + cp : null;
+    }
+
+    /** 是否已收藏(身份键或旧本地键任一命中) */
     public boolean isFavorite(MusicBean bean) {
-        return favoriteSet.contains(getSongKey(bean));
+        if (favoriteSet.contains(getSongKey(bean))) return true;
+        String legacy = legacyLocalKey(bean);
+        return legacy != null && favoriteSet.contains(legacy);
     }
 
     /** 是否已收藏(key 版本) */
@@ -57,9 +76,21 @@ public class FavoriteManager {
         return favoriteSet.contains(key);
     }
 
-    /** 切换收藏状态,返回切换后是否已收藏 */
+    /** 切换收藏状态,返回切换后是否已收藏(新旧键一起处理) */
     public boolean toggleFavorite(MusicBean bean) {
-        return toggleFavorite(getSongKey(bean));
+        String key = getSongKey(bean);
+        String legacy = legacyLocalKey(bean);
+        boolean wasFav = favoriteSet.contains(key)
+                || (legacy != null && favoriteSet.contains(legacy));
+        if (wasFav) {
+            favoriteSet.remove(key);
+            if (legacy != null) favoriteSet.remove(legacy);
+            save();
+            return false;
+        }
+        favoriteSet.add(key);
+        save();
+        return true;
     }
 
     /** 切换收藏状态(key 版本),返回切换后是否已收藏 */
@@ -84,13 +115,20 @@ public class FavoriteManager {
         }
     }
 
-    /** 移除收藏 */
+    /** 移除收藏(新旧键一起移除) */
     public void removeFavorite(MusicBean bean) {
         String key = getSongKey(bean);
+        String legacy = legacyLocalKey(bean);
+        boolean changed = false;
         if (favoriteSet.contains(key)) {
             favoriteSet.remove(key);
-            save();
+            changed = true;
         }
+        if (legacy != null && favoriteSet.contains(legacy)) {
+            favoriteSet.remove(legacy);
+            changed = true;
+        }
+        if (changed) save();
     }
 
     /** 获取全部收藏 key(不可变) */

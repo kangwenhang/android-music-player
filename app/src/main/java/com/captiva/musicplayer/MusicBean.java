@@ -25,6 +25,9 @@ public class MusicBean {
     /** 缓存的 song key,避免重复调用 getCanonicalPath()(文件系统 I/O) */
     private String cachedKey;
 
+    /** 缓存的跨列表身份键(getIdentityKey),同一首歌在云端/本地两个列表中同键 */
+    private String cachedIdentityKey;
+
     /** 缓存的规范化路径(即 normalizePath 的磁盘 I/O 结果),供 getCachedKey 与去重键共享,只算一次 */
     private String cachedCanonicalPath;
 
@@ -192,6 +195,37 @@ public class MusicBean {
                     ? MusicScanner.normalizePath(data) : "";
         }
         return cachedCanonicalPath;
+    }
+
+    /**
+     * 获取跨列表身份键(懒加载,线程安全) —— 同一首歌在云端列表和本地列表中返回同一个键。
+     *
+     * 与 getCachedKey(存储身份)的区别:
+     * - getCachedKey: 本地文件一律 local_{路径} —— 同一首歌下载到本地后与云端键不同,
+     *   导致收藏/高亮在两个列表之间对不上。
+     * - getIdentityKey: 本地文件若回填过 streamId(来自 StreamIdIndex,即从服务器下载的歌),
+     *   直接用 net_{streamId} 与云端同键;纯本地文件(U盘/本地录制)仍用 local_{路径}。
+     *
+     * key 规则:
+     * - 网络歌曲: net_{streamId}
+     * - 本地已下载(有 streamId): net_{streamId}  ← 与云端同键
+     * - 纯本地歌曲: local_{normalizePath(data)} 或 local_{id}
+     *
+     * 供 收藏(FavoriteManager)、高亮定位(findPositionByBean)、DiffUtil 身份判定使用。
+     */
+    public synchronized String getIdentityKey() {
+        if (cachedIdentityKey == null) {
+            if (network) {
+                cachedIdentityKey = "net_" + streamId;
+            } else if (streamId != null && !streamId.isEmpty()) {
+                // 本地文件但身份来自服务器(下载/同步回填),与云端同键
+                cachedIdentityKey = "net_" + streamId;
+            } else {
+                String cp = getCachedCanonicalPath();
+                cachedIdentityKey = (cp != null && !cp.isEmpty()) ? "local_" + cp : "local_" + id;
+            }
+        }
+        return cachedIdentityKey;
     }
 
     /**

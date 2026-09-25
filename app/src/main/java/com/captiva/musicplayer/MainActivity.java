@@ -3112,10 +3112,10 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 生成歌曲唯一key(使用 MusicBean 缓存,避免重复文件系统 I/O) */
+    /** 生成歌曲唯一key(跨列表身份键:同一首歌云端/本地同键,高亮与收藏跨列表一致) */
     private String getSongKey(MusicBean b) {
         if (b == null) return "";
-        return b.getCachedKey();
+        return b.getIdentityKey();
     }
 
     /**

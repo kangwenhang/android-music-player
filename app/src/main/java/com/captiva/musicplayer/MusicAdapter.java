@@ -221,9 +221,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 如果有搜索过滤,filteredData会在下次filter时重建
     }
 
-    /** 生成歌曲唯一标识(使用 MusicBean 缓存,避免重复文件系统 I/O) */
+    /** 生成歌曲唯一标识(跨列表身份键:同一首歌云端/本地同键,收藏与高亮跨列表一致) */
     private String getSongKey(MusicBean b) {
-        return b.getCachedKey();
+        return b.getIdentityKey();
     }
 
     /** 搜索过滤(主线程入口,遍历/diff 在后台线程执行) */
@@ -375,7 +375,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     }
 
     /**
-     * DiffUtil 回调:以 getCachedKey() 作为稳定身份。
+     * DiffUtil 回调:以 getIdentityKey() 作为稳定身份(跨云端/本地列表同键,
+     * 切换列表时同一首歌被视为同一行,平滑过渡而不是整表重绑)。
      * 内容视为相同(只有增/删/移动会被处理,未变化行不被重绑,避免掉帧);
      * 播放高亮变化通过 setPlayingIndex → notifyItemChanged 单独刷新。
      */
@@ -395,8 +396,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             MusicBean a = oldList.get(oldItemPosition);
             MusicBean b = newList.get(newItemPosition);
             if (a == null || b == null) return false;
-            String ka = a.getCachedKey();
-            String kb = b.getCachedKey();
+            String ka = a.getIdentityKey();
+            String kb = b.getIdentityKey();
             if (ka == null || kb == null) return false;
             return ka.equals(kb);
         }
