@@ -192,6 +192,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean favoritesOnly = false;
     /** 本地/云端切换:false=云端模式(默认,云端歌单全部,已下载本地播/未下载联网播);true=本地模式(仅已下载的歌) */
     private boolean localOnlyMode = false;
+    /** 来源切换是否正在执行(单飞:快速连点只重建最终目标,不并发开多个扫描/构建线程) */
+    private boolean sourceSwitchInFlight = false;
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
 
@@ -815,14 +817,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 本地/云端切换:云端=云端歌单(已下载本地播,未下载联网播);本地=扫描本地目录的全部歌曲。
         // 两个列表相互独立,各有各的数据来源与缓存;模式持久化,下次启动保持。
-        btnSourceToggle.setOnClickListener(v -> {
-            localOnlyMode = !localOnlyMode;
-            navidromeConfig.setLocalMode(localOnlyMode);
-            updateSourceToggleUi();
-            applySourceMode();
-            // 模式切换后同步本地目录监听(本地模式启动,云端模式停止)
-            syncLocalDirObserver();
-        });
+        btnSourceToggle.setOnClickListener(v -> toggleSource());
 
         // 点击服务器状态可手动刷新
         tvServerStatus.setOnClickListener(v -> {
@@ -2552,17 +2547,49 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 按当前模式重建列表(后台构建,主线程刷新)。两个列表相互独立:
+     * 本地/云端切换入口(按钮点击)。
+     * 单飞:若上一次切换仍在后台构建/刷新中,只更新 localOnlyMode(最终目标),不重复开线程;
+     * 当前切换完成后会校验最终目标,必要时自动补一次。这样快速连点只会产生「最终模式」的
+     * 一次重建,杜绝并发扫描/多次 setData 卡顿。
+     */
+    private void toggleSource() {
+        final boolean toLocal = !localOnlyMode;
+        localOnlyMode = toLocal;
+        navidromeConfig.setLocalMode(toLocal);
+        updateSourceToggleUi();
+        syncLocalDirObserver();
+        if (sourceSwitchInFlight) {
+            return; // 正在切换,目标已是最新,等完成后自动收敛到最终模式
+        }
+        sourceSwitchInFlight = true;
+        applySourceMode(toLocal);
+    }
+
+    /**
+     * 一次来源切换在主线程刷新完成后调用。
+     * 若期间又有点击(本地变量 localOnlyMode 已是最新目标)导致 appliedToLocal 与之不符,
+     * 自动补一次切换,确保最终停在 localOnlyMode 对应列表。
+     */
+    private void finishSourceSwitch(boolean appliedToLocal) {
+        sourceSwitchInFlight = false;
+        if (appliedToLocal != localOnlyMode) {
+            sourceSwitchInFlight = true;
+            applySourceMode(localOnlyMode);
+        }
+    }
+
+    /**
+     * 按指定模式重建列表(后台构建,主线程刷新)。两个列表相互独立:
      * 云端模式 = 云端歌单全部(已下载的本地播,未下载的联网播),来源 SongCache;
      * 本地模式 = 优先从 local_songs.json 缓存秒开(避免每首 MediaMetadataRetriever 全量重扫
      *           导致切换卡顿数秒、列表迟迟不出),再后台扫描刷新发现新增文件。
-     * 播放队列不动,当前歌曲继续播。
+     * 单飞由调用方(toggleSource)保证:同一时刻只有一个此方法的实例在跑。
+     * 完成(或云端不可用时回退)后通过 finishSourceSwitch 收尾,以便收敛到最终目标模式。
      */
-    private void applySourceMode() {
+    private void applySourceMode(final boolean toLocal) {
         final String syncPath = navidromeConfig.getCloudDir();
         final String localDir = navidromeConfig.getLocalScanPath();
         final String serverType = navidromeConfig.getServerType();
-        final boolean toLocal = localOnlyMode;
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -2572,90 +2599,128 @@ public class MainActivity extends AppCompatActivity {
                     List<MusicBean> cached = localMusicCache.load();
                     if (cached != null && !cached.isEmpty()) {
                         warmKeys(cached);            // 后台预热 getCanonicalPath,避免 setData 主线程掉帧
-                        applyMusicListToUi(cached, true);
+                        // 先秒开缓存(预览,不收尾);收尾交给扫描结果
+                        final List<MusicBean> previewList = cached;
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                applyMusicListCore(previewList, true);
+                            }
+                        });
                         // 后台扫描刷新:扫描完成直接以新结果覆盖显示(不再仅在数量变化时刷新),
                         // 保证新增/替换/删除的歌即时出现;扫描为空(目录不存在/无音频)则保留缓存,不覆盖
                         List<MusicBean> fresh = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
                         java.util.Collections.sort(fresh, MusicTitleComparator.INSTANCE);
                         List<MusicBean> deduped = dedupeList(fresh);
                         if (!deduped.isEmpty()) {
-                            applyMusicListToUi(deduped, true);
+                            final List<MusicBean> finalList = deduped;
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    applyMusicListCore(finalList, true);
+                                    finishSourceSwitch(true);
+                                }
+                            });
                         } else {
                             Log.w(TAG, "本地目录扫描为空,保留缓存列表");
+                            finishSourceSwitch(true);   // 缓存已展示,视为已应用本地模式
                         }
                         return;
                     }
                     // 无缓存:全量扫描(首启 / 缓存损坏)
                     List<MusicBean> list = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
                     java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
-                    applyMusicListToUi(dedupeList(list), true);
+                    final List<MusicBean> finalList = dedupeList(list);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            applyMusicListCore(finalList, true);
+                            finishSourceSwitch(true);
+                        }
+                    });
                     return;
                 }
                 // 云端模式:读云端缓存构建列表(与本地无关)
                 List<MusicBean> list = buildCloudDrivenList(serverType, syncPath);
                 if (list == null) {
-                    // 云端不可用:回退按钮状态并提示
+                    // 云端不可用:回退本地模式
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            localOnlyMode = !toLocal;
+                            localOnlyMode = true;
                             updateSourceToggleUi();
                             Toast.makeText(MainActivity.this,
                                     "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
-                            // 回退到本地模式,确保本地目录监听随模式同步启动
                             syncLocalDirObserver();
+                            finishSourceSwitch(true);   // 实际已落到本地模式
                         }
                     });
                     return;
                 }
                 java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
                 List<MusicBean> deduped = dedupeList(list);
-                // 后台预热 getCanonicalPath 缓存:已下载、本地播的云端歌在 buildCloudDrivenList 里
-                // 被置为 network=false + 本地路径,setData 主线程会逐首 getCachedKey → getCanonicalPath
-                // 触发磁盘 I/O(810 首约 240ms)造成切换掉帧。dedupeList 因 getDedupKey 对 streamId
-                // 短路返回 "net_"+sid 而不会预热路径,故这里显式 warmKeys 把 I/O 挪到后台线程。
+                // 后台预热:已下载本地播的云端歌在 buildCloudDrivenList 里被置为 network=false + 本地路径,
+                // 但其去重/身份键走 getIdentityKey = net_{streamId}(流式身份,无需磁盘路径),
+                // 故预热 getIdentityKey(而非 getCachedKey)即可,避免对全部已下载歌做无谓的
+                // getCanonicalPath 磁盘 I/O(810 首≈220ms,是「本地→云端」切换延迟/卡顿的主因之一)。
                 warmKeys(deduped);
-                applyMusicListToUi(deduped, false);
+                final List<MusicBean> finalList = deduped;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        applyMusicListCore(finalList, false);
+                        finishSourceSwitch(false);
+                    }
+                });
             }
         }, "SourceModeToggle").start();
     }
 
-    /** 后台预热每首歌的规范化路径缓存(getCanonicalPath 磁盘 I/O),避免 setData 主线程掉帧 */
+    /** 后台预热每首歌的身份键缓存(getIdentityKey,适配器去重/DiffUtil 真正使用的键) */
     private void warmKeys(List<MusicBean> list) {
         if (list == null) return;
         for (MusicBean b : list) {
-            b.getCachedKey(); // 触发 getCachedCanonicalPath 并缓存,仅首次有磁盘 I/O
+            // 预热 getIdentityKey:已下载本地播的云端歌(network=false 但带 streamId)返回 net_{streamId},
+            // 无需磁盘 I/O;只有纯本地歌才走 getCanonicalPath(必要的一次性磁盘 I/O,仍在后台线程)。
+            // 原实现预热 getCachedKey 会对所有已下载云端歌做无谓 getCanonicalPath(810 首≈220ms),
+            // 是「本地→云端」切换延迟/卡顿的主因,故改为预热 getIdentityKey。
+            b.getIdentityKey();
         }
     }
 
-    /** 将列表交给主线程刷新 UI:显示 + 重应用收藏/搜索过滤 + 计数 + 空态 + 缓存回写 + 播放高亮 */
+    /** 核心:主线程刷新列表 UI(须在主线程调用)。供 applyMusicListToUi 与 applySourceMode 共用 */
+    private void applyMusicListCore(final List<MusicBean> list, final boolean toLocal) {
+        musicList.clear();
+        musicList.addAll(list);
+        adapter.setData(list);
+        // 重新应用收藏/搜索过滤,保持各过滤维度一致
+        if (favoritesOnly) {
+            applyFavoritesFilter();
+        } else {
+            adapter.filter(currentSearchQuery);
+        }
+        updateCount();
+        if (musicList.isEmpty()) {
+            tvEmpty.setVisibility(View.VISIBLE);
+            tvEmpty.setText(toLocal
+                    ? "本地目录没有找到歌曲\n可在设置中自定义本地模式目录"
+                    : "未找到音乐\n请在设置中配置服务器并同步");
+        } else {
+            tvEmpty.setVisibility(View.GONE);
+        }
+        // 本地模式:保存本地扫描缓存(local_songs.json,与云端缓存隔离)
+        if (toLocal) {
+            localMusicCache.forceSaveAsync(musicList);
+        }
+        updatePlayingHighlight();
+    }
+
+    /** 将列表交给主线程刷新 UI(供 FileObserver 重扫描等无单飞场景) */
     private void applyMusicListToUi(final List<MusicBean> list, final boolean toLocal) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                musicList.clear();
-                musicList.addAll(list);
-                adapter.setData(list);
-                // 重新应用收藏/搜索过滤,保持各过滤维度一致
-                if (favoritesOnly) {
-                    applyFavoritesFilter();
-                } else {
-                    adapter.filter(currentSearchQuery);
-                }
-                updateCount();
-                if (musicList.isEmpty()) {
-                    tvEmpty.setVisibility(View.VISIBLE);
-                    tvEmpty.setText(toLocal
-                            ? "本地目录没有找到歌曲\n可在设置中自定义本地模式目录"
-                            : "未找到音乐\n请在设置中配置服务器并同步");
-                } else {
-                    tvEmpty.setVisibility(View.GONE);
-                }
-                // 本地模式:保存本地扫描缓存(local_songs.json,与云端缓存隔离)
-                if (toLocal) {
-                    localMusicCache.forceSaveAsync(musicList);
-                }
-                updatePlayingHighlight();
+                applyMusicListCore(list, toLocal);
             }
         });
     }
