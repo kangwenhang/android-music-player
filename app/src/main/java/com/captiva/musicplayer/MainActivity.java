@@ -2541,15 +2541,14 @@ public class MainActivity extends AppCompatActivity {
         return cloud;
     }
 
-    /** 更新本地/云端切换按钮外观与文案(云端=普通底色,本地=高亮底色) */
+    /**
+     * 更新本地/云端切换按钮文案。
+     * 注意:按需求「取消高亮变色」,按钮背景不再随模式切换,始终是普通底色(bg_btn),
+     * 仅文字在「本地 / 云端」之间切换,避免本地模式时按钮变蓝造成误导。
+     */
     private void updateSourceToggleUi() {
-        if (localOnlyMode) {
-            btnSourceToggle.setBackgroundResource(R.drawable.bg_btn_play);
-            btnSourceToggle.setText("本地");
-        } else {
-            btnSourceToggle.setBackgroundResource(R.drawable.bg_btn);
-            btnSourceToggle.setText("云端");
-        }
+        btnSourceToggle.setBackgroundResource(R.drawable.bg_btn);
+        btnSourceToggle.setText(localOnlyMode ? "本地" : "云端");
     }
 
     /**
