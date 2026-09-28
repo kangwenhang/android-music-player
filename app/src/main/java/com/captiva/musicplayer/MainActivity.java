@@ -59,7 +59,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -2515,18 +2517,24 @@ public class MainActivity extends AppCompatActivity {
         if (cloud == null || cloud.isEmpty()) {
             return null;
         }
+        // 一次性遍历同步目录,收集「真实存在且 >1024 字节」的音频文件绝对路径集合。
+        // 旧实现是对每一首云端歌都做 localPathKey(getCanonicalPath,磁盘 I/O) + exists() + length()
+        // —— 约 810 首就要 ~1620 次独立 stat,在车机/USB 存储上是「切换成云端很卡」的根因。
+        // 改为:单次递归遍历(遍历成本只与「已存在文件数」成正比,而非歌曲总数) + 每首 O(1) 查表,
+        // 把 N 次散落 stat 压成一次顺序遍历,列表秒出。
+        Set<String> localFiles = collectExistingLocalPaths(syncPath);
+        final boolean hasSyncDir = !localFiles.isEmpty();
         for (MusicBean b : cloud) {
             if (b == null) {
                 continue;
             }
-            // 本地固定路径(与 MusicSyncManager.buildLocalFile 命名规则一致)
-            String localPath = MusicSyncManager.localPathKey(b, syncPath);
-            File f = new File(localPath);
-            if (f.exists() && f.length() > 1024) {
+            // 期望的本地固定路径(与 MusicSyncManager.buildLocalFile 命名规则一致,且不触发任何磁盘 I/O)
+            String expected = MusicSyncManager.buildLocalFile(b, syncPath).getAbsolutePath();
+            if (hasSyncDir && localFiles.contains(expected)) {
                 // 本地已下载:改本地播放,用真实文件路径;
                 // 清掉服务端 uri(MusicService 会优先用 uri,可能误指向服务端地址)
                 b.setNetwork(false);
-                b.setData(localPath);
+                b.setData(expected);
                 b.setUri(null);
             } else {
                 // 未下载:保持联网播放(streamUrl 已在缓存中)
@@ -2534,6 +2542,42 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return cloud;
+    }
+
+    /**
+     * 单次遍历同步目录,收集所有「存在且 >1024 字节」的文件的绝对路径。
+     * 用与 buildLocalFile 相同的绝对路径形式作为 key,使 buildCloudDrivenList 里
+     * 每首歌的 expected 路径能直接 O(1) 命中,从而避免逐首 stat。
+     * 成本仅与磁盘上「实际存在的文件数」成正比,而非云端歌曲总数。
+     */
+    private static Set<String> collectExistingLocalPaths(String syncPath) {
+        Set<String> set = new HashSet<String>();
+        if (syncPath == null || syncPath.isEmpty()) {
+            return set;
+        }
+        File root = new File(syncPath);
+        if (!root.exists() || !root.isDirectory()) {
+            return set;
+        }
+        collectAudioInto(set, root);
+        return set;
+    }
+
+    private static void collectAudioInto(Set<String> set, File dir) {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File f : files) {
+            if (f.isDirectory()) {
+                if (!f.getName().startsWith(".")) {
+                    collectAudioInto(set, f);
+                }
+            } else if (f.length() > 1024) {
+                // 仅收集绝对路径;歌曲侧用 buildLocalFile(...).getAbsolutePath() 同形式比较,保证一致
+                set.add(f.getAbsolutePath());
+            }
+        }
     }
 
     /**
@@ -2662,7 +2706,9 @@ public class MainActivity extends AppCompatActivity {
                 // 后台预热:已下载本地播的云端歌在 buildCloudDrivenList 里被置为 network=false + 本地路径,
                 // 但其去重/身份键走 getIdentityKey = net_{streamId}(流式身份,无需磁盘路径),
                 // 故预热 getIdentityKey(而非 getCachedKey)即可,避免对全部已下载歌做无谓的
-                // getCanonicalPath 磁盘 I/O(810 首≈220ms,是「本地→云端」切换延迟/卡顿的主因之一)。
+                // getCanonicalPath 磁盘 I/O。
+                // 注:「切换成云端很卡」的主因曾是 buildCloudDrivenList 对每首歌做 localPathKey(getCanonicalPath)
+                // + exists() + length() 的 ~1620 次散落 stat,现已改为「单次目录遍历 + O(1) 查表」根治。
                 warmKeys(deduped);
                 final List<MusicBean> finalList = deduped;
                 runOnUiThread(new Runnable() {
