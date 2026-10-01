@@ -140,7 +140,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
             etLocalPath.setText(savedLocalPath);
         }
 
-        // 回填自动缓存设置(默认:关闭 / 上限 2048MB)
+        // 回填自动缓存设置(默认:开启 / 上限 2048MB)
         cbAutoCache.setChecked(config.isAutoCacheOnPlay());
         etAutoCacheMax.setText(String.valueOf(config.getAutoCacheMaxMb()));
     }

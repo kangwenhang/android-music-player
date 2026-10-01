@@ -206,11 +206,22 @@ public class MusicSyncManager {
     }
 
     /**
-     * 开始同步(在后台线程调用)
-     * 每次从服务器获取最新列表,用HashSet去重,跳过已存在文件
-     * @param callback 进度回调
+     * 开始同步(在后台线程调用),下载全部缺失文件(全量模式)
      */
     public void sync(final SyncCallback callback) {
+        sync(callback, true);
+    }
+
+    /**
+     * 开始同步(在后台线程调用)
+     * 每次从服务器获取最新列表,用HashSet去重,跳过已存在文件
+     *
+     * @param callback 进度回调
+     * @param downloadAudio true=下载全部缺失音频(全量同步,手动同步用);
+     *                      false=仅刷新云端歌曲列表(更新 SongCache/StreamIdIndex,不下载音频),
+     *                      配合"点击播放按需缓存"模式:云端列表发现新歌靠它,音频下载交给播放时 autoCacheSong
+     */
+    public void sync(final SyncCallback callback, final boolean downloadAudio) {
         if (api == null) {
             callback.onError("Navidrome 未配置");
             return;
@@ -266,6 +277,28 @@ public class MusicSyncManager {
         // 3.1 用同步列表(每个 song 带 streamId)重建 路径→streamId 索引,
         //     让 MusicScanner 扫描本地文件时能回填 streamId,启用稳定的服务端身份去重。
         StreamIdIndex.build(context, allSongs, syncPath);
+
+        // 仅刷新列表模式:云端歌曲列表已写入 SongCache 并重建 StreamIdIndex,
+        // 不下载任何音频 —— 按需缓存由播放时的 autoCacheSong 负责。
+        // 统计一下本地已有文件数作为 skipped,保持回调语义完整。
+        if (!downloadAudio) {
+            Log.d(TAG, "列表刷新完成(不下载音频): 共 " + allSongs.size() + " 首");
+            callback.onStart(allSongs.size());
+            callback.onProgress(0, allSongs.size(), "云端列表已更新");
+            int existing = 0;
+            for (MusicBean song : allSongs) {
+                if (cancelled) {
+                    callback.onCancelled(0, allSongs.size());
+                    return;
+                }
+                File localFile = buildLocalFile(song);
+                if (localFile.exists() && localFile.length() > 1024) {
+                    existing++;
+                }
+            }
+            callback.onComplete(0, existing, 0, allSongs.size());
+            return;
+        }
 
         Log.d(TAG, "同步开始: 共 " + allSongs.size() + " 首歌曲");
 

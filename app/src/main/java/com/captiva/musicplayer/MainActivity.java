@@ -3369,11 +3369,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 后台自动同步
-     * 直接启动 MusicSyncManager.sync()
-     * - sync() 内部从服务器获取最新歌曲列表(确保发现新歌)
-     * - 逐首检查文件是否存在,已存在的跳过(增量同步)
-     * - 全部已存在才显示"已是最新",否则只下载缺失的文件
+     * 后台自动刷新云端列表
+     * 云端为「点击播放」模式:后台只刷新云端歌曲列表(发现新歌/更新streamUrl),
+     * 不再全量下载音频;音频在点击播放时按需下载缓存(MusicService.maybeAutoCache)。
+     * 全量下载仍可在「同步」界面手动触发(SyncActivity)。
      * 注意:此方法可能从后台线程调用,startAutoSync 内部操作了 UI,
      *       所以必须切到主线程执行。
      */
@@ -3432,6 +3431,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 仅刷新云端列表(不下载音频):音频由播放时按需缓存
                 syncManager.sync(new MusicSyncManager.SyncCallback() {
                     @Override
                     public void onStart(final int totalSongs) {
@@ -3439,7 +3439,7 @@ public class MainActivity extends AppCompatActivity {
                             @Override
                             public void run() {
                                 tvSyncStatus.setVisibility(View.VISIBLE);
-                                tvSyncStatus.setText("同步 准备中.../" + totalSongs);
+                                tvSyncStatus.setText("更新云端列表...");
                             }
                         });
                     }
@@ -3449,7 +3449,7 @@ public class MainActivity extends AppCompatActivity {
                         handler.post(new Runnable() {
                             @Override
                             public void run() {
-                                tvSyncStatus.setText("同步 " + downloaded + "/" + total);
+                                tvSyncStatus.setText("更新列表 " + total);
                             }
                         });
                     }
@@ -3499,7 +3499,7 @@ public class MainActivity extends AppCompatActivity {
                                 if (downloaded > 0) {
                                     tvSyncStatus.setText("已同步 +" + downloaded + " 首");
                                 } else {
-                                    tvSyncStatus.setText("已是最新");
+                                    tvSyncStatus.setText("列表已更新");
                                 }
                                 updateCount();
                                 if (tvEmpty.getVisibility() == View.VISIBLE && !musicList.isEmpty()) {
@@ -3531,7 +3531,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                         });
                     }
-                });
+                }, false);   // 列表刷新模式:不下载音频,播放时按需缓存
             }
         }).start();
     }

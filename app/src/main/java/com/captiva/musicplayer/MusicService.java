@@ -754,6 +754,9 @@ public class MusicService extends Service {
         if (bean == null) {
             return;
         }
+        // 播放优先使用缓存:列表状态可能滞后(如刚在别的入口下载完成),
+        // 播放前再做一次本地文件检查,已缓存则直接转本地播放,绝不联网重复拉流。
+        bean = promoteToLocalIfCached(bean);
         // 更新全局当前播放歌曲(供 EqualizerActivity 等获取)
         MusicDataHolder.getInstance().setCurrentPlayingMusic(bean);
         // 增加 token:每次切歌都递增,旧请求自动作废
@@ -879,6 +882,39 @@ public class MusicService extends Service {
                 }
             }, 1000);
         }
+    }
+
+    /**
+     * 播放前的缓存优先检查:若云端歌曲的本地缓存文件已存在(与同步/自动缓存同一固定路径),
+     * 则原地转为本地播放并广播来源变化。列表状态可能滞后(刚下载完成尚未重建列表),
+     * 所以在播放瞬间用一次文件 stat 兜底,保证"播放优先使用缓存"。
+     *
+     * @return 传入的 bean(可能已被改为本地可用)
+     */
+    private MusicBean promoteToLocalIfCached(MusicBean bean) {
+        if (bean == null || !bean.isNetwork()
+                || bean.getStreamId() == null || bean.getStreamId().isEmpty()) {
+            return bean;
+        }
+        try {
+            String cloudDir = navidromeConfig != null ? navidromeConfig.getCloudDir() : null;
+            if (cloudDir == null || cloudDir.isEmpty()) {
+                return bean;
+            }
+            java.io.File localFile = MusicSyncManager.buildLocalFile(bean, cloudDir);
+            if (localFile.exists() && localFile.length() > 1024) {
+                bean.setNetwork(false);
+                bean.setData(localFile.getAbsolutePath());
+                bean.setUri(null);
+                // 通知界面刷新来源标识(云端→本地)
+                Intent i = new Intent(ACTION_CACHE_AVAILABILITY_CHANGED);
+                i.putExtra("streamId", bean.getStreamId());
+                sendBroadcast(i);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "promoteToLocalIfCached failed", e);
+        }
+        return bean;
     }
 
     /**

@@ -220,9 +220,11 @@ public class NavidromeConfig {
         prefs.edit().putBoolean(KEY_LOCAL_MODE, local).apply();
     }
 
-    /** 播放云端歌曲时是否自动下载缓存到本地(默认关,避免车机存储与流量失控) */
+    /** 播放云端歌曲时是否自动下载缓存到本地。
+     *  云端为「点击播放」模式:默认开启 —— 点击播放即边播边缓存(受配额约束),
+     *  下次播放优先本地;后台同步不再全量下载,全量下载走 SyncActivity 手动触发。 */
     public boolean isAutoCacheOnPlay() {
-        return prefs.getBoolean(KEY_AUTO_CACHE_ON_PLAY, false);
+        return prefs.getBoolean(KEY_AUTO_CACHE_ON_PLAY, true);
     }
 
     /** 设置是否开启播放时自动缓存 */

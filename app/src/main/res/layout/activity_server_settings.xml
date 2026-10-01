@@ -220,7 +220,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="播放自动缓存(云端歌曲播放时下载到本地,断网可听)"
+                android:text="播放时自动缓存(点击播放即下载到本地,下次优先本地播放;上限见下方)"
                 android:textColor="@color/text_secondary"
                 android:textSize="@dimen/sub_text_size"
                 android:layout_marginTop="20dp"

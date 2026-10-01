@@ -13,9 +13,10 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 /**
- * 音乐同步界面
- * 从 Navidrome 服务器下载全部音乐到本地指定目录
- * 下载完成后网络模式从本地播放,彻底解决卡顿问题
+ * 手动全量同步界面
+ * 从服务器下载全部音乐到本地指定目录(后台自动同步只刷新列表,不下载音频;
+ * 本页是用户主动「整库下载」的入口,保留全量模式)
+ * 下载完成后云端列表中这些歌会自动转为本地播放
  */
 public class SyncActivity extends AppCompatActivity {
 
