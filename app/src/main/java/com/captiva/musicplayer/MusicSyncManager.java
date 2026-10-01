@@ -177,6 +177,15 @@ public class MusicSyncManager {
      */
     public static boolean autoCacheSong(Context context, MusicSourceApi api,
                                         MusicBean song, String syncPath, long maxBytes) {
+        return autoCacheSong(context, api, song, syncPath, maxBytes, null);
+    }
+
+    /**
+     * 同上,附加下载进度回调(用于未缓存歌曲的进度条显示);listener 可为 null。
+     */
+    public static boolean autoCacheSong(Context context, MusicSourceApi api,
+                                        MusicBean song, String syncPath, long maxBytes,
+                                        MusicSourceApi.DownloadProgressListener progressListener) {
         if (context == null || api == null || song == null || syncPath == null
                 || syncPath.isEmpty() || song.getStreamId() == null
                 || song.getStreamId().isEmpty()) {
@@ -190,7 +199,7 @@ public class MusicSyncManager {
         if (parent != null && !parent.exists()) {
             parent.mkdirs();
         }
-        long bytes = api.downloadFile(song.getStreamId(), target);
+        long bytes = api.downloadFile(song.getStreamId(), target, progressListener);
         if (bytes <= 0) {
             return false;
         }

@@ -261,17 +261,26 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    // 自动缓存完成广播接收:云端歌曲下载到本地后,刷新来源标识(云端→本地)
+    // 自动缓存完成/进度广播接收:刷新来源标识(云端→本地)与未缓存歌曲的进度条
     private final BroadcastReceiver cacheReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (MusicService.ACTION_CACHE_AVAILABILITY_CHANGED.equals(intent.getAction())) {
+            String action = intent.getAction();
+            if (MusicService.ACTION_CACHE_AVAILABILITY_CHANGED.equals(action)) {
                 // bean 已由 MusicService 原地翻转为本地可用(与界面列表共享同一对象),
                 // 这里只刷新列表视图与高亮,无需重新构建列表。
                 if (adapter != null) {
+                    // 下载完成:清除该行的缓存进度条,再整体刷新来源标识
+                    adapter.clearCacheProgress(intent.getStringExtra("streamId"));
                     adapter.notifyDataSetChanged();
                 }
                 updatePlayingHighlight();
+            } else if (MusicService.ACTION_CACHE_PROGRESS.equals(action)) {
+                // 未缓存歌曲正在按需下载:更新对应行的进度条
+                if (adapter != null) {
+                    adapter.updateCacheProgress(intent.getStringExtra("streamId"),
+                            intent.getIntExtra("percent", -2));
+                }
             }
         }
     };
@@ -502,6 +511,8 @@ public class MainActivity extends AppCompatActivity {
 
         adapter = new MusicAdapter(this);
         adapter.setFavoriteManager(favoriteManager);
+        // 本地模式下全部是本地歌曲,来源状态点无信息量 → 隐藏
+        adapter.setShowSourceDot(!localOnlyMode);
         // 异步过滤(搜索/收藏/去重)完成后,filteredData 才是最终态,这里刷新计数,
         // 避免 "updateCount() 跑在 filter() 异步返回之前" 导致的统计数错误。
         adapter.setOnFilterCompleteListener(new MusicAdapter.OnFilterCompleteListener() {
@@ -2601,6 +2612,8 @@ public class MainActivity extends AppCompatActivity {
         localOnlyMode = toLocal;
         navidromeConfig.setLocalMode(toLocal);
         updateSourceToggleUi();
+        // 本地模式隐藏来源状态点(全部是本地歌,点无信息量)
+        adapter.setShowSourceDot(!toLocal);
         syncLocalDirObserver();
         if (sourceSwitchInFlight) {
             return; // 正在切换,目标已是最新,等完成后自动收敛到最终模式
@@ -2693,6 +2706,8 @@ public class MainActivity extends AppCompatActivity {
                         public void run() {
                             localOnlyMode = true;
                             updateSourceToggleUi();
+                            // 云端不可用回退本地:同样隐藏状态点
+                            adapter.setShowSourceDot(false);
                             Toast.makeText(MainActivity.this,
                                     "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
                             syncLocalDirObserver();
@@ -3928,8 +3943,9 @@ public class MainActivity extends AppCompatActivity {
 
         IntentFilter f = new IntentFilter(MusicService.ACTION_STATE_CHANGED);
         registerReceiver(stateReceiver, f);
-        // 注册自动缓存完成接收器(刷新来源标识)
+        // 注册自动缓存完成/进度接收器(刷新来源标识与缓存进度条)
         IntentFilter cf = new IntentFilter(MusicService.ACTION_CACHE_AVAILABILITY_CHANGED);
+        cf.addAction(MusicService.ACTION_CACHE_PROGRESS);
         registerReceiver(cacheReceiver, cf);
         handler.post(progressTask);
         // 恢复本地目录监听(仅本地模式会真正启动 FileObserver)

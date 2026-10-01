@@ -683,7 +683,14 @@ public class NavidromeApi implements MusicSourceApi {
      * @param destFile 目标文件
      * @return 下载的字节数,-1表示失败
      */
+    @Override
     public long downloadFile(String songId, File destFile) {
+        return downloadFile(songId, destFile, null);
+    }
+
+    @Override
+    public long downloadFile(String songId, File destFile,
+                             MusicSourceApi.DownloadProgressListener listener) {
         if (songId == null || songId.isEmpty() || destFile == null) {
             return -1;
         }
@@ -711,6 +718,7 @@ public class NavidromeApi implements MusicSourceApi {
                 return -1;
             }
 
+            long contentLength = conn.getContentLengthLong();
             is = conn.getInputStream();
             fos = new FileOutputStream(destFile);
             byte[] buf = new byte[8192];
@@ -719,6 +727,9 @@ public class NavidromeApi implements MusicSourceApi {
             while ((len = is.read(buf)) != -1) {
                 fos.write(buf, 0, len);
                 total += len;
+                if (listener != null) {
+                    listener.onProgress(total, contentLength);
+                }
             }
             fos.flush();
             Log.d(TAG, "下载完成: " + songId + " -> " + destFile.getName() + " (" + total + " bytes)");

@@ -48,6 +48,13 @@ public class MusicService extends Service {
     public static final String ACTION_CACHE_AVAILABILITY_CHANGED =
             "com.captiva.musicplayer.CACHE_AVAILABILITY_CHANGED";
 
+    /**
+     * 自动缓存下载进度广播(未缓存歌曲的进度条显示)。
+     * extras: streamId(歌曲服务端ID)、percent(0-100;-1=总长未知用不定进度;-2=下载结束,隐藏进度条)
+     */
+    public static final String ACTION_CACHE_PROGRESS =
+            "com.captiva.musicplayer.CACHE_PROGRESS";
+
     // 对外广播 action
     public static final String ACTION_STATE_CHANGED = "com.captiva.musicplayer.STATE_CHANGED";
     public static final String ACTION_PROGRESS = "com.captiva.musicplayer.PROGRESS";
@@ -943,9 +950,30 @@ public class MusicService extends Service {
         cacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
+                // 进度节流:仅百分比变化时广播(总长未知时按 500ms 节流)
+                final long[] lastTime = {0L};
+                final int[] lastPct = {-100};
+                MusicSourceApi.DownloadProgressListener listener =
+                        new MusicSourceApi.DownloadProgressListener() {
+                    @Override
+                    public void onProgress(long bytes, long contentLength) {
+                        int pct = contentLength > 0
+                                ? (int) (bytes * 100 / contentLength) : -1;
+                        long now = System.currentTimeMillis();
+                        if (pct == lastPct[0] && (pct >= 0 || now - lastTime[0] < 500)) {
+                            return;
+                        }
+                        lastPct[0] = pct;
+                        lastTime[0] = now;
+                        Intent pi = new Intent(ACTION_CACHE_PROGRESS);
+                        pi.putExtra("streamId", bean.getStreamId());
+                        pi.putExtra("percent", pct);
+                        sendBroadcast(pi);
+                    }
+                };
                 try {
                     boolean ok = MusicSyncManager.autoCacheSong(
-                            getApplicationContext(), api, bean, syncPath, maxBytes);
+                            getApplicationContext(), api, bean, syncPath, maxBytes, listener);
                     if (ok) {
                         // 即时把当前播放条目标记为本地可用(与手动同步后行为一致)。
                         // bean 是 service.playList 与界面列表共享的同一对象,原地修改即生效。
@@ -961,6 +989,12 @@ public class MusicService extends Service {
                     }
                 } catch (Exception e) {
                     Log.w(TAG, "auto cache failed: " + bean.getTitle(), e);
+                } finally {
+                    // 无论成功失败都通知界面结束该条的进度条显示(percent=-2)
+                    Intent pi = new Intent(ACTION_CACHE_PROGRESS);
+                    pi.putExtra("streamId", bean.getStreamId());
+                    pi.putExtra("percent", -2);
+                    sendBroadcast(pi);
                 }
             }
         });

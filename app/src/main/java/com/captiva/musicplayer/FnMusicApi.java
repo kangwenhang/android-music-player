@@ -794,6 +794,12 @@ public class FnMusicApi implements MusicSourceApi {
 
     @Override
     public long downloadFile(String songId, File destFile) {
+        return downloadFile(songId, destFile, null);
+    }
+
+    @Override
+    public long downloadFile(String songId, File destFile,
+                             MusicSourceApi.DownloadProgressListener listener) {
         if (songId == null || songId.isEmpty() || destFile == null) return -1;
         if (ensureToken() == null) return -1;
         File parent = destFile.getParentFile();
@@ -825,6 +831,7 @@ public class FnMusicApi implements MusicSourceApi {
                 Log.e(TAG, "download failed: HTTP " + code);
                 return -1;
             }
+            long contentLength = conn.getContentLengthLong();
             is = conn.getInputStream();
             fos = new FileOutputStream(destFile);
             byte[] buf = new byte[8192];
@@ -833,6 +840,9 @@ public class FnMusicApi implements MusicSourceApi {
             while ((len = is.read(buf)) != -1) {
                 fos.write(buf, 0, len);
                 total += len;
+                if (listener != null) {
+                    listener.onProgress(total, contentLength);
+                }
             }
             fos.flush();
             return total;

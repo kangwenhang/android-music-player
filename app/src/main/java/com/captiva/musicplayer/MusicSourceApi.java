@@ -94,4 +94,17 @@ public interface MusicSourceApi {
 
     /** 下载歌曲到本地,返回字节数,-1 表示失败 */
     long downloadFile(String songId, File destFile);
+
+    /** 下载进度回调:bytes = 已下载字节;contentLength = 总字节(未知为 -1) */
+    interface DownloadProgressListener {
+        void onProgress(long bytes, long contentLength);
+    }
+
+    /**
+     * 下载歌曲到本地并回调进度(用于未缓存歌曲的进度条显示)。
+     * 默认实现忽略进度,直接委托给无进度版本,数据源可选支持。
+     */
+    default long downloadFile(String songId, File destFile, DownloadProgressListener listener) {
+        return downloadFile(songId, destFile);
+    }
 }
