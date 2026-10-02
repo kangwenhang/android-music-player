@@ -530,6 +530,8 @@ public class MainActivity extends AppCompatActivity {
         statusDotDrawable.setColor(ContextCompat.getColor(this, R.color.server_status_disconnected));
         vServerStatus.setBackground(statusDotDrawable);
         setServerStatusDot(ServerStatusMonitor.Status.OFFLINE, "未连接");
+        // 按当前模式决定顶部服务器状态区(圆点 + "列表已更新")的显隐
+        updateServerStatusAreaVisibility();
         tvNowTitle = findViewById(R.id.tv_now_title);
         tvNowArtist = findViewById(R.id.tv_now_artist);
         tvCurrentTime = findViewById(R.id.tv_current_time);
@@ -2733,6 +2735,32 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * 顶部「服务器状态区」的可见性,跟随列表模式。
+     *
+     * 本地模式:列表全部是本地歌 —— 「服务器连接圆点」和「列表已更新」都没有意义,
+     * 一并隐藏(用户截图反馈:切到本地后右上角还挂着绿点、左上角还留着"列表已更新")。
+     * 同时隐藏的 tvSyncStatus 兼作手动更新列表的入口,本地模式的刷新入口是
+     * 「设置里的目录」与 FileObserver 自动监听,不需要顶栏入口。
+     *
+     * 云端模式:圆点恢复显示;tvSyncStatus 若不在同步中则恢复成「列表已更新」
+     * (它兼作手动更新入口,切回云端后入口要回来),同步中的文案由同步流程自己管理。
+     */
+    private void updateServerStatusAreaVisibility() {
+        if (flServerStatus != null) {
+            flServerStatus.setVisibility(localOnlyMode ? View.GONE : View.VISIBLE);
+        }
+        if (tvSyncStatus == null) {
+            return;
+        }
+        if (localOnlyMode) {
+            tvSyncStatus.setVisibility(View.GONE);
+        } else if (!isAutoSyncing && tvSyncStatus.getVisibility() != View.VISIBLE) {
+            tvSyncStatus.setVisibility(View.VISIBLE);
+            tvSyncStatus.setText("列表已更新");
+        }
+    }
+
+    /**
      * 本地/云端切换入口(按钮点击)。
      * 单飞:若上一次切换仍在后台构建/刷新中,只更新 localOnlyMode(最终目标),不重复开线程;
      * 当前切换完成后会校验最终目标,必要时自动补一次。这样快速连点只会产生「最终模式」的
@@ -2744,6 +2772,8 @@ public class MainActivity extends AppCompatActivity {
         localOnlyMode = toLocal;
         navidromeConfig.setLocalMode(toLocal);
         updateSourceToggleUi();
+        // 本地模式:隐藏右上角服务器状态圆点与「列表已更新」(全部是本地歌,均无意义)
+        updateServerStatusAreaVisibility();
         // 本地模式隐藏来源状态点(全部是本地歌,点无信息量)
         // notify=false:紧接着 applySourceMode 就会整表 setData,新数据自带最新状态;
         // 这里再 notifyDataSetChanged() 只会在下一帧白重绑一次(实测 ~180ms),拖长上屏延迟。
@@ -2946,6 +2976,8 @@ public class MainActivity extends AppCompatActivity {
                         public void run() {
                             localOnlyMode = true;
                             updateSourceToggleUi();
+                            // 回退到本地:服务器状态区同样收起
+                            updateServerStatusAreaVisibility();
                             // 云端不可用回退本地:同样隐藏状态点。
                             // 这条路径**不重建列表**(沿用原来那份),所以 toggleSource 里那次
                             // 静默设值不会有机会被 setData 渲染出来,必须在这里显式刷一次。
