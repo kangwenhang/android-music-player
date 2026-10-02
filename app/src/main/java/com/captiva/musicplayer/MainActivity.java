@@ -214,6 +214,8 @@ public class MainActivity extends AppCompatActivity {
     private static final long SOURCE_SWITCH_DEBOUNCE_MS = 250L;
     /** 当前列表实际是按哪个模式构建的(用于短路:目标模式没变就不需要重建) */
     private boolean lastAppliedMode = false;
+    /** 云端优先启动:本进程是否已经强制过一次(static,Activity 重建不重复触发) */
+    private static boolean forceCloudLaunchApplied = false;
     /** 防抖后的真正切换动作(合并连点,按最终目标模式重建一次) */
     private final Runnable pendingSourceSwitch = new Runnable() {
         @Override
@@ -451,6 +453,20 @@ public class MainActivity extends AppCompatActivity {
         navidromeConfig.migrateAutoCacheOnPlayIfNeeded();
         // 恢复上次的列表模式(true=本地列表,false=云端列表)
         localOnlyMode = navidromeConfig.isLocalMode();
+        // 开 app 固定进云端列表(用户明确选择"始终云端启动")。
+        // 背景:上次若停在「本地」而本地目录(根目录/本地歌曲)没歌,一开 app 就是空列表,
+        // 容易被误判成"歌单丢了"(车机日志 19:40:05 模式=本地 即此场景)。
+        // 只在**本进程首次**进 onCreate 时强制一次 —— Activity 因配置变化重建时不再打断
+        // 用户本次会话里手动切到的本地模式;会话内仍可自由切换,只是下次启动回到云端。
+        if (!forceCloudLaunchApplied) {
+            forceCloudLaunchApplied = true;
+            if (localOnlyMode) {
+                localOnlyMode = false;
+                navidromeConfig.setLocalMode(false);   // 同步落盘,保证下次启动也是云端
+                // 这里 CacheDebugLog 还没 init(目录未知),只进 logcat,避免写歪到默认 /Music
+                Log.i(TAG, "启动: 上次为本地模式,已按云端优先重置为云端");
+            }
+        }
         // 启动时的列表就是按此模式构建的(loadMusic),作为连点防抖的短路基准
         lastAppliedMode = localOnlyMode;
         localMusicCache = new LocalMusicCache(this);
