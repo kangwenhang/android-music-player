@@ -30,13 +30,22 @@
             android:textColor="@color/text_secondary"
             android:textSize="@dimen/sub_text_size" />
 
-        <!-- 同步进度(网络模式自动同步时显示) -->
+        <!-- 同步进度 / 手动刷新入口(网络模式自动同步时显示;点击可手动更新列表) -->
         <TextView
             android:id="@+id/tv_sync_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"
             android:layout_marginLeft="6dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?android:attr/selectableItemBackground"
             android:textColor="@color/source_network"
             android:textSize="@dimen/time_text_size"
             android:visibility="gone" />
@@ -99,17 +108,28 @@
             android:textColor="@color/btn_text"
             android:textSize="@dimen/sub_text_size" />
 
-        <!-- 服务器状态指示 -->
-        <TextView
-            android:id="@+id/tv_server_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_marginLeft="8dp"
-            android:text="●未连接"
-            android:textColor="@color/server_status_disconnected"
-            android:textSize="@dimen/sub_text_size"
-            android:singleLine="true" />
+        <!-- 服务器状态指示:只显示一个小圆点,不带文字
+             绿=已连接 / 橙=连接中 / 红=未连接(具体颜色由代码按状态设置)
+             外层 32dp 是透明的命中区 —— 电阻屏上 12dp 的圆点太难点,
+             点它可手动重新检测一次服务器连接 -->
+        <FrameLayout
+            android:id="@+id/fl_server_status"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="2dp"
+            android:layout_marginLeft="2dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?android:attr/selectableItemBackground">
+
+            <View
+                android:id="@+id/v_server_status"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_status_dot"
+                android:contentDescription="服务器状态" />
+        </FrameLayout>
     </LinearLayout>
 
     <!-- 中部:左侧歌曲列表 + 右侧歌词区(封面做底色) -->

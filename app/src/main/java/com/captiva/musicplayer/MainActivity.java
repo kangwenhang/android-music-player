@@ -157,7 +157,15 @@ public class MainActivity extends AppCompatActivity {
     // UI - 顶栏
     private EditText etSearch;
     private Button btnSettings, btnFavorites, btnEq, btnSourceToggle;
-    private TextView tvServerStatus;
+    /** 服务器状态小圆点(只显示颜色,不显示文字:绿=已连接 橙=连接中 红=未连接) */
+    private View vServerStatus;
+    /** 圆点外层的透明命中区(电阻屏上放大点击范围),点击=手动重测服务器连接 */
+    private View flServerStatus;
+    /** 小圆点的圆形背景(复用同一实例,只改颜色,避免每次状态变化都新建 Drawable) */
+    private android.graphics.drawable.GradientDrawable statusDotDrawable;
+    /** 上一次已应用的圆点颜色/描述(避免重复 setColor 触发无谓重绘) */
+    private int lastStatusDotColor = 0;
+    private String lastStatusDotDesc = null;
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
@@ -466,6 +474,14 @@ public class MainActivity extends AppCompatActivity {
         sideIndexBar = findViewById(R.id.side_index_bar);
         tvCount = findViewById(R.id.tv_count);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
+        // 顶栏状态文字兼作"手动更新列表"入口:自动同步完成后显示"列表已更新",
+        // 点它即可再手动刷新一次(云端=重新拉列表,本地=重扫本地目录)
+        tvSyncStatus.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                manualRefreshList();
+            }
+        });
         etSearch = findViewById(R.id.et_search);
         btnSettings = findViewById(R.id.btn_settings);
         btnFavorites = findViewById(R.id.btn_favorites);
@@ -473,7 +489,15 @@ public class MainActivity extends AppCompatActivity {
         // 按持久化的模式设置按钮外观(云端/本地)
         updateSourceToggleUi();
         btnEq = findViewById(R.id.btn_eq);
-        tvServerStatus = findViewById(R.id.tv_server_status);
+        // 服务器状态小圆点:用代码创建的圆形 Drawable 上色
+        // (不用 setBackgroundTintList —— 那是 API 21+,本应用最低要跑安卓 4.2.2/API 17)
+        flServerStatus = findViewById(R.id.fl_server_status);
+        vServerStatus = findViewById(R.id.v_server_status);
+        statusDotDrawable = new android.graphics.drawable.GradientDrawable();
+        statusDotDrawable.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        statusDotDrawable.setColor(ContextCompat.getColor(this, R.color.server_status_disconnected));
+        vServerStatus.setBackground(statusDotDrawable);
+        setServerStatusDot(ServerStatusMonitor.Status.OFFLINE, "未连接");
         tvNowTitle = findViewById(R.id.tv_now_title);
         tvNowArtist = findViewById(R.id.tv_now_artist);
         tvCurrentTime = findViewById(R.id.tv_current_time);
@@ -850,13 +874,16 @@ public class MainActivity extends AppCompatActivity {
         // 两个列表相互独立,各有各的数据来源与缓存;模式持久化,下次启动保持。
         btnSourceToggle.setOnClickListener(v -> toggleSource());
 
-        // 点击服务器状态可手动刷新
-        tvServerStatus.setOnClickListener(v -> {
-            if (statusMonitor != null && MusicDataHolder.getInstance().getMusicSourceApi() != null) {
-                Toast.makeText(this, "正在检测服务器连接...", Toast.LENGTH_SHORT).show();
-                statusMonitor.checkNow();
-            }
-        });
+        // 点击服务器状态圆点可手动刷新连接状态
+        // (监听挂在外层 32dp 命中区上 —— 12dp 的圆点在电阻屏上点不准)
+        if (flServerStatus != null) {
+            flServerStatus.setOnClickListener(v -> {
+                if (statusMonitor != null && MusicDataHolder.getInstance().getMusicSourceApi() != null) {
+                    Toast.makeText(this, "正在检测服务器连接...", Toast.LENGTH_SHORT).show();
+                    statusMonitor.checkNow();
+                }
+            });
+        }
 
         // 进度条
         sbProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -2317,37 +2344,58 @@ public class MainActivity extends AppCompatActivity {
 
     /** 更新服务器状态显示 */
     private void updateServerStatusDisplay(ServerStatusMonitor.Status status, String message) {
-        if (tvServerStatus == null) return;
+        setServerStatusDot(status, message);
+    }
 
-        String text;
+    /**
+     * 给服务器指示圆点上色。
+     *
+     * 需求:只显示一个小圆点、不带文字 ——
+     *   绿 = 已连接,橙 = 连接中,红 = 未连接。
+     * 其中"重连倒计时(RETRYING)"同属连接中语义,统一用橙色;
+     * "未配置服务器(OFFLINE)"同属未连接语义,统一用红色。
+     *
+     * message 不再直接显示,但会写进 contentDescription ——
+     * 这样重连倒计时等文字信息在无障碍/调试视图里仍然可查。
+     */
+    private void setServerStatusDot(ServerStatusMonitor.Status status, String message) {
+        if (vServerStatus == null || statusDotDrawable == null) {
+            return;
+        }
         int color;
-
+        String desc;
         switch (status) {
             case CONNECTED:
-                text = "●已连接";
                 color = ContextCompat.getColor(this, R.color.server_status_connected);
+                desc = "已连接";
                 break;
             case CONNECTING:
-                text = "●连接中";
                 color = ContextCompat.getColor(this, R.color.server_status_connecting);
+                desc = "连接中";
                 break;
             case RETRYING:
-                text = "●" + message;
-                color = ContextCompat.getColor(this, R.color.server_status_retrying);
+                color = ContextCompat.getColor(this, R.color.server_status_connecting);
+                desc = (message != null && !message.isEmpty()) ? message : "连接中";
                 break;
             case DISCONNECTED:
-                text = "●未连接";
                 color = ContextCompat.getColor(this, R.color.server_status_disconnected);
+                desc = "未连接";
                 break;
             case OFFLINE:
             default:
-                text = "●离线";
-                color = ContextCompat.getColor(this, R.color.server_status_offline);
+                color = ContextCompat.getColor(this, R.color.server_status_disconnected);
+                desc = "未连接";
                 break;
         }
-
-        tvServerStatus.setText(text);
-        tvServerStatus.setTextColor(color);
+        if (color != lastStatusDotColor) {
+            lastStatusDotColor = color;
+            statusDotDrawable.setColor(color);
+            vServerStatus.invalidate();
+        }
+        if (desc != null && !desc.equals(lastStatusDotDesc)) {
+            lastStatusDotDesc = desc;
+            vServerStatus.setContentDescription("服务器" + desc);
+        }
     }
 
     // ==================== 音乐加载 ====================
@@ -3407,6 +3455,47 @@ public class MainActivity extends AppCompatActivity {
             fname = idx >= 0 ? data.substring(idx + 1) : data;
         }
         return "meta_" + artist + "|" + album + "|" + title + "|" + fname;
+    }
+
+    /**
+     * 手动更新列表(点击顶栏状态文字触发)。
+     *
+     * 云端模式:重跑一次"只刷新列表"的同步(与后台自动同步同一条路径,不下载音频);
+     * 本地模式:重建本地列表(复用来源切换的 applySourceMode,
+     *           它自带单飞保护,连点不会并发扫描)。
+     * 各前置条件不满足时给出明确提示,而不是静默什么都不发生。
+     */
+    private void manualRefreshList() {
+        if (isAutoSyncing) {
+            Toast.makeText(this, "正在更新列表,请稍候...", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (localOnlyMode) {
+            if (sourceSwitchInFlight) {
+                Toast.makeText(this, "正在刷新列表,请稍候...", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            // 复用来源切换的单飞机制:置位后由 finishSourceSwitch 收尾复位
+            sourceSwitchInFlight = true;
+            Toast.makeText(this, "正在重新扫描本地列表...", Toast.LENGTH_SHORT).show();
+            applySourceMode(true);
+            return;
+        }
+
+        MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+        if (api == null || !MusicDataHolder.getInstance().isNavidromeEnabled()) {
+            Toast.makeText(this, "未配置云端服务器,无法更新列表", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String syncPath = navidromeConfig.getCloudDir();
+        if (syncPath == null || syncPath.isEmpty()) {
+            Toast.makeText(this, "未设置云端目录,请先在设置中配置", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "正在更新云端列表...", Toast.LENGTH_SHORT).show();
+        startAutoSync(syncPath, 0);
     }
 
     /**

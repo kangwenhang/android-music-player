@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 服务器状态小圆点:只定义形状与默认色(未连接红),
+     实际颜色由 MainActivity.updateServerStatusDisplay 按状态动态设置:
+     绿=已连接 / 橙=连接中 / 红=未连接 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/server_status_disconnected" />
+</shape>
