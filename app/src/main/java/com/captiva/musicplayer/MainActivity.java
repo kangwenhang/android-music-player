@@ -983,7 +983,8 @@ public class MainActivity extends AppCompatActivity {
                         // 缓存只在切换本地/云端时作废,不会一直不更新。
                         Log.i(TAG, "[FavToggle] 复用已缓存的云端收藏集合(秒开)");
                         adapter.setSearchKeyword(currentSearchQuery);
-                        adapter.filterFavorites(null);
+                        // 强制通道:模式切换是关键操作,不该被防抖决定成败
+                        adapter.filterFavorites(null, true);
                         updateCount();
                         updateCloudFavEmptyHint();
                         // 高亮推到下一帧:findPositionByBean 是 O(n) 遍历,
@@ -1015,7 +1016,9 @@ public class MainActivity extends AppCompatActivity {
                 adapter.setFavoritesMode(false);
                 // 恢复搜索或全部
                 long t1 = System.currentTimeMillis();
-                adapter.filter(currentSearchQuery);
+                // 强制通道:退出收藏夹是模式切换,关键词往往没变,若被 120ms 防抖
+                // 判定为"重复请求"就会静默跳过 —— 这类操作不该由防抖决定成败。
+                adapter.filter(currentSearchQuery, true);
                 Log.i(TAG, "[FavToggle] adapter.filter=" + (System.currentTimeMillis() - t1) + "ms");
                 updateCount();
                 // 隐藏"还没有收藏"的空提示
@@ -1034,6 +1037,27 @@ public class MainActivity extends AppCompatActivity {
                                 + " 总=" + (System.currentTimeMillis() - t0) + "ms");
                     }
                 });
+                // 自愈兜底:上面那次 filter 是**异步**的,而 updateCount() 是同步跑的 ——
+                // 所以"顶部计数已变成共 810 首"**不代表**列表真的切过来了(用户两次反馈
+                // 的正是这种"计数变了、列表还是收藏"的错位)。
+                // 500ms 后若发现"无搜索关键词、但过滤结果条数仍少于全量",说明这次过滤
+                // 没能生效(被作废/被防抖吃掉/被后续请求覆盖),再强制过滤一次。
+                // 只在异常路径动手,正常路径零开销、零闪烁。
+                rvList.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (favoritesOnly) return;                  // 用户又切回收藏夹了,不插手
+                        if (!currentSearchQuery.isEmpty()) return;  // 带搜索时无法便宜地判定期望条数
+                        int got = adapter.getTotalFilteredCount();
+                        int all = adapter.getTotalCount();
+                        if (got < all) {
+                            DownloadDiag.log("[收藏夹] 自愈:退出后列表仍只有 " + got + "/" + all
+                                    + " 首 → 重新强制过滤");
+                            adapter.filter(currentSearchQuery, true);
+                            updateCount();
+                        }
+                    }
+                }, 500);
             }
             if (PerfLogger.isEnabled()) {
                 PerfLogger.log("FavToggle", "总=" + (System.currentTimeMillis() - t0) + "ms favoritesOnly=" + favoritesOnly);
@@ -4323,7 +4347,7 @@ public class MainActivity extends AppCompatActivity {
                             // 云端收藏夹:沿用内存里已缓存的服务器收藏 ID 重新过滤(不联网);
                             // 本地收藏夹:用本机 FavoriteManager 过滤。
                             if (adapter.isCloudFavoritesMode()) {
-                                adapter.filterFavorites(null);
+                                adapter.filterFavorites(null, true);
                             } else {
                                 applyFavoritesFilter();
                             }

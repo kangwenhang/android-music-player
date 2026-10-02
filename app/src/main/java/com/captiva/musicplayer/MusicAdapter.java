@@ -87,8 +87,25 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     // 过滤遍历 + Diff 计算放到后台单线程,避免主线程遍历几百上千首导致掉帧
     private final ExecutorService filterExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    /** 过滤请求代际:每次新请求 +1,过期的异步结果直接丢弃,避免旧结果覆盖新结果 */
-    private int filterGeneration = 0;
+    /**
+     * 过滤请求代际:每次提交新过滤请求 +1,过期的异步结果直接丢弃,避免旧结果覆盖新结果。
+     *
+     * 注意:这个计数器**只能**由 requestFilter() 推进,代表"有没有更新的过滤请求"。
+     * 千万不要拿它去表示"data 被结构性改动了" —— 那会把本次过滤结果整包作废,
+     * 列表就永远不刷新(表现为"点了退出收藏夹/搜索,列表纹丝不动")。
+     * data 的结构性改动请走 {@link #dataVersion}。
+     */
+    private volatile int filterGeneration = 0;
+    /**
+     * data 列表的结构性改动代际:分批补加载(ensureLoaded)、追加(appendData)、
+     * 整体替换(setData)时 +1。
+     *
+     * 它和 filterGeneration 的区别:过滤结果 r.filtered **依然有效**(全量数据没换),
+     * 只是当初按旧快照算出来的 Diff 不适用了 —— 这种情况应该**重算一次 Diff 再套用**,
+     * 而不是把结果丢掉。以前两者共用 filterGeneration,于是滚动补批一次
+     * (退出收藏夹后 post 的高亮就会触发 ensureLoaded)就把"恢复全部歌曲"的结果吃掉了。
+     */
+    private volatile int dataVersion = 0;
     /** 当前过滤模式:false=普通搜索过滤,true=仅收藏 */
     private boolean favoritesMode = false;
     /** 收藏过滤使用的 FavoriteManager(异步计算时需要) */
@@ -111,6 +128,12 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private static final long FILTER_DEBOUNCE_MS = 120;
     private String lastFilterSignature = "";
     private long lastFilterSubmitTime = 0;
+    /**
+     * 下一次过滤完成后是否记一行结果日志。
+     * 只对 force 提交(模式切换这类关键操作)打开 —— 搜索输入每敲一个字都会过滤,
+     * 全记会把 download_debug.log 刷爆。
+     */
+    private volatile boolean logNextFilter = false;
 
     // 缓存颜色和尺寸(避免每次 onBindViewHolder 重复查询 Resources)
     private final int colorPlayingBg;
@@ -157,8 +180,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 使用 DiffUtil 增量刷新(只重绑变化行),替代 notifyDataSetChanged
      */
     public synchronized void setData(List<MusicBean> list) {
-        // 标记代际,使任何在途的异步过滤结果失效,避免覆盖本次新数据
+        // 整体替换数据:在途异步过滤是按**旧 fullData** 算的,结果本身已无意义,
+        // 所以这里要连过滤代次一起作废(不只是 dataVersion)。
         filterGeneration++;
+        dataVersion++;
         // 重置防抖签名,避免重载后一次相同关键词过滤被误判为重复而跳过
         lastFilterSignature = "";
         // 收藏模式要**保留**:原来这里无条件 favoritesMode=false,于是收藏夹模式下
@@ -209,9 +234,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (more == null || more.isEmpty()) {
             return;
         }
-        // 结构性修改 data/filteredData 前,使在途异步过滤的 dispatch 失效:
-        // 否则在途 diff 按旧快照 dispatch 会造成 RecyclerView 位置不一致(崩溃)
+        // 追加了新歌:在途异步过滤漏算了这批新数据,结果不完整,同样整体作废
         filterGeneration++;
+        dataVersion++;
         // 1. 用 HashSet O(1) 去重,只收集真正新增的歌曲
         List<MusicBean> newlyAdded = new ArrayList<>();
         for (MusicBean b : more) {
@@ -258,18 +283,36 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     /** 搜索过滤(主线程入口,遍历/diff 在后台线程执行) */
     public void filter(String keyword) {
+        filter(keyword, false);
+    }
+
+    /**
+     * 普通过滤(可选强制)。
+     *
+     * force=true 用于**模式切换**这种必须生效的关键操作(退出收藏夹等):
+     * 防抖本来是给"输入抖动/空关键词连环触发"用的,但模式切换时关键词往往没变,
+     * 一旦签名撞上就被静默跳过 —— 表现就是"点了退出收藏夹,列表没变"。
+     * 这类操作不该由防抖决定成败。
+     */
+    public void filter(String keyword, boolean force) {
         String kw = keyword == null ? "" : keyword.trim().toLowerCase();
         filterKeyword = kw; // 立即更新,保证 matchesFilter 一致性(后台线程会读取)
         // 防抖:相同签名且窗口内重复提交 → 跳过(典型场景:空关键词连续触发 / 输入抖动)
         String signature = "f:" + kw;
         long now = System.currentTimeMillis();
-        if (signature.equals(lastFilterSignature) && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
+        if (!force && signature.equals(lastFilterSignature)
+                && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
             Log.d(TAG, "[filter] 防抖跳过重复请求 keyword='" + kw + "'");
+            // 车机看不到 logcat,被跳过这种事必须落到文件里 —— 它正是"点了没反应"的头号嫌疑
+            DownloadDiag.log("[列表] 普通过滤被防抖跳过 keyword='" + kw
+                    + "'(距今 " + (now - lastFilterSubmitTime) + "ms < " + FILTER_DEBOUNCE_MS + "ms)");
             return;
         }
         lastFilterSignature = signature;
         lastFilterSubmitTime = now;
-        Log.i(TAG, "[filter] 提交异步过滤 keyword='" + kw + "' fullData=" + fullData.size());
+        logNextFilter = force;   // 关键操作记一行结果,搜索输入不记(避免刷屏)
+        Log.i(TAG, "[filter] 提交异步过滤 keyword='" + kw + "' fullData=" + fullData.size()
+                + " force=" + force);
         requestFilter(false, null);
     }
 
@@ -299,15 +342,24 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 遍历/diff 在后台线程执行,主线程只做增量 dispatch
      */
     public void filterFavorites(FavoriteManager fm) {
+        filterFavorites(fm, false);
+    }
+
+    /** 收藏过滤(可选强制);force 的用途同 {@link #filter(String, boolean)} */
+    public void filterFavorites(FavoriteManager fm, boolean force) {
         // 签名里带上收藏代次:收藏增删后即使关键词没变,也必须重新过滤
         String signature = "v:" + filterKeyword + ":" + favVersion;
         long now = System.currentTimeMillis();
-        if (signature.equals(lastFilterSignature) && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
+        if (!force && signature.equals(lastFilterSignature)
+                && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
             Log.d(TAG, "[filterFavorites] 防抖跳过重复请求");
+            DownloadDiag.log("[列表] 收藏过滤被防抖跳过(距今 "
+                    + (now - lastFilterSubmitTime) + "ms < " + FILTER_DEBOUNCE_MS + "ms)");
             return;
         }
         lastFilterSignature = signature;
         lastFilterSubmitTime = now;
+        logNextFilter = force;
         pendingFm = fm;
         requestFilter(true, fm);
     }
@@ -319,6 +371,12 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      */
     private void requestFilter(final boolean favMode, final FavoriteManager fm) {
         final int gen = ++filterGeneration;
+        // 提交时快照"data 结构版本":dispatch 前若发现变了,说明期间有人补加载/追加过,
+        // 旧 Diff 的基线不再是当前 data,必须重算(见下方 dispatch)。
+        final int dataVer = dataVersion;
+        // 结果日志开关:只有 force 提交(模式切换)才记,取到局部变量后立即复位
+        final boolean needLog = logNextFilter;
+        logNextFilter = false;
         favoritesMode = favMode;
         if (fm != null) pendingFm = fm;
         final long t0 = System.currentTimeMillis();
@@ -341,10 +399,32 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                     @Override
                     public void run() {
                         if (gen != filterGeneration) {
-                            // 已被更新的过滤请求取代,丢弃本次结果
+                            // 已被**更新的过滤请求**取代,丢弃本次结果。
+                            // 车机看不到 logcat,这种"算了但没用上"必须落到文件里,
+                            // 否则排查时只能靠猜。
+                            DownloadDiag.log("[列表] 过滤结果作废:已被更新的过滤请求取代"
+                                    + " (本次=" + gen + " 当前=" + filterGeneration + ")");
                             return;
                         }
                         long t1 = System.currentTimeMillis();
+                        DiffUtil.DiffResult diffToApply = diff;
+                        boolean reDiff = false;
+                        if (dataVer != dataVersion) {
+                            // 期间 data 被结构性地补加载过(滚动/高亮触发 ensureLoaded):
+                            // 过滤结果 r.filtered 仍然是对的,只是当初的 Diff 基线
+                            // (提交时的 data 快照)已经不是现在屏幕上这一份。
+                            // 用当前 data 重算一次 Diff 再套用 —— 以前这里是直接丢弃,
+                            // 于是"退出收藏夹"的恢复结果被吃掉,列表一直显示收藏。
+                            reDiff = true;
+                            List<MusicBean> curData;
+                            synchronized (MusicAdapter.this) {
+                                curData = new ArrayList<>(data);
+                            }
+                            // Diff 是 O(n·d),放到锁外算:别在主线程持锁期间做这种遍历,
+                            // 后台过滤线程正拿着同一把锁遍历 fullData,会互相阻塞。
+                            diffToApply = DiffUtil.calculateDiff(
+                                    new FilterDiffCallback(curData, r.firstBatch), false);
+                        }
                         synchronized (MusicAdapter.this) {
                             data.clear();
                             data.addAll(r.firstBatch);
@@ -353,7 +433,12 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             loadedCount = r.loadCount;
                             hasMore = loadedCount < filteredData.size();
                         }
-                        diff.dispatchUpdatesTo(MusicAdapter.this);
+                        diffToApply.dispatchUpdatesTo(MusicAdapter.this);
+                        if (needLog) {
+                            DownloadDiag.log("[列表] 过滤完成 模式=" + (favMode ? "仅收藏" : "全部")
+                                    + " 关键词='" + filterKeyword + "' 显示=" + r.filtered.size()
+                                    + "/" + fullData.size() + " 首 (重算Diff=" + reDiff + ")");
+                        }
                         // 过滤完成:通知外部刷新依赖过滤结果的 UI(如歌曲计数)。
                         // 此时 filteredData 已是最终态,updateCount() 读到的数字才正确,
                         // 避免"滤后计数滞后一帧"导致的统计数错误。
@@ -580,8 +665,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (position < 0 || position >= filteredData.size()) {
             return false;
         }
-        // 结构性追加 data 前使在途异步过滤 dispatch 失效(同 appendData 的理由)
-        filterGeneration++;
         // 如果位置已超出当前加载范围,一次性补充加载所有需要的批次
         // 然后只通知一次(原来每批 notifyItemRangeInserted,目标在 3000 时触发 60 次通知)
         while (loadedCount <= position && hasMore) {
@@ -595,6 +678,15 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         int added = loadedCount - startLoaded;
         if (added > 0) {
+            // 确实往 data 里追加了行:结构性改动,推进 dataVersion —— 让在途过滤结果
+            // 在 dispatch 前按当前 data **重算一次 Diff**,而不是被整包作废。
+            //
+            // 这里以前写的是 filterGeneration++ —— 那一次自增会在"退出收藏夹"时吃掉
+            // 刚提交的"恢复全部歌曲"过滤结果:切换分支里 rvList.post(updatePlayingHighlight)
+            // 会走到本方法,于是过滤结果到主线程时被判定为过期直接丢弃,列表纹丝不动,
+            // 而顶部计数(同步调用)已经变成"共 810 首" —— 正是用户截图里的现象。
+            // 过滤代次只代表"有没有更新的过滤请求",与本方法无关。
+            dataVersion++;
             // 只通知一次,而不是每批通知
             notifyItemRangeInserted(startLoaded, added);
             long elapsed = System.currentTimeMillis() - t0;
