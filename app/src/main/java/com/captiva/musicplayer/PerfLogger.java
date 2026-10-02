@@ -11,6 +11,8 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 性能日志工具
@@ -25,21 +27,59 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * 每次启动清空旧日志,重新记录。
  * 仅调试版(BuildConfig.DEBUG=true)启用;正式版不调用 init,perf 日志完全关闭。
  *
+ * 【写盘策略 —— 全异步】
+ * 早期实现里 enqueue() 会直接调 flushToFile(),也就是"谁写日志谁写盘":
+ * dump() 由主线程的定时任务调用,onFrame() 的掉帧日志也在主线程,
+ * 于是每攒 50 条就在主线程上做一次完整的 open→write→flush→close。
+ * 滑动列表时帧率日志累积很快,这个"第 50 条"的边界落在哪儿完全不可控,
+ * 可能在用户点击的瞬间正好触发一次主线程写盘 → 可见卡顿。
+ * 现在改为:enqueue()/dump() 只发出刷新信号,由独立守护线程批量落盘。
+ * 需要"立刻落盘"的场合(应用退出)仍可调 flushToFile() 同步写。
+ *
  * 使用方式(在 MainActivity.loadMusic 中,已按 BuildConfig.DEBUG 判断后调用):
  *   PerfLogger.init(context, syncPath);  // 初始化并开始写日志
  *   PerfLogger.log("onBind", 15);        // 记录耗时操作
- *   PerfLogger.dump();                   // 手动刷新到文件(另有 50 条/10秒 自动刷新)
+ *   PerfLogger.dump();                   // 请求刷新到文件(异步,另有 50 条自动请求)
  */
 public class PerfLogger {
 
     private static final String TAG = "PerfLogger";
     private static final String LOG_FILE_NAME = "perf_log.txt";
     private static final int MAX_QUEUE_SIZE = 5000;  // 环形缓冲区上限
+    /** 每积累多少条请求一次异步落盘 */
+    private static final int FLUSH_EVERY = 50;
 
     private static volatile boolean enabled = false;
     private static File logFile;
     private static final ConcurrentLinkedQueue<String> logQueue = new ConcurrentLinkedQueue<>();
-    private static final SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
+
+    /**
+     * 队列长度的近似计数。
+     * 之所以需要它:ConcurrentLinkedQueue.size() 是 O(n) 的,而原实现每次 enqueue
+     * 都要调两次,等于每写一条日志就遍历一遍整个队列(可能上千个节点),且都在主线程上。
+     * 这里用原子计数替代,只在极少数超过上限时才做一次精确核对。
+     */
+    private static final AtomicInteger logSize = new AtomicInteger(0);
+    /** 距上次请求落盘的条数(达到 FLUSH_EVERY 就发一次刷新信号) */
+    private static final AtomicInteger sinceFlush = new AtomicInteger(0);
+
+    /** 落盘串行化:写线程与 shutdown() 的同步落盘不能同时写同一个文件 */
+    private static final Object WRITE_LOCK = new Object();
+    /** 刷新信号量:release=请求落盘,写线程 acquire 后被唤醒 */
+    private static final Semaphore FLUSH_SIGNAL = new Semaphore(0);
+    private static volatile Thread writerThread;
+
+    /**
+     * 时间戳格式化。SimpleDateFormat 非线程安全,而 log() 会被主线程、
+     * 封面加载线程(磁盘读取打点)、下载线程等并发调用,必须用 ThreadLocal 隔离。
+     */
+    private static final ThreadLocal<SimpleDateFormat> SDF_HOLDER =
+            new ThreadLocal<SimpleDateFormat>() {
+                @Override
+                protected SimpleDateFormat initialValue() {
+                    return new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
+                }
+            };
 
     // 帧率监控
     private static long lastFrameTimeNanos = 0;
@@ -114,7 +154,7 @@ public class PerfLogger {
     /** 记录一条日志(带时间戳) */
     public static void log(String tag, String message) {
         if (!enabled) return;
-        String time = sdf.format(new Date());
+        String time = SDF_HOLDER.get().format(new Date());
         String entry = time + " [" + tag + "] " + message;
         enqueue(entry);
     }
@@ -122,7 +162,7 @@ public class PerfLogger {
     /** 记录一条耗时日志 */
     public static void log(String tag, long elapsedMs) {
         if (!enabled) return;
-        String time = sdf.format(new Date());
+        String time = SDF_HOLDER.get().format(new Date());
         // 加严:>8ms 标 ⚠️,>16ms 标 🔴(车机上这些会被放大成明显卡顿)
         String flag = elapsedMs > OP_SEVERE_MS ? " 🔴"
                 : elapsedMs > OP_WARN_MS ? " ⚠️" : "";
@@ -140,20 +180,76 @@ public class PerfLogger {
     /** 记录一条普通日志(无耗时) */
     public static void log(String message) {
         if (!enabled) return;
-        String time = sdf.format(new Date());
+        String time = SDF_HOLDER.get().format(new Date());
         String entry = time + " " + message;
         enqueue(entry);
     }
 
+    /**
+     * 入队。只做内存操作 —— 不写盘、不阻塞调用线程。
+     * 达到 FLUSH_EVERY 条时发出一次异步刷新信号(由写线程落盘)。
+     */
     private static void enqueue(String entry) {
         logQueue.add(entry);
-        // 环形缓冲区:超过上限丢弃最旧的
-        while (logQueue.size() > MAX_QUEUE_SIZE) {
-            logQueue.poll();
+        int size = logSize.incrementAndGet();
+        // 环形缓冲区:超过上限丢弃最旧的。
+        // 注意不要在这里无脑调 logQueue.size()(O(n));用近似计数判断,只有确实超限时才精确核对一次
+        if (size > MAX_QUEUE_SIZE) {
+            int real = logQueue.size();
+            while (real > MAX_QUEUE_SIZE && logQueue.poll() != null) {
+                real--;
+            }
+            logSize.set(real);
         }
-        // 每积累 50 条自动刷新一次
-        if (logQueue.size() % 50 == 0) {
-            flushToFile();
+        // 每积累 FLUSH_EVERY 条请求一次落盘(异步,调用线程立刻返回)
+        if (sinceFlush.incrementAndGet() >= FLUSH_EVERY) {
+            sinceFlush.set(0);
+            requestFlush();
+        }
+    }
+
+    /** 发出一次异步落盘请求(非阻塞,可从主线程安全调用) */
+    private static void requestFlush() {
+        ensureWriter();
+        FLUSH_SIGNAL.release();
+    }
+
+    /** 懒启动写线程(守护线程,不阻止进程退出) */
+    private static void ensureWriter() {
+        if (writerThread != null) {
+            return;
+        }
+        synchronized (PerfLogger.class) {
+            if (writerThread != null) {
+                return;
+            }
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    writeLoop();
+                }
+            }, "perf-log-writer");
+            t.setDaemon(true);
+            t.start();
+            writerThread = t;
+        }
+    }
+
+    /** 写线程主循环:收到信号就落盘;连续多次信号合并成一次(drain 会把队列写空) */
+    private static void writeLoop() {
+        while (true) {
+            try {
+                FLUSH_SIGNAL.acquire();
+                // 合并积压的信号:一次 flushToFile 就能把队列写空,多余的信号不必重复处理
+                while (FLUSH_SIGNAL.tryAcquire()) {
+                    // 故意留空:把 permits 消耗掉
+                }
+                flushToFile();
+            } catch (InterruptedException ie) {
+                return;
+            } catch (Throwable t) {
+                // 静默:性能日志失败绝不影响业务
+            }
         }
     }
 
@@ -211,34 +307,54 @@ public class PerfLogger {
         lastFrameTimeNanos = frameTimeNanos;
     }
 
-    /** 手动刷新日志到文件 */
+    /**
+     * 把队列里积压的日志写入文件(同步方法)。
+     *
+     * 正常情况下由写线程调用;另在应用退出(shutdown)时由调用方同步调用,
+     * 以保证最后一批日志不丢。加写锁串行化,避免与写线程同时写同一个文件。
+     */
     public static void flushToFile() {
         if (!enabled || logFile == null) return;
-        OutputStreamWriter writer = null;
-        try {
-            writer = new OutputStreamWriter(new FileOutputStream(logFile, true), "UTF-8");
-            String entry;
-            while ((entry = logQueue.poll()) != null) {
-                writer.write(entry);
-                writer.write('\n');
-            }
-            writer.flush();
-        } catch (Exception e) {
-            Log.w(TAG, "flushToFile failed", e);
-        } finally {
-            if (writer != null) {
-                try { writer.close(); } catch (Exception ignored) {}
+        synchronized (WRITE_LOCK) {
+            OutputStreamWriter writer = null;
+            try {
+                writer = new OutputStreamWriter(new FileOutputStream(logFile, true), "UTF-8");
+                String entry;
+                int drained = 0;
+                while ((entry = logQueue.poll()) != null) {
+                    writer.write(entry);
+                    writer.write('\n');
+                    drained++;
+                }
+                writer.flush();
+                if (drained > 0) {
+                    // 修正近似计数(只用于上限裁剪;并发 enqueue 会让它略有偏差,夹到 0 以上即可)
+                    int left = logSize.addAndGet(-drained);
+                    if (left < 0) {
+                        logSize.set(0);
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "flushToFile failed", e);
+            } finally {
+                if (writer != null) {
+                    try { writer.close(); } catch (Exception ignored) {}
+                }
             }
         }
     }
 
-    /** dump 当前状态(定时调用) */
+    /**
+     * dump 当前状态(定时调用)。
+     * 只发出异步落盘请求,不阻塞调用线程 —— 这个方法由主线程的定时任务调用,
+     * 早先的同步写盘会在车机上造成周期性卡顿。
+     */
     public static void dump() {
         if (!enabled) return;
-        flushToFile();
+        requestFlush();
     }
 
-    /** 应用退出时调用 */
+    /** 应用退出时调用:这里同步落盘,确保最后一批日志不丢 */
     public static void shutdown() {
         if (!enabled) return;
         log("=== PerfLogger 关闭 ===");
