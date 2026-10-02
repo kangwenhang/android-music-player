@@ -76,6 +76,22 @@ public interface MusicSourceApi {
     /** 收藏的歌曲 */
     List<MusicBean> getStarredSongs();
 
+    /**
+     * 把一首歌标为服务器收藏(星标)。
+     * 失败返回 false —— 调用方仍会保留本地收藏,只影响跨设备同步,不影响本机使用。
+     */
+    default boolean starSong(String songId) {
+        return false;
+    }
+
+    /**
+     * 取消服务器收藏(星标)。
+     * 失败返回 false —— 同上,本地收藏仍会照常取消。
+     */
+    default boolean unstarSong(String songId) {
+        return false;
+    }
+
     // ==================== 歌词 ====================
 
     /** 按歌曲 ID 获取结构化歌词 */

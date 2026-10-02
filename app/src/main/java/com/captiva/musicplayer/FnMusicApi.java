@@ -753,6 +753,55 @@ public class FnMusicApi implements MusicSourceApi {
     }
 
     @Override
+    public boolean starSong(String songId) {
+        return setFavorite(songId, true);
+    }
+
+    @Override
+    public boolean unstarSong(String songId) {
+        return setFavorite(songId, false);
+    }
+
+    /**
+     * 飞牛收藏 / 取消收藏。
+     *
+     * 端点说明:飞牛的收藏**读**接口是 /favorite-track/list(已在用),但写接口没有公开文档,
+     * 命名风格不明。这里按同一前缀列出最可能的几个候选依次尝试,一个成功即止。
+     * 全部失败时返回 false —— 调用方仍会保留本地收藏,不影响本机使用,
+     * 失败详情写进 download_debug.log,拿到日志后就能把正确端点固定下来。
+     */
+    private boolean setFavorite(String songId, boolean add) {
+        if (songId == null || songId.isEmpty()) return false;
+        if (ensureToken() == null) {
+            DownloadDiag.log("飞牛收藏失败: token 为空(登录态失效)");
+            return false;
+        }
+        String[] candidates = add
+                ? new String[]{"/favorite-track/add", "/favorite-track/save", "/favorite-track/create"}
+                : new String[]{"/favorite-track/remove", "/favorite-track/delete", "/favorite-track/cancel"};
+        for (String ep : candidates) {
+            try {
+                JSONObject body = new JSONObject();
+                body.put("trackGUID", songId);
+                String resp = httpPost(ep, body);
+                if (resp == null) continue;
+                JSONObject root = new JSONObject(resp);
+                int code = root.optInt("code", -1);
+                if (code == 0) {
+                    Log.d(TAG, "飞牛收藏" + (add ? "成功" : "已取消") + " 端点=" + ep);
+                    return true;
+                }
+                DownloadDiag.log("飞牛收藏端点 " + ep + " 返回 code=" + code
+                        + " msg=" + root.optString("msg"));
+            } catch (Exception e) {
+                DownloadDiag.logError("飞牛收藏端点异常 " + ep, e);
+            }
+        }
+        DownloadDiag.log("飞牛收藏失败: 候选端点均不可用 songId=" + songId + " add=" + add);
+        return false;
+    }
+
+    @Override
     public List<LrcEntry> getLyricsBySongId(String songId) {
         List<LrcEntry> empty = new ArrayList<>();
         if (songId == null || songId.isEmpty()) return empty;

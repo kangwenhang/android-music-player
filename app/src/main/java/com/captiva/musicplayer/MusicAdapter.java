@@ -93,6 +93,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private boolean favoritesMode = false;
     /** 收藏过滤使用的 FavoriteManager(异步计算时需要) */
     private FavoriteManager pendingFm = null;
+    /**
+     * 云端收藏夹使用的**服务器收藏 streamId 集合**;null 表示用本地 FavoriteManager 过滤。
+     *
+     * 两种收藏来源分开处理:云端模式看服务器 starred(跨设备同步),
+     * 本地模式看本机 FavoriteManager(离线可用)。两者互斥,靠这个字段是否为 null 区分。
+     */
+    private volatile Set<String> cloudStarredIds = null;
     /** 防抖窗口:相同签名的过滤请求在此窗口内合并,避免输入/滑动抖动引发主线程重复刷新 */
     private static final long FILTER_DEBOUNCE_MS = 120;
     private String lastFilterSignature = "";
@@ -147,9 +154,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         filterGeneration++;
         // 重置防抖签名,避免重载后一次相同关键词过滤被误判为重复而跳过
         lastFilterSignature = "";
-        // 重新载入完整列表时回到普通模式(历史行为:setData 不应用收藏过滤)
-        favoritesMode = false;
-        pendingFm = null;
+        // 收藏模式要**保留**:原来这里无条件 favoritesMode=false,于是收藏夹模式下
+        // 任何一次后台刷新(setData:扫描合并 / 同步完成 / 切歌后补全)都会把列表
+        // 悄悄打回"全部歌曲",而按钮仍显示收藏态 —— 表现就是"点了不过滤"。
+        // 现在非收藏模式下 favoritesMode 本来就 false,行为完全不变;
+        // 收藏模式下沿用 pendingFm 重新计算,刷新后依然是收藏列表。
+        if (!favoritesMode) {
+            pendingFm = null;
+        }
         fullData.clear();
         fullDataKeys.clear();
         if (list != null) {
@@ -163,7 +175,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         loadedCount = 0;
         List<MusicBean> oldData = new ArrayList<>(data);
-        FilterResult r = computeFilteredUnsafe(favoritesMode, pendingFm);
+        FilterResult r = computeFilteredUnsafe(favoritesMode, pendingFm, cloudStarredIds);
         data.clear();
         data.addAll(r.firstBatch);
         filteredData.clear();
@@ -310,7 +322,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 final FilterResult r;
                 synchronized (MusicAdapter.this) {
                     oldData = new ArrayList<>(data);
-                    r = computeFilteredUnsafe(favMode, fm);
+                    r = computeFilteredUnsafe(favMode, fm, cloudStarredIds);
                 }
                 // 2. 后台线程:计算 Diff(数据量小,通常 <1ms)
                 final DiffUtil.DiffResult diff =
@@ -359,12 +371,19 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 在持有 this 锁的前提下计算过滤结果(不自带锁,调用方必须同步)。
      * 同时应用搜索关键词与(可选)收藏过滤。
      */
-    private FilterResult computeFilteredUnsafe(boolean favMode, FavoriteManager fm) {
+    private FilterResult computeFilteredUnsafe(boolean favMode, FavoriteManager fm,
+                                                Set<String> cloudIds) {
         FilterResult r = new FilterResult();
         r.filtered = new ArrayList<>();
         for (MusicBean b : fullData) {
             if (favMode) {
-                if (fm != null && fm.isFavorite(b) && matchesFilter(b)) {
+                if (cloudIds != null) {
+                    // 云端收藏夹:按服务器返回的 streamId 集合过滤,与本地收藏无关
+                    String sid = b.getStreamId();
+                    if (sid != null && cloudIds.contains(sid) && matchesFilter(b)) {
+                        r.filtered.add(b);
+                    }
+                } else if (fm != null && fm.isFavorite(b) && matchesFilter(b)) {
                     r.filtered.add(b);
                 }
             } else {
@@ -651,6 +670,32 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     public void setFavoriteManager(FavoriteManager fm) {
         this.favoriteManager = fm;
+    }
+
+    /**
+     * 直接设置收藏过滤模式(不触发异步过滤)。
+     * 给"云端收藏夹"用:它的列表本身就是服务器返回的收藏曲目,
+     * 不需要再用本地 FavoriteManager 过滤一遍,必须先关掉这个模式,
+     * 否则 setData 会拿本地收藏集合把服务器列表过滤掉(本地没收藏过就变空列表)。
+     */
+    public void setFavoritesMode(boolean on) {
+        favoritesMode = on;
+        if (!on) {
+            pendingFm = null;
+        }
+    }
+
+    /**
+     * 设置云端收藏夹的服务器收藏 streamId 集合;
+     * 传 null 表示切回"用本地 FavoriteManager 过滤"。
+     */
+    public synchronized void setCloudStarredIds(Set<String> ids) {
+        cloudStarredIds = ids;
+    }
+
+    /** 当前是否处于云端收藏夹模式(列表由服务器收藏 ID 过滤而来) */
+    public boolean isCloudFavoritesMode() {
+        return cloudStarredIds != null;
     }
 
     /** 收藏状态变化后刷新列表显示(增量 diff:仅收藏模式会增删行) */

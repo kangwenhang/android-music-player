@@ -381,6 +381,41 @@ public class NavidromeApi implements MusicSourceApi {
     }
 
     /**
+     * Subsonic 星标:GET /rest/star.view?id=<songId>
+     * (取消是 unstar.view,参数相同)
+     */
+    @Override
+    public boolean starSong(String songId) {
+        return setStarred(songId, true);
+    }
+
+    @Override
+    public boolean unstarSong(String songId) {
+        return setStarred(songId, false);
+    }
+
+    private boolean setStarred(String songId, boolean star) {
+        if (songId == null || songId.isEmpty()) {
+            return false;
+        }
+        try {
+            String endpoint = star ? "star" : "unstar";
+            String json = httpGet(apiUrl(endpoint, "id=" + URLEncoder.encode(songId, "UTF-8")));
+            JSONObject root = new JSONObject(json);
+            JSONObject resp = root.optJSONObject("subsonic-response");
+            boolean ok = resp != null && "ok".equals(resp.optString("status"));
+            if (!ok) {
+                DownloadDiag.log("Navidrome " + endpoint + " 失败 songId=" + songId
+                        + " resp=" + (resp == null ? json : resp.toString()));
+            }
+            return ok;
+        } catch (Exception e) {
+            DownloadDiag.logError("Navidrome " + (star ? "star" : "unstar") + " 异常 songId=" + songId, e);
+            return false;
+        }
+    }
+
+    /**
      * 获取全部歌曲(分页获取,无数量限制)
      * 使用 search3 接口以空查询匹配全部,分页拉取直到没有更多
      *

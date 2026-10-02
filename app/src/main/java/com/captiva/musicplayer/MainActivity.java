@@ -951,18 +951,28 @@ public class MainActivity extends AppCompatActivity {
             showEqualizerQuickSwitch();
         });
 
-        // 收藏夹:切换只看收藏
+        // 收藏夹:切换只看收藏(云端看服务器收藏,本地看本机收藏)
         btnFavorites.setOnClickListener(v -> {
             long t0 = System.currentTimeMillis();
             favoritesOnly = !favoritesOnly;
             if (favoritesOnly) {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn_play);
-                Log.i(TAG, "[FavToggle] 切到收藏模式");
-                applyFavoritesFilter();
+                Log.i(TAG, "[FavToggle] 切到收藏模式 localOnlyMode=" + localOnlyMode);
+                if (!localOnlyMode) {
+                    // 云端模式:收藏来自服务器,跨设备同步
+                    loadCloudFavorites();
+                } else {
+                    // 本地模式:收藏来自本机,不联网
+                    adapter.setCloudStarredIds(null);
+                    applyFavoritesFilter();
+                }
                 Log.i(TAG, "[FavToggle] 收藏模式完成 " + (System.currentTimeMillis() - t0) + "ms");
             } else {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn);
                 Log.i(TAG, "[FavToggle] 切回全部歌曲 query='" + currentSearchQuery + "'");
+                // 退出收藏夹:清掉云端收藏集合与过滤模式,恢复完整列表
+                adapter.setCloudStarredIds(null);
+                adapter.setFavoritesMode(false);
                 // 恢复搜索或全部
                 long t1 = System.currentTimeMillis();
                 adapter.filter(currentSearchQuery);
@@ -1049,9 +1059,17 @@ public class MainActivity extends AppCompatActivity {
             }
             boolean nowFav = favoriteManager.toggleFavorite(current);
             updateFavoriteButton(current);
-            // 收藏状态变化时,如果在收藏夹模式,刷新列表
+            // 云端歌曲:同时同步到服务器收藏(后台线程;失败不影响本机收藏)
+            syncStarToServer(current, nowFav);
+            // 收藏状态变化时刷新列表:
+            // - 云端收藏夹是服务器 ID 过滤出来的,必须重新拉一次,否则新收藏的歌不会出现
+            // - 本地收藏夹重新过滤即可
             if (favoritesOnly) {
-                applyFavoritesFilter();
+                if (adapter.isCloudFavoritesMode()) {
+                    loadCloudFavorites();
+                } else {
+                    applyFavoritesFilter();
+                }
             }
             Toast.makeText(this, nowFav ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
         });
@@ -1215,6 +1233,102 @@ public class MainActivity extends AppCompatActivity {
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("applyFavFilter", "总=" + (System.currentTimeMillis() - t0) + "ms");
         }
+    }
+
+    /**
+     * 云端收藏夹:从服务器拉取收藏列表(后台线程),拿到后按 streamId 过滤当前列表。
+     *
+     * 为什么按 streamId 过滤、而不是直接把服务器返回的列表塞进去:
+     * 服务器返回的 bean 可能与当前列表里的不是同一份(字段/路径/是否已下载都可能不同),
+     * 直接替换会让播放队列、高亮、来源标识全部错位;按 ID 过滤则沿用列表里已有的
+     * bean 对象,行为与普通列表完全一致,后台刷新时也只要重新过滤一次即可。
+     *
+     * 失败时退回本地收藏(本机收藏照常可用),绝不留一个空白列表。
+     */
+    private void loadCloudFavorites() {
+        final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+        if (api == null) {
+            Toast.makeText(this, "未连接服务器,改用本地收藏", Toast.LENGTH_SHORT).show();
+            adapter.setCloudStarredIds(null);
+            applyFavoritesFilter();
+            return;
+        }
+        Toast.makeText(this, "正在获取云端收藏...", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<MusicBean> starred = null;
+                try {
+                    starred = api.getStarredSongs();
+                } catch (Throwable t) {
+                    DownloadDiag.logError("获取云端收藏失败", t);
+                }
+                final List<MusicBean> result = starred;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (result == null) {
+                            Toast.makeText(MainActivity.this,
+                                    "获取云端收藏失败,改用本地收藏", Toast.LENGTH_SHORT).show();
+                            adapter.setCloudStarredIds(null);
+                            applyFavoritesFilter();
+                            return;
+                        }
+                        java.util.Set<String> ids = new java.util.HashSet<>();
+                        for (MusicBean b : result) {
+                            String sid = b != null ? b.getStreamId() : null;
+                            if (sid != null && !sid.isEmpty()) {
+                                ids.add(sid);
+                            }
+                        }
+                        DownloadDiag.log("云端收藏: 服务器 " + result.size() + " 首,有效 ID "
+                                + ids.size() + " 个");
+                        adapter.setCloudStarredIds(ids);
+                        adapter.filterFavorites(null);
+                        updateCount();
+                        if (ids.isEmpty()) {
+                            tvEmpty.setVisibility(View.VISIBLE);
+                            tvEmpty.setText("云端还没有收藏的歌曲\n播放歌曲时点击底栏爱心收藏");
+                        } else {
+                            tvEmpty.setVisibility(View.GONE);
+                        }
+                        updatePlayingHighlight();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /**
+     * 云端歌曲的收藏同步到服务器(后台线程)。
+     * 失败不影响本机:本地收藏已经写入,只是这次没能同步到服务器而已。
+     */
+    private void syncStarToServer(final MusicBean bean, final boolean star) {
+        if (localOnlyMode || bean == null) {
+            return;
+        }
+        final String sid = bean.getStreamId();
+        if (sid == null || sid.isEmpty()) {
+            return;
+        }
+        final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+        if (api == null) {
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean ok;
+                try {
+                    ok = star ? api.starSong(sid) : api.unstarSong(sid);
+                } catch (Throwable t) {
+                    DownloadDiag.logError("收藏同步服务器异常", t);
+                    ok = false;
+                }
+                DownloadDiag.log("收藏同步服务器: " + (ok ? "成功" : "失败")
+                        + " star=" + star + " " + bean.getTitle());
+            }
+        }).start();
     }
 
     // ==================== 设置菜单 ====================
@@ -2843,6 +2957,15 @@ public class MainActivity extends AppCompatActivity {
         final boolean toLocal = !localOnlyMode;
         localOnlyMode = toLocal;
         navidromeConfig.setLocalMode(toLocal);
+        // 收藏来源随模式切换:云端看服务器收藏、本地看本机收藏。
+        // 不重置的话,从云端收藏夹切到本地时仍会用"服务器收藏 ID"去过滤本地歌,
+        // 结果就是列表空空如也(本地歌大多没有对应的服务器收藏 ID)。
+        adapter.setCloudStarredIds(null);
+        adapter.setFavoritesMode(false);
+        if (favoritesOnly) {
+            favoritesOnly = false;
+            btnFavorites.setBackgroundResource(R.drawable.bg_btn);
+        }
         updateSourceToggleUi();
         // 本地模式:隐藏右上角服务器状态圆点与「列表已更新」(全部是本地歌,均无意义)
         updateServerStatusAreaVisibility();
@@ -4040,7 +4163,13 @@ public class MainActivity extends AppCompatActivity {
                                 dedupeMusicList();
                             }
                             adapter.setData(musicList);
-                            applyFavoritesFilter();
+                            // 云端收藏夹:沿用内存里已缓存的服务器收藏 ID 重新过滤(不联网);
+                            // 本地收藏夹:用本机 FavoriteManager 过滤。
+                            if (adapter.isCloudFavoritesMode()) {
+                                adapter.filterFavorites(null);
+                            } else {
+                                applyFavoritesFilter();
+                            }
                             if (service != null && !musicList.isEmpty()) {
                                 // 关键:播放队列必须用收藏夹列表,而不是全部曲目。
                                 // 否则后台扫描补全完成后会把正在播放的收藏夹队列悄悄换成
