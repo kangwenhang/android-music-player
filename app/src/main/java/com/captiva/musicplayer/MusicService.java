@@ -152,6 +152,10 @@ public class MusicService extends Service {
         // 一次性迁移:旧的"播放时自动缓存=关"重置为开(与 MainActivity 幂等,双保险)
         config.migrateAutoCacheOnPlayIfNeeded();
         playMode = PlayMode.fromValue(config.getPlayMode());
+        // 【必须】给字段赋值:maybeAutoCache / promoteToLocalIfCached 都依赖它,
+        // 此前该字段从未初始化(恒为 null),导致"播放时按需缓存"与"播放优先用缓存"
+        // 这两条路径在判断处就直接返回,功能静默失效。
+        navidromeConfig = config;
     }
 
     /**
@@ -906,7 +910,11 @@ public class MusicService extends Service {
             return bean;
         }
         try {
-            String cloudDir = navidromeConfig != null ? navidromeConfig.getCloudDir() : null;
+            if (navidromeConfig == null) {
+                // 兜底:正常路径 onCreate 已赋值
+                navidromeConfig = new NavidromeConfig(this);
+            }
+            String cloudDir = navidromeConfig.getCloudDir();
             if (cloudDir == null || cloudDir.isEmpty()) {
                 return bean;
             }
@@ -953,8 +961,8 @@ public class MusicService extends Service {
             return;
         }
         if (navidromeConfig == null) {
-            CacheDebugLog.log("跳过缓存: navidromeConfig 为空");
-            return;
+            // 兜底:正常路径 onCreate 已赋值;这里防止异常路径再次导致功能静默失效
+            navidromeConfig = new NavidromeConfig(this);
         }
         if (!navidromeConfig.isAutoCacheOnPlay()) {
             CacheDebugLog.log("跳过缓存: 设置里「播放时自动缓存」为关(请在设置中勾选)");
