@@ -514,6 +514,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 return;
             }
         }
+        // 诊断:可见列表中找不到对应行(如该歌尚未加载到当前批次)→ 进度条不会显示
+        CacheDebugLog.log("进度刷新未命中可见行 streamId=" + streamId
+                + " data=" + data.size() + " filtered=" + filteredData.size());
     }
 
     /**

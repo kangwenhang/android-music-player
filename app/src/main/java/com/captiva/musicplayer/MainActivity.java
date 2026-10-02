@@ -277,9 +277,11 @@ public class MainActivity extends AppCompatActivity {
                 updatePlayingHighlight();
             } else if (MusicService.ACTION_CACHE_PROGRESS.equals(action)) {
                 // 未缓存歌曲正在按需下载:更新对应行的进度条
+                int percent = intent.getIntExtra("percent", -2);
+                CacheDebugLog.log("UI 收到进度广播 streamId=" + intent.getStringExtra("streamId")
+                        + " percent=" + percent + " adapter=" + (adapter != null));
                 if (adapter != null) {
-                    adapter.updateCacheProgress(intent.getStringExtra("streamId"),
-                            intent.getIntExtra("percent", -2));
+                    adapter.updateCacheProgress(intent.getStringExtra("streamId"), percent);
                 }
             }
         }

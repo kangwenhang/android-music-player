@@ -910,7 +910,7 @@ public class MusicService extends Service {
             }
             java.io.File localFile = MusicSyncManager.buildLocalFile(bean, cloudDir);
             if (localFile.exists() && localFile.length() > 1024) {
-                Log.i(TAG, "promoteToLocalIfCached: 已缓存,本地播放 " + bean.getTitle());
+                CacheDebugLog.log("promoteToLocalIfCached: 已缓存,本地播放 " + bean.getTitle());
                 bean.setNetwork(false);
                 bean.setData(localFile.getAbsolutePath());
                 bean.setUri(null);
@@ -935,11 +935,15 @@ public class MusicService extends Service {
         if (bean == null) {
             return;
         }
+        if (navidromeConfig != null) {
+            CacheDebugLog.init(this, navidromeConfig.getSyncPath());
+        }
         // 诊断日志:无论走不走缓存,都记录决策依据(定位"看不到进度条"类问题)
-        Log.i(TAG, "maybeAutoCache: " + bean.getTitle()
+        CacheDebugLog.log("maybeAutoCache: " + bean.getTitle()
                 + " network=" + bean.isNetwork()
                 + " autoCacheOnPlay=" + (navidromeConfig != null && navidromeConfig.isAutoCacheOnPlay())
-                + " streamId=" + bean.getStreamId());
+                + " streamId=" + bean.getStreamId()
+                + " streamUrl=" + (bean.getStreamUrl() != null ? "有" : "无"));
         if (!bean.isNetwork() || bean.getStreamUrl() == null) {
             return;
         }
@@ -962,6 +966,7 @@ public class MusicService extends Service {
                 // 进度节流:仅百分比变化时广播(总长未知时按 500ms 节流)
                 final long[] lastTime = {0L};
                 final int[] lastPct = {-100};
+                final boolean[] firstLogged = {false};
                 MusicSourceApi.DownloadProgressListener listener =
                         new MusicSourceApi.DownloadProgressListener() {
                     @Override
@@ -971,6 +976,12 @@ public class MusicService extends Service {
                         long now = System.currentTimeMillis();
                         if (pct == lastPct[0] && (pct >= 0 || now - lastTime[0] < 500)) {
                             return;
+                        }
+                        if (!firstLogged[0]) {
+                            firstLogged[0] = true;
+                            CacheDebugLog.log("下载开始: " + bean.getTitle()
+                                    + " 首个进度事件 bytes=" + bytes
+                                    + " contentLength=" + contentLength + " pct=" + pct);
                         }
                         lastPct[0] = pct;
                         lastTime[0] = now;
@@ -983,7 +994,7 @@ public class MusicService extends Service {
                 try {
                     boolean ok = MusicSyncManager.autoCacheSong(
                             getApplicationContext(), api, bean, syncPath, maxBytes, listener);
-                    Log.i(TAG, "autoCacheSong result=" + ok + ": " + bean.getTitle());
+                    CacheDebugLog.log("autoCacheSong result=" + ok + ": " + bean.getTitle());
                     if (ok) {
                         // 即时把当前播放条目标记为本地可用(与手动同步后行为一致)。
                         // bean 是 service.playList 与界面列表共享的同一对象,原地修改即生效。
