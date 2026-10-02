@@ -35,6 +35,16 @@ import java.util.concurrent.TimeUnit;
 public class CacheDebugLog {
 
     private static final String TAG = "CacheDebugLog";
+    /**
+     * 总开关:false = 完全关闭(不写文件、不建写线程、也不进 logcat)。
+     *
+     * 本类原本是**正式版也生效**的诊断日志(不受 BuildConfig.DEBUG 门控),
+     * 目的是车机不接 adb 时也能靠文件排查问题。诊断期结束后正式发布即关闭:
+     * 每次播放/切换都会往 U 盘目录写文件,在车机上属于无谓的 I/O 与噪音。
+     * 需要重新排查时:把这里改回 true 重新构建即可,调用点无需改动(log 内部短路)。
+     */
+    public static final boolean ENABLED = false;
+
     private static final String FILE_NAME = "cache_debug.log";
     /** 单文件大小上限(超过即重建),避免长期运行把存储写满 */
     private static final long MAX_BYTES = 256 * 1024L;
@@ -76,6 +86,9 @@ public class CacheDebugLog {
      * 本方法只入队,不做磁盘 I/O,可从主线程安全调用。
      */
     public static void init(Context context, String dir) {
+        if (!ENABLED) {
+            return;   // 关闭时不记录目录,也不写文件头
+        }
         if (dir != null && !dir.isEmpty()) {
             dirPath = dir;
         }
@@ -101,8 +114,8 @@ public class CacheDebugLog {
      * 同时输出到 logcat,便于接 adb 时对照。
      */
     public static void log(String msg) {
-        if (msg == null) {
-            return;
+        if (!ENABLED || msg == null) {
+            return;   // 关闭:不入队、不落盘、不进 logcat
         }
         Log.i(TAG, msg);
         enqueue(SDF_HOLDER.get().format(new java.util.Date()) + "  " + msg);

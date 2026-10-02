@@ -44,6 +44,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class PerfLogger {
 
     private static final String TAG = "PerfLogger";
+    /**
+     * 总开关:false = 完全关闭(不 init、不写 perf_log.txt、不建写线程)。
+     *
+     * 原本由调用方按 BuildConfig.DEBUG 决定是否 init,正式版(assembleRelease)天然不写;
+     * 但调试包仍会生成 perf_log.txt。正式发布统一关闭:init() 直接返回,enabled 保持 false,
+     * 于是所有 log()/onFrame()/dump() 全部空转,连 logcat 都不输出。
+     * 需要重新做卡顿分析时把这里改回 true 重新构建即可。
+     */
+    public static final boolean ENABLED = false;
+
     private static final String LOG_FILE_NAME = "perf_log.txt";
     private static final int MAX_QUEUE_SIZE = 5000;  // 环形缓冲区上限
     /** 每积累多少条请求一次异步落盘 */
@@ -110,6 +120,10 @@ public class PerfLogger {
      * @param syncPath 首选日志目录(同步/U盘目录),可为空
      */
     public static void init(Context context, String syncPath) {
+        if (!ENABLED) {
+            enabled = false;   // 关闭:不建文件、不建写线程
+            return;
+        }
         if (context == null) {
             Log.w(TAG, "context 为空,性能日志不可用");
             return;
