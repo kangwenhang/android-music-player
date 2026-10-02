@@ -38,6 +38,8 @@ public class App extends MultiDexApplication {
         // 全局崩溃捕获:车机不方便接 adb,任何未捕获异常先把完整堆栈落盘
         // (与 cache_debug.log 同目录,文件管理器直接可看),再交回系统默认处理。
         installCrashLogger();
+        // 下载 / 联网播放诊断:只记失败与异常,正常播放不写一行,与 crash_log.txt 同目录
+        DownloadDiag.init(this);
     }
 
     /**

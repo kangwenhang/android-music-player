@@ -46,6 +46,15 @@ public class MusicSyncManager {
     private final String syncPath;
     private volatile boolean cancelled = false;
 
+    /**
+     * 正在下载中的 streamId 集合(同一首只允许一个下载在跑)。
+     * 多个入口(播放时自动缓存 / 播放失败后下载重播 / 手动同步)可能同时指向同一首歌,
+     * 若不加保护会两个输入流交叉写同一个目标文件 → 文件损坏,
+     * 之后 file.exists() 判定为"已缓存"却根本播不了,极难排查。
+     */
+    private static final java.util.Set<String> IN_FLIGHT =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
     public interface SyncCallback {
         /** 同步开始 */
         void onStart(int totalSongs);
@@ -189,20 +198,54 @@ public class MusicSyncManager {
         if (context == null || api == null || song == null || syncPath == null
                 || syncPath.isEmpty() || song.getStreamId() == null
                 || song.getStreamId().isEmpty()) {
+            DownloadDiag.log("autoCacheSong 跳过: 前置条件不足"
+                    + " context=" + (context != null)
+                    + " api=" + (api != null)
+                    + " song=" + (song != null)
+                    + " syncPath=" + (syncPath == null ? "null" : (syncPath.isEmpty() ? "空" : "有"))
+                    + " streamId=" + (song == null ? "null"
+                            : (song.getStreamId() == null ? "null"
+                                    : (song.getStreamId().isEmpty() ? "空" : "有"))));
             return false;
         }
+        // 并发保护:同一首歌只允许一个下载在跑。
+        // 否则"播放时自动缓存"与"播放失败后下载重播"会同时写同一个目标文件,
+        // 两个输入流交叉写盘 → 文件损坏,后续 file.exists() 判定为已缓存却播不了。
+        final String sid = song.getStreamId();
+        if (!IN_FLIGHT.add(sid)) {
+            DownloadDiag.log("autoCacheSong 跳过: 同一首正在下载中 " + song.getTitle());
+            return false;
+        }
+        try {
+            return autoCacheSongLocked(context, api, song, syncPath, maxBytes, progressListener);
+        } finally {
+            IN_FLIGHT.remove(sid);
+        }
+    }
+
+    /** 真正的下载实现(调用前已确保同一首不在下载中) */
+    private static boolean autoCacheSongLocked(Context context, MusicSourceApi api,
+                                               MusicBean song, String syncPath, long maxBytes,
+                                               MusicSourceApi.DownloadProgressListener progressListener) {
         File target = buildLocalFile(song, syncPath);
         if (target.exists() && target.length() > 1024) {
             return true; // 已缓存,无需重复下载
         }
         File parent = target.getParentFile();
         if (parent != null && !parent.exists()) {
-            parent.mkdirs();
+            if (!parent.mkdirs()) {
+                DownloadDiag.log("autoCacheSong 目录创建失败: " + parent.getAbsolutePath());
+            }
         }
+        DownloadDiag.log("autoCacheSong 开始: " + song.getTitle()
+                + " -> " + target.getAbsolutePath());
         long bytes = api.downloadFile(song.getStreamId(), target, progressListener);
         if (bytes <= 0) {
+            DownloadDiag.log("autoCacheSong 下载失败(返回 " + bytes + "): " + song.getTitle()
+                    + " 详细原因见上方 download 记录");
             return false;
         }
+        DownloadDiag.log("autoCacheSong 成功: " + bytes + " bytes -> " + target.getName());
         // 登记 路径→streamId,使本地模式扫描时身份对齐(稳定去重)
         StreamIdIndex.registerSong(context, song, syncPath);
         // 记入自动缓存清单(仅清单内的文件会被配额清理,手动同步文件不受影响)

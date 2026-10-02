@@ -801,15 +801,23 @@ public class FnMusicApi implements MusicSourceApi {
     public long downloadFile(String songId, File destFile,
                              MusicSourceApi.DownloadProgressListener listener) {
         if (songId == null || songId.isEmpty() || destFile == null) return -1;
-        if (ensureToken() == null) return -1;
+        if (ensureToken() == null) {
+            DownloadDiag.log("飞牛下载失败: ensureToken() 为空(登录态失效,"
+                    + " 通常是 token 过期或服务器地址解析失败) songId=" + songId);
+            return -1;
+        }
         File parent = destFile.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();
 
         HttpURLConnection conn = null;
         InputStream is = null;
         FileOutputStream fos = null;
+        String urlStr = null;
         try {
-            String urlStr = getStreamUrl(songId);
+            urlStr = getStreamUrl(songId);
+            DownloadDiag.log("下载请求: " + DownloadDiag.safeUrl(urlStr)
+                    + " -> " + destFile.getAbsolutePath()
+                    + " relayMode=" + relayMode);
             URL url = new URL(urlStr);
             conn = TlsCompat.open(url);
             conn.setRequestMethod("GET");
@@ -829,6 +837,11 @@ public class FnMusicApi implements MusicSourceApi {
             int code = conn.getResponseCode();
             if (code != 200) {
                 Log.e(TAG, "download failed: HTTP " + code);
+                DownloadDiag.log("下载失败: HTTP " + code
+                        + " url=" + DownloadDiag.safeUrl(urlStr) + " songId=" + songId
+                        + " relayMode=" + relayMode
+                        + " (401/403=token 或鉴权头不对,404=guid 不对,"
+                        + " 302 未带 mode=relay Cookie 时中继链路会失败)");
                 return -1;
             }
             long contentLength = conn.getContentLengthLong();
@@ -848,6 +861,9 @@ public class FnMusicApi implements MusicSourceApi {
             return total;
         } catch (Exception e) {
             Log.e(TAG, "downloadFile failed: " + songId, e);
+            DownloadDiag.logError("下载异常: url=" + DownloadDiag.safeUrl(urlStr)
+                    + " songId=" + songId + " relayMode=" + relayMode
+                    + " 目标=" + destFile.getAbsolutePath(), e);
             if (destFile.exists()) destFile.delete();
             return -1;
         } finally {

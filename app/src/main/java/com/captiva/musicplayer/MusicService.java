@@ -118,6 +118,12 @@ public class MusicService extends Service {
     /** 配置(读取自动缓存开关/配额等) */
     private NavidromeConfig navidromeConfig;
 
+    /**
+     * 是否已有一次"下载后重播"在跑。
+     * 联网播放失败时用它兜底一次,避免每首都触发下载、也避免与自动缓存并发写同一文件。
+     */
+    private volatile boolean downloadRetryInFlight = false;
+
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
 
@@ -852,6 +858,12 @@ public class MusicService extends Service {
                 }
                 tAuth = System.currentTimeMillis() - tA;
                 long tB = System.currentTimeMillis();
+                // 注意:MediaPlayer 自己发网络请求,**不走 TlsCompat**。
+                // 安卓 4.2.2 的媒体栈只开 SSLv3/TLSv1.0,遇到要求 TLS 1.2 的 HTTPS 站点
+                // (飞牛中继等)会直接握手失败 —— 这就是"列表能刷出来、点击却播不了"的典型根因。
+                DownloadDiag.log("联网播放: " + bean.getTitle()
+                        + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
+                        + " 鉴权头=" + (headers == null ? "无" : headers.size() + "个"));
                 if (headers != null && !headers.isEmpty()) {
                     player.setDataSource(this, android.net.Uri.parse(bean.getStreamUrl()), headers);
                 } else {
@@ -930,6 +942,24 @@ public class MusicService extends Service {
                 public boolean onError(MediaPlayer mp, int what, int extra) {
                     Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
                     isPrepared = false;
+                    DownloadDiag.log("播放失败: " + currentBean.getTitle() + " "
+                            + DownloadDiag.mpError(what, extra)
+                            + " url=" + DownloadDiag.safeUrl(currentBean.getStreamUrl())
+                            + " network=" + currentBean.isNetwork());
+
+                    // 联网播放失败:先尝试"下载到本地再播",而不是直接跳下一首。
+                    // MediaPlayer 的网络栈不走 TlsCompat,HTTPS 站点在安卓 4.2.2 上常因
+                    // TLS 过旧握手失败;下载走 HttpURLConnection + TlsCompat(已验证可用),
+                    // 下载完用本地文件播放则完全绕开 MediaPlayer 的网络能力。
+                    if (token == playToken
+                            && currentBean.isNetwork()
+                            && currentBean.getStreamUrl() != null
+                            && !downloadRetryInFlight) {
+                        downloadRetryInFlight = true;
+                        downloadThenPlay(currentBean, token);
+                        return true;
+                    }
+
                     // 出错时自动跳下一首(避免卡住)
                     if (token == playToken) {
                         mainHandler.postDelayed(new Runnable() {
@@ -961,6 +991,16 @@ public class MusicService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "prepareAndPlay failed", e);
             isPrepared = false;
+            // setDataSource 抛异常(而不是回调 onError)同样可能是联网播放失败,
+            // 例如 HTTPS 握手直接抛 SSLException,所以这里也要兜底。
+            DownloadDiag.logError("prepareAndPlay 异常: " + bean.getTitle()
+                    + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
+                    + " network=" + bean.isNetwork(), e);
+            if (bean.isNetwork() && bean.getStreamUrl() != null && !downloadRetryInFlight) {
+                downloadRetryInFlight = true;
+                downloadThenPlay(bean, token);
+                return;
+            }
             // 异常时也尝试跳下一首
             mainHandler.postDelayed(new Runnable() {
                 @Override
@@ -971,6 +1011,85 @@ public class MusicService extends Service {
                 }
             }, 1000);
         }
+    }
+
+    /**
+     * 联网播放失败时的兜底:把这首歌下载到本地,再用本地文件重新播放。
+     *
+     * 为什么需要:MediaPlayer.setDataSource(url) 走的是**媒体播放器自己的网络栈**,
+     * 不经过 TlsCompat —— 安卓 4.2.2 只开 SSLv3/TLSv1.0,遇到要求 TLS 1.2 的 HTTPS
+     * 站点(飞牛中继等)会直接握手失败,表现为"列表能刷出来、点击却播不了"。
+     * 而下载走 HttpURLConnection + TlsCompat(登录、取列表都靠它,已验证可用),
+     * 下载完用本地文件播放则完全不依赖 MediaPlayer 的网络能力。
+     *
+     * 只兜底一次:失败就跳下一首,绝不循环重试(避免卡死与流量浪费)。
+     * 同一首的并发下载由 MusicSyncManager.IN_FLIGHT 挡住,不会与自动缓存抢写同一文件。
+     */
+    private void downloadThenPlay(final MusicBean bean, final int token) {
+        cacheExecutor.submit(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+                    String syncPath = navidromeConfig != null
+                            ? navidromeConfig.getCloudDir() : null;
+                    long maxBytes = 0L;
+                    if (navidromeConfig != null && navidromeConfig.getAutoCacheMaxMb() > 0) {
+                        maxBytes = (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L;
+                    }
+                    boolean ok = MusicSyncManager.autoCacheSong(
+                            getApplicationContext(), api, bean, syncPath, maxBytes, null);
+                    DownloadDiag.log("下载后重播: autoCacheSong=" + ok + " " + bean.getTitle());
+                    if (!ok) {
+                        DownloadDiag.log("下载后重播放弃: 下载未成功 " + bean.getTitle());
+                        postNextIfCurrent(token);
+                        return;
+                    }
+                    java.io.File f = MusicSyncManager.buildLocalFile(bean, syncPath);
+                    if (f == null || !f.exists() || f.length() <= 1024) {
+                        DownloadDiag.log("下载后重播放弃: 本地文件异常 "
+                                + (f == null ? "(null)" : f.getAbsolutePath())
+                                + " len=" + (f == null ? -1 : (f.exists() ? f.length() : -1)));
+                        postNextIfCurrent(token);
+                        return;
+                    }
+                    // 原地转为本地歌(bean 与界面列表共享同一对象,改了即生效)
+                    bean.setNetwork(false);
+                    bean.setData(f.getAbsolutePath());
+                    bean.setUri(null);
+                    Intent i = new Intent(ACTION_CACHE_AVAILABILITY_CHANGED);
+                    i.putExtra("streamId", bean.getStreamId());
+                    sendBroadcast(i);
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (token != playToken) {
+                                return;   // 已经切歌,放弃这次重播
+                            }
+                            DownloadDiag.log("下载后重播: 用本地文件重播 " + bean.getTitle());
+                            prepareAndPlay();
+                        }
+                    });
+                } catch (Exception e) {
+                    DownloadDiag.logError("下载后重播异常: " + bean.getTitle(), e);
+                    postNextIfCurrent(token);
+                } finally {
+                    downloadRetryInFlight = false;
+                }
+            }
+        });
+    }
+
+    /** 仍是当前歌曲才跳下一首(避免切歌后被旧回调带偏) */
+    private void postNextIfCurrent(final int token) {
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (token == playToken) {
+                    next();
+                }
+            }
+        }, 300);
     }
 
     /**

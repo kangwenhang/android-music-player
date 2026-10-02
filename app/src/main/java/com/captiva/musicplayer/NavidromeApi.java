@@ -703,8 +703,11 @@ public class NavidromeApi implements MusicSourceApi {
         HttpURLConnection conn = null;
         InputStream is = null;
         FileOutputStream fos = null;
+        String urlStr = null;
         try {
-            String urlStr = getStreamUrl(songId);
+            urlStr = getStreamUrl(songId);
+            DownloadDiag.log("下载请求: " + DownloadDiag.safeUrl(urlStr)
+                    + " -> " + destFile.getAbsolutePath());
             URL url = new URL(urlStr);
             conn = TlsCompat.open(url);
             conn.setRequestMethod("GET");
@@ -715,6 +718,10 @@ public class NavidromeApi implements MusicSourceApi {
             int code = conn.getResponseCode();
             if (code != 200) {
                 Log.e(TAG, "download failed: HTTP " + code + " for " + songId);
+                DownloadDiag.log("下载失败: HTTP " + code
+                        + " url=" + DownloadDiag.safeUrl(urlStr) + " songId=" + songId
+                        + " (401/403=鉴权失败或 token 过期,404=地址或 id 不对,"
+                        + " 5xx=服务器问题,302 未跟进常见于中继链路)");
                 return -1;
             }
 
@@ -736,6 +743,9 @@ public class NavidromeApi implements MusicSourceApi {
             return total;
         } catch (Exception e) {
             Log.e(TAG, "downloadFile failed: " + songId, e);
+            DownloadDiag.logError("下载异常: url=" + DownloadDiag.safeUrl(urlStr)
+                    + " songId=" + songId + " 目标=" + destFile.getAbsolutePath()
+                    + " (TLS/SSL 相关多为安卓 4.2.2 老协议栈握手失败)", e);
             // 下载失败时删除不完整的文件
             if (destFile.exists()) {
                 destFile.delete();
