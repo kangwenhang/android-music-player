@@ -57,6 +57,10 @@ public class FnMusicApi implements MusicSourceApi {
     private static final int READ_TIMEOUT = 15000;
     /** 单次拉取曲目上限(服务端无有效分页,靠放大量级一次取完) */
     private static final int MAX_PAGE_SIZE = 5000;
+    /** 收藏列表分页大小(服务端对单页有上限,放大 size 也没用,必须翻页) */
+    private static final int FAV_PAGE_SIZE = 200;
+    /** 收藏列表最多翻多少页(防异常时死循环) */
+    private static final int MAX_FAV_PAGES = 30;
     /** 中继模式手动跟随重定向的最大次数(飞牛中继会返回 302,需带 mode=relay 重发) */
     private static final int MAX_RELAY_REDIRECTS = 5;
     /** 登录失败后的重试冷却(毫秒):冷却期内不重复尝试,避免把请求打成风暴 */
@@ -744,12 +748,53 @@ public class FnMusicApi implements MusicSourceApi {
         return list;
     }
 
+    /**
+     * 收藏列表:带翻页地取全。
+     *
+     * 为什么不再"一次放大 size 取完":实测云端收藏 61 首只拿到 50 首,
+     * 说明服务端对单页有上限(size 再大也不给更多)。于是改成翻页。
+     *
+     * 飞牛的 offset 历史上实测无效(每次都返回同一批),所以这里靠 streamId 去重,
+     * 并检测"本页没有任何新增"就立即终止 —— offset 有效时能翻页取全,
+     * offset 被忽略时也不会死循环(最多白花一次请求)。
+     */
     @Override
     public List<MusicBean> getStarredSongs() {
-        JSONObject data = requestJsonGet("/favorite-track/list",
-                map("size", String.valueOf(MAX_PAGE_SIZE)));
-        if (data == null) return new ArrayList<>();
-        return parseTrackList(data.optJSONArray("list"));
+        List<MusicBean> all = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int page = 0; page < MAX_FAV_PAGES; page++) {
+            JSONObject data = requestJsonGet("/favorite-track/list",
+                    map("size", String.valueOf(FAV_PAGE_SIZE),
+                            "offset", String.valueOf(page * FAV_PAGE_SIZE)));
+            if (data == null) {
+                DownloadDiag.log("云端收藏第 " + page + " 页: 请求无响应(网络/鉴权)");
+                break;
+            }
+            int total = data.optInt("total", -1);
+            JSONArray arr = data.optJSONArray("list");
+            if (arr == null || arr.length() == 0) {
+                DownloadDiag.log("云端收藏第 " + page + " 页: list 为空, total=" + total);
+                break;
+            }
+            List<MusicBean> pageList = parseTrackList(arr);
+            int added = 0;
+            for (MusicBean b : pageList) {
+                String sid = (b != null) ? b.getStreamId() : null;
+                if (sid == null || sid.isEmpty()) continue;
+                if (seen.add(sid)) {
+                    all.add(b);
+                    added++;
+                }
+            }
+            DownloadDiag.log("云端收藏第 " + page + " 页: 返回 " + pageList.size()
+                    + " 条, 新增 " + added + " 条, 累计 " + all.size()
+                    + " 条, 服务端 total=" + total);
+            if (total > 0 && all.size() >= total) break;   // 已取够
+            if (added == 0) break;                          // offset 无效,全是重复 → 停
+            if (pageList.size() < FAV_PAGE_SIZE) break;     // 最后一页
+        }
+        DownloadDiag.log("云端收藏取完: " + all.size() + " 首");
+        return all;
     }
 
     @Override

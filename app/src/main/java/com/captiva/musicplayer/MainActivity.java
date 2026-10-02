@@ -1287,8 +1287,20 @@ public class MainActivity extends AppCompatActivity {
                                 ids.add(sid);
                             }
                         }
-                        DownloadDiag.log("云端收藏: 服务器 " + result.size() + " 首,有效 ID "
-                                + ids.size() + " 个");
+                        // 统计"当前列表里能匹配上几首" —— 收藏夹是按 streamId 过滤
+                        // 现有列表的,若某首收藏歌不在当前列表里就显示不出来。
+                        // 记下来才能区分:是服务端只给了 50 首,还是列表里只匹配到 50 首。
+                        int matched = 0;
+                        for (MusicBean b : musicList) {
+                            String sid = (b != null) ? b.getStreamId() : null;
+                            if (sid != null && ids.contains(sid)) {
+                                matched++;
+                            }
+                        }
+                        DownloadDiag.log("云端收藏: 服务器 " + result.size() + " 首, 有效 ID "
+                                + ids.size() + " 个, 当前列表匹配 " + matched + " 首");
+                        Toast.makeText(MainActivity.this,
+                                "云端收藏 " + ids.size() + " 首", Toast.LENGTH_SHORT).show();
                         adapter.setCloudStarredIds(ids);
                         adapter.filterFavorites(null);
                         updateCount();
