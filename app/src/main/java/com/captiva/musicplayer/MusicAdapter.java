@@ -100,6 +100,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 本地模式看本机 FavoriteManager(离线可用)。两者互斥,靠这个字段是否为 null 区分。
      */
     private volatile Set<String> cloudStarredIds = null;
+    /**
+     * 收藏集合的代次:每增删一个云端收藏 ID 就 +1。
+     * 存在的理由:防抖签名原本只有 "关键词",而"收藏状态变了但关键词没变"时
+     * 两次 filterFavorites 的签名完全相同 —— 一旦落在防抖窗口内,列表就会**不刷新**
+     * (表现为"点了收藏列表没反应")。把它并进签名,收藏变化就一定不会被防抖吃掉。
+     */
+    private volatile int favVersion = 0;
     /** 防抖窗口:相同签名的过滤请求在此窗口内合并,避免输入/滑动抖动引发主线程重复刷新 */
     private static final long FILTER_DEBOUNCE_MS = 120;
     private String lastFilterSignature = "";
@@ -292,7 +299,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 遍历/diff 在后台线程执行,主线程只做增量 dispatch
      */
     public void filterFavorites(FavoriteManager fm) {
-        String signature = "v:" + filterKeyword;
+        // 签名里带上收藏代次:收藏增删后即使关键词没变,也必须重新过滤
+        String signature = "v:" + filterKeyword + ":" + favVersion;
         long now = System.currentTimeMillis();
         if (signature.equals(lastFilterSignature) && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
             Log.d(TAG, "[filterFavorites] 防抖跳过重复请求");
@@ -696,6 +704,42 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 当前是否处于云端收藏夹模式(列表由服务器收藏 ID 过滤而来) */
     public boolean isCloudFavoritesMode() {
         return cloudStarredIds != null;
+    }
+
+    /** 云端收藏夹里的收藏数量(用于空提示判断;非云端模式返回 -1) */
+    public int getCloudStarredCount() {
+        return cloudStarredIds == null ? -1 : cloudStarredIds.size();
+    }
+
+    /**
+     * 云端收藏夹:**本地增量**地加/删一个 streamId,并立即重过滤(**不联网**)。
+     *
+     * 存在的理由:以前在收藏夹里点一下爱心,要等调用方把服务器收藏列表整个重拉一遍
+     * (翻页 + 一次完整的网络往返)列表才会动 —— 用户看到的就是"点了半天没反应",
+     * 而服务端慢/不可达时甚至永远不动。
+     * 收藏与取消收藏是本地已知的确定操作,完全可以**乐观更新**:先改集合、立刻重过滤,
+     * 服务器同步交给后台线程;只有同步失败才由调用方回滚(重新拉真实状态)。
+     *
+     * @param add true=加入收藏,false=取消收藏
+     * @return 是否真的改动了(不在云端收藏夹模式 / id 为空 / 集合本来就是这个状态 → false)
+     */
+    public boolean updateCloudStarredId(String sid, boolean add) {
+        if (cloudStarredIds == null || sid == null || sid.isEmpty()) {
+            return false;
+        }
+        boolean changed;
+        // 集合本身是可变 HashSet,而 computeFilteredUnsafe 会在后台线程遍历它
+        // (调用处已 synchronized(this))—— 原地增删必须与它互斥,否则可能撞
+        // ConcurrentModificationException。注意别把 requestFilter 放进锁里。
+        synchronized (this) {
+            changed = add ? cloudStarredIds.add(sid) : cloudStarredIds.remove(sid);
+        }
+        if (!changed) {
+            return false;
+        }
+        favVersion++;                  // 让下一次 filterFavorites 不会被防抖吃掉
+        requestFilter(true, null);     // 异步遍历+diff,主线程只做增量 dispatch
+        return true;
     }
 
     /** 收藏状态变化后刷新列表显示(增量 diff:仅收藏模式会增删行) */

@@ -814,7 +814,16 @@ public class FnMusicApi implements MusicSourceApi {
      * 命名风格不明。这里按同一前缀列出最可能的几个候选依次尝试,一个成功即止。
      * 全部失败时返回 false —— 调用方仍会保留本地收藏,不影响本机使用,
      * 失败详情写进 download_debug.log,拿到日志后就能把正确端点固定下来。
+     *
+     * 为什么加"记住成功端点"(FAV_ADD_EP / FAV_REMOVE_EP):
+     * 候选是逐个**同步 HTTP** 试的,单次超时是 connect 10s + read 15s。
+     * 若每次收藏都要从第一个候选开始试探,最坏一次要花 3×25s —— 后台线程虽然不卡 UI,
+     * 但用户连点几次就会堆起一串线程,且失败/成功的反馈全都要等这么久。
+     * 第一次成功后把端点记下来(进程内),之后每次只发一个请求。
      */
+    private static volatile String FAV_ADD_EP = null;
+    private static volatile String FAV_REMOVE_EP = null;
+
     private boolean setFavorite(String songId, boolean add) {
         if (songId == null || songId.isEmpty()) return false;
         if (ensureToken() == null) {
@@ -824,7 +833,13 @@ public class FnMusicApi implements MusicSourceApi {
         String[] candidates = add
                 ? new String[]{"/favorite-track/add", "/favorite-track/save", "/favorite-track/create"}
                 : new String[]{"/favorite-track/remove", "/favorite-track/delete", "/favorite-track/cancel"};
+        // 已经探到过的端点排在最前面(只发一次请求)
+        String remembered = add ? FAV_ADD_EP : FAV_REMOVE_EP;
+        if (remembered != null) {
+            candidates = new String[]{remembered};
+        }
         for (String ep : candidates) {
+            long t0 = System.currentTimeMillis();
             try {
                 JSONObject body = new JSONObject();
                 body.put("trackGUID", songId);
@@ -833,13 +848,17 @@ public class FnMusicApi implements MusicSourceApi {
                 JSONObject root = new JSONObject(resp);
                 int code = root.optInt("code", -1);
                 if (code == 0) {
-                    Log.d(TAG, "飞牛收藏" + (add ? "成功" : "已取消") + " 端点=" + ep);
+                    if (add) FAV_ADD_EP = ep; else FAV_REMOVE_EP = ep;
+                    DownloadDiag.log("飞牛收藏" + (add ? "成功" : "已取消")
+                            + " 端点=" + ep + " 耗时=" + (System.currentTimeMillis() - t0) + "ms");
                     return true;
                 }
                 DownloadDiag.log("飞牛收藏端点 " + ep + " 返回 code=" + code
-                        + " msg=" + root.optString("msg"));
+                        + " msg=" + root.optString("msg")
+                        + " 耗时=" + (System.currentTimeMillis() - t0) + "ms");
             } catch (Exception e) {
-                DownloadDiag.logError("飞牛收藏端点异常 " + ep, e);
+                DownloadDiag.logError("飞牛收藏端点异常 " + ep
+                        + " 耗时=" + (System.currentTimeMillis() - t0) + "ms", e);
             }
         }
         DownloadDiag.log("飞牛收藏失败: 候选端点均不可用 songId=" + songId + " add=" + add);

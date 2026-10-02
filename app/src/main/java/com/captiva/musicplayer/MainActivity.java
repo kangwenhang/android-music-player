@@ -969,7 +969,27 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG, "[FavToggle] 切到收藏模式 localOnlyMode=" + localOnlyMode);
                 if (!localOnlyMode) {
                     // 云端模式:收藏来自服务器,跨设备同步
-                    loadCloudFavorites();
+                    if (adapter.isCloudFavoritesMode()) {
+                        // 本次会话已经拉过:直接用现有 ID 集合重过滤,**秒开**。
+                        // 以前每次进收藏夹都要 loadCloudFavorites() 走一整轮网络往返
+                        // (飞牛还要翻页),进出几次就是"点了半天没反应"。
+                        // 缓存只在切换本地/云端时作废,不会一直不更新。
+                        Log.i(TAG, "[FavToggle] 复用已缓存的云端收藏集合(秒开)");
+                        adapter.setSearchKeyword(currentSearchQuery);
+                        adapter.filterFavorites(null);
+                        updateCount();
+                        updateCloudFavEmptyHint();
+                        // 高亮推到下一帧:findPositionByBean 是 O(n) 遍历,
+                        // 同步执行会阻塞 filter 的第一帧渲染
+                        rvList.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                updatePlayingHighlight();
+                            }
+                        });
+                    } else {
+                        loadCloudFavorites();
+                    }
                 } else {
                     // 本地模式:收藏来自本机,不联网
                     adapter.setCloudStarredIds(null);
@@ -1068,18 +1088,23 @@ public class MainActivity extends AppCompatActivity {
             }
             boolean nowFav = favoriteManager.toggleFavorite(current);
             updateFavoriteButton(current);
-            // 云端歌曲:同时同步到服务器收藏(后台线程;失败不影响本机收藏)
-            syncStarToServer(current, nowFav);
             // 收藏状态变化时刷新列表:
-            // - 云端收藏夹是服务器 ID 过滤出来的,必须重新拉一次,否则新收藏的歌不会出现
+            // - 云端收藏夹:**乐观更新** —— 本地改 ID 集合 + 立即重过滤,列表马上就动。
+            //   以前这里要 loadCloudFavorites() 把服务器收藏整个重拉一遍才刷新,
+            //   一次网络往返(飞牛还要试多个候选端点)下来就是"点了半天没反应";
+            //   服务器同步失败时再由 syncStarToServer 回滚(重新拉真实状态)。
             // - 本地收藏夹重新过滤即可
             if (favoritesOnly) {
-                if (adapter.isCloudFavoritesMode()) {
-                    loadCloudFavorites();
+                String sid = current.getStreamId();
+                if (adapter.isCloudFavoritesMode() && sid != null && !sid.isEmpty()) {
+                    adapter.updateCloudStarredId(sid, nowFav);
+                    updateCloudFavEmptyHint();
                 } else {
                     applyFavoritesFilter();
                 }
             }
+            // 云端歌曲:同时同步到服务器收藏(后台线程;失败会回滚并提示)
+            syncStarToServer(current, nowFav);
             Toast.makeText(this, nowFav ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
         });
 
@@ -1322,7 +1347,10 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 云端歌曲的收藏同步到服务器(后台线程)。
-     * 失败不影响本机:本地收藏已经写入,只是这次没能同步到服务器而已。
+     *
+     * 与列表刷新的关系:调用方已经做过**乐观更新**(本地改收藏集合 + 立即重过滤),
+     * 所以这里只负责把结果落到服务器。同步失败才回滚 —— 重新拉一次服务器真实状态,
+     * 并给出可见提示,避免"界面显示已收藏、服务器其实没有"这种看不见的不一致。
      */
     private void syncStarToServer(final MusicBean bean, final boolean star) {
         if (localOnlyMode || bean == null) {
@@ -1336,9 +1364,22 @@ public class MainActivity extends AppCompatActivity {
         if (api == null) {
             return;
         }
+        final Runnable onFail = new Runnable() {
+            @Override
+            public void run() {
+                // 回滚:以服务器真实状态为准重拉一次(只在还停在收藏夹里时才需要)
+                if (favoritesOnly && adapter.isCloudFavoritesMode()) {
+                    loadCloudFavorites();
+                }
+                Toast.makeText(MainActivity.this,
+                        star ? "已收藏(服务器同步失败,仅本机)" : "已取消(服务器同步失败,仅本机)",
+                        Toast.LENGTH_SHORT).show();
+            }
+        };
         new Thread(new Runnable() {
             @Override
             public void run() {
+                long t0 = System.currentTimeMillis();
                 boolean ok;
                 try {
                     ok = star ? api.starSong(sid) : api.unstarSong(sid);
@@ -1346,10 +1387,30 @@ public class MainActivity extends AppCompatActivity {
                     DownloadDiag.logError("收藏同步服务器异常", t);
                     ok = false;
                 }
+                long cost = System.currentTimeMillis() - t0;
                 DownloadDiag.log("收藏同步服务器: " + (ok ? "成功" : "失败")
-                        + " star=" + star + " " + bean.getTitle());
+                        + " star=" + star + " 耗时=" + cost + "ms " + bean.getTitle());
+                if (!ok) {
+                    runOnUiThread(onFail);
+                }
             }
         }).start();
+    }
+
+    /**
+     * 云端收藏夹的空提示。
+     * 乐观更新后要立刻刷新一次:取消掉最后一首收藏时列表会变空,提示得马上出来。
+     */
+    private void updateCloudFavEmptyHint() {
+        if (!adapter.isCloudFavoritesMode()) {
+            return;
+        }
+        if (adapter.getCloudStarredCount() <= 0) {
+            tvEmpty.setVisibility(View.VISIBLE);
+            tvEmpty.setText("云端还没有收藏的歌曲\n播放歌曲时点击底栏爱心收藏");
+        } else {
+            tvEmpty.setVisibility(View.GONE);
+        }
     }
 
     // ==================== 设置菜单 ====================
