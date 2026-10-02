@@ -116,6 +116,16 @@
 - 版本号基于 git tag,正式版如 `v5.7`,预发布如 `v5.7.300-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
 
+### v5.7.1 更新内容
+
+- **自解析 ID3 内嵌歌词(车机读 USLT 的兜底)**:车机安卓 4.2.2 的 `MediaMetadataRetriever`
+  取不到 `METADATA_KEY_LYRICS`(文件里明明有 USLT 却返回 null),而本地歌没有 streamId,
+  歌词缓存与网络兜底都用不上。`EmbeddedLyricsExtractor` 新增自解析:系统读不到时直接解析
+  ID3v2 的 USLT 帧(v2.2/2.3/2.4、ISO-8859-1 / UTF-16 / UTF-16BE / UTF-8、反同步字节还原、
+  UTF-8 乱码回退 GBK),只读标签区不读整个文件,跑在歌词加载的后台线程
+- 实测:本地 10 首歌的 USLT 全部解析成功(43~138 行),不再需要手工导出 `.lrc`
+  (已导出的 `.lrc` 保留也无妨,它更靠后才会被用到,可当备份)
+
 ### v5.7 更新内容(正式版)
 
 - **接入飞牛音乐(FN Music)数据源**:新增 `FnMusicApi`,支持 `user/password-login`、`album/list`、`track/list`、`artist/list`、`track/stream`、`static/cover`、`lyric/list` 全套接口
