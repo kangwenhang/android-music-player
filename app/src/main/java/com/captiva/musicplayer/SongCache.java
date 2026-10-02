@@ -56,6 +56,23 @@ public class SongCache {
     }
 
     /**
+     * 进程内解析结果缓存。
+     *
+     * 为什么需要:云端列表每次「切换来源 / 重载」都要 load() 一遍,
+     * 而 load() 是「读整个 JSON 文件 + org.json 逐个解析 810 个对象 × 14 个字段」。
+     * 车机实测:冷 1470ms、热 442ms,是切换卡顿的最大单项。
+     * 文件内容没变时没必要重复解析,直接复用上一次的解析结果。
+     *
+     * 失效判定:文件路径 + 长度 + 修改时间(保存是新文件 rename 过来的,长度/时间必变);
+     * 另外 save()/clear() 里会显式置空,避免依赖文件系统时间戳精度。
+     */
+    private static volatile List<MusicBean> memList;
+    private static volatile String memKey;
+
+    /** 本次 load 是否命中了内存缓存(仅供诊断日志读取) */
+    public static volatile boolean lastLoadFromMemory = false;
+
+    /**
      * 保存歌曲列表到缓存文件(同步)
      * 如果歌曲数与上次相同,跳过保存(避免重复IO)
      */
@@ -70,6 +87,7 @@ public class SongCache {
             }
             doSave(songs);
             lastSavedCount = songs.size();
+            invalidateMemoryCache();   // 文件已变,内存缓存作废
         }
     }
 
@@ -146,8 +164,18 @@ public class SongCache {
     /** 从缓存文件加载歌曲列表 */
     public List<MusicBean> load() {
         if (!cacheFile.exists()) {
+            invalidateMemoryCache();
             return null;
         }
+        // 1. 先看内存里有没有同一版本的解析结果
+        String key = cacheFile.getAbsolutePath() + "|" + cacheFile.length() + "|" + cacheFile.lastModified();
+        List<MusicBean> cached = memList;
+        if (cached != null && key.equals(memKey)) {
+            lastLoadFromMemory = true;
+            return copyOf(cached);
+        }
+        lastLoadFromMemory = false;
+
         InputStreamReader reader = null;
         try {
             StringBuilder sb = new StringBuilder();
@@ -189,7 +217,12 @@ public class SongCache {
             // 记录已加载的缓存数量,避免load后立即save相同数据
             lastSavedCount = list.size();
             Log.d(TAG, "缓存已加载: " + list.size() + " 首");
-            return list;
+            // 存"干净"的一份,并把副本交给调用方:
+            // 调用方(buildCloudDrivenList)会就地改写 bean 的 network/data/uri,
+            // 若把同一份对象交出去,缓存就被污染了。
+            memList = list;
+            memKey = key;
+            return copyOf(list);
         } catch (Exception e) {
             Log.e(TAG, "加载缓存失败", e);
             return null;
@@ -198,6 +231,21 @@ public class SongCache {
                 try { reader.close(); } catch (Exception ignored) {}
             }
         }
+    }
+
+    /** 逐条复制出独立实例(810 条只需几毫秒,远低于重新解析 JSON 的数百毫秒) */
+    private static List<MusicBean> copyOf(List<MusicBean> src) {
+        List<MusicBean> out = new ArrayList<>(src.size());
+        for (int i = 0; i < src.size(); i++) {
+            out.add(src.get(i).copy());
+        }
+        return out;
+    }
+
+    /** 作废进程内解析缓存(文件被写/清空后调用) */
+    private static void invalidateMemoryCache() {
+        memList = null;
+        memKey = null;
     }
 
     /** 缓存是否存在且有效 */
@@ -235,6 +283,7 @@ public class SongCache {
                 cacheFile.delete();
             }
             lastSavedCount = 0;
+            invalidateMemoryCache();
         }
     }
 }

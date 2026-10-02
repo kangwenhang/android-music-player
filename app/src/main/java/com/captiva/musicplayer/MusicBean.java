@@ -39,6 +39,34 @@ public class MusicBean {
     public MusicBean() {
     }
 
+    /**
+     * 复制出一个独立实例(供缓存交出副本)。
+     *
+     * **不复制** cachedKey / cachedIdentityKey / cachedCanonicalPath:
+     * 它们由 data 等字段派生,而调用方(如 buildCloudDrivenList 把已下载歌改成
+     * network=false + 本地路径)会在拿到副本后改写这些字段,复制过来就是过期键。
+     */
+    public MusicBean copy() {
+        MusicBean b = new MusicBean();
+        b.id = id;
+        b.title = title;
+        b.artist = artist;
+        b.album = album;
+        b.duration = duration;
+        b.data = data;
+        b.uri = uri;
+        b.network = network;
+        b.coverArtId = coverArtId;
+        b.streamId = streamId;
+        b.streamUrl = streamUrl;
+        b.localSuffix = localSuffix;
+        b.bitRate = bitRate;
+        // cachedLowerTitle / cachedLowerArtist 只依赖 title/artist,值不变,可安全复用
+        b.cachedLowerTitle = cachedLowerTitle;
+        b.cachedLowerArtist = cachedLowerArtist;
+        return b;
+    }
+
     public long getId() {
         return id;
     }

@@ -2643,9 +2643,12 @@ public class MainActivity extends AppCompatActivity {
      *         (调用方应回退到本地扫描,保证界面不空白)。
      */
     private List<MusicBean> buildCloudDrivenList(String serverType, String syncPath) {
+        final long t0 = System.currentTimeMillis();
         SongCache cloudCache = new SongCache(this, serverType);
         List<MusicBean> cloud = cloudCache.load();
+        final long tLoad = System.currentTimeMillis();
         if (cloud == null || cloud.isEmpty()) {
+            CacheDebugLog.log("构建云端列表: 读云端缓存=" + (tLoad - t0) + "ms -> 列表为空,回退本地");
             return null;
         }
         // 一次性遍历同步目录,收集「真实存在且 >1024 字节」的音频文件绝对路径集合。
@@ -2654,6 +2657,7 @@ public class MainActivity extends AppCompatActivity {
         // 改为:单次递归遍历(遍历成本只与「已存在文件数」成正比,而非歌曲总数) + 每首 O(1) 查表,
         // 把 N 次散落 stat 压成一次顺序遍历,列表秒出。
         Set<String> localFiles = collectExistingLocalPaths(syncPath);
+        final long tWalk = System.currentTimeMillis();
         final boolean hasSyncDir = !localFiles.isEmpty();
         for (MusicBean b : cloud) {
             if (b == null) {
@@ -2672,6 +2676,13 @@ public class MainActivity extends AppCompatActivity {
                 b.setNetwork(true);
             }
         }
+        final long tBind = System.currentTimeMillis();
+        CacheDebugLog.log("构建云端列表: 读云端缓存=" + (tLoad - t0) + "ms"
+                + (SongCache.lastLoadFromMemory ? "(内存命中)" : "(重新解析)")
+                + " 遍历同步目录=" + (tWalk - tLoad) + "ms"
+                + " 组装=" + (tBind - tWalk) + "ms"
+                + " 合计=" + (tBind - t0) + "ms 条数=" + cloud.size()
+                + " 本地已有=" + localFiles.size());
         return cloud;
     }
 
@@ -2734,8 +2745,11 @@ public class MainActivity extends AppCompatActivity {
         navidromeConfig.setLocalMode(toLocal);
         updateSourceToggleUi();
         // 本地模式隐藏来源状态点(全部是本地歌,点无信息量)
+        // notify=false:紧接着 applySourceMode 就会整表 setData,新数据自带最新状态;
+        // 这里再 notifyDataSetChanged() 只会在下一帧白重绑一次(实测 ~180ms),拖长上屏延迟。
+        // 例外见「云端不可用回退本地」分支 —— 那条路不重建列表,需显式刷新。
         final long t1 = System.currentTimeMillis();
-        adapter.setShowSourceDot(!toLocal);
+        adapter.setShowSourceDot(!toLocal, false);
         final long t2 = System.currentTimeMillis();
         syncLocalDirObserver();
         final long t3 = System.currentTimeMillis();
@@ -2932,8 +2946,11 @@ public class MainActivity extends AppCompatActivity {
                         public void run() {
                             localOnlyMode = true;
                             updateSourceToggleUi();
-                            // 云端不可用回退本地:同样隐藏状态点
-                            adapter.setShowSourceDot(false);
+                            // 云端不可用回退本地:同样隐藏状态点。
+                            // 这条路径**不重建列表**(沿用原来那份),所以 toggleSource 里那次
+                            // 静默设值不会有机会被 setData 渲染出来,必须在这里显式刷一次。
+                            adapter.setShowSourceDot(false, false);
+                            adapter.notifyDataSetChanged();
                             Toast.makeText(MainActivity.this,
                                     "云端列表不可用(未同步或未配置服务器)", Toast.LENGTH_SHORT).show();
                             syncLocalDirObserver();

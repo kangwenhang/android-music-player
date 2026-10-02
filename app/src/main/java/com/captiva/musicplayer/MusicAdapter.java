@@ -472,9 +472,22 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     /** 设置是否显示来源状态点(本地模式=false 隐藏;须主线程调用) */
     public void setShowSourceDot(boolean show) {
+        setShowSourceDot(show, true);
+    }
+
+    /**
+     * 设置是否显示来源状态点。
+     *
+     * @param notify false = 只改状态、不通知刷新。
+     *   给「来源切换」用:切换后马上就会 setData 整表换新数据,新数据自然带着
+     *   最新的 showSourceDot 渲染出来;此时若还调 notifyDataSetChanged(),
+     *   会在下一帧白白重绑一次全部可见行(车机上实测 ~180ms),
+     *   把「点完按钮 → 加载态上屏」这段硬生生拖长。
+     */
+    public void setShowSourceDot(boolean show, boolean notify) {
         if (showSourceDot == show) return;
         showSourceDot = show;
-        notifyDataSetChanged();
+        if (notify) notifyDataSetChanged();
     }
 
     /**
