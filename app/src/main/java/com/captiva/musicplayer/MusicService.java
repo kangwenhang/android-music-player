@@ -936,7 +936,8 @@ public class MusicService extends Service {
             return;
         }
         if (navidromeConfig != null) {
-            CacheDebugLog.init(this, navidromeConfig.getSyncPath());
+            // 与 perf_log.txt 同目录(云端歌曲目录)
+            CacheDebugLog.init(this, navidromeConfig.getCloudDir());
         }
         // 诊断日志:无论走不走缓存,都记录决策依据(定位"看不到进度条"类问题)
         CacheDebugLog.log("maybeAutoCache: " + bean.getTitle()

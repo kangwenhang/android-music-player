@@ -2378,6 +2378,11 @@ public class MainActivity extends AppCompatActivity {
             PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
         }
 
+        // 缓存诊断日志:正式版也开(与 perf_log.txt 同目录,便于车机上直接查看)
+        CacheDebugLog.init(this, syncPath);
+        CacheDebugLog.log("loadMusic 开始, 模式=" + (localOnlyMode ? "本地" : "云端")
+                + " 云端目录=" + syncPath);
+
         // 显示加载中提示
         tvEmpty.setText("正在加载音乐...");
         tvEmpty.setVisibility(View.VISIBLE);

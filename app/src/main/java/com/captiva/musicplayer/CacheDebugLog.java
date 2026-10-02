@@ -33,16 +33,34 @@ public class CacheDebugLog {
     private static final SimpleDateFormat SDF =
             new SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault());
 
-    /** 日志目录(由调用方 init 指定,通常为音乐根目录;为空时回退 外部存储/Music) */
+    /** 日志目录(由调用方 init 指定,通常为云端歌曲目录;为空时回退 外部存储/Music) */
     private static volatile String dirPath;
+    /** 是否已写过文件头(含完整绝对路径),方便用户直接定位文件 */
+    private static boolean headerLogged = false;
 
     private CacheDebugLog() {}
 
-    /** 初始化日志目录(建议在播放服务启动时调用一次) */
+    /**
+     * 初始化日志目录(建议在加载音乐 / 播放服务启动时调用)。
+     * 与 perf_log.txt 同目录(云端歌曲目录),首次调用会写入一行含完整路径的文件头。
+     */
     public static void init(Context context, String dir) {
         if (dir != null && !dir.isEmpty()) {
             dirPath = dir;
         }
+        if (!headerLogged) {
+            headerLogged = true;
+            log("==== cache_debug.log 开始记录,文件路径: " + currentFilePath() + " ====");
+        }
+    }
+
+    /** 当前日志文件绝对路径(供日志头与排查使用) */
+    public static String currentFilePath() {
+        String dir = dirPath;
+        if (dir == null || dir.isEmpty()) {
+            dir = Environment.getExternalStorageDirectory().getAbsolutePath() + "/Music";
+        }
+        return new File(dir, FILE_NAME).getAbsolutePath();
     }
 
     /** 追加一条诊断日志(同时输出到 logcat,便于接 adb 时对照) */
