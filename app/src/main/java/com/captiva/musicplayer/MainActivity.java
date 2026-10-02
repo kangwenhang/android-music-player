@@ -204,6 +204,34 @@ public class MainActivity extends AppCompatActivity {
     private boolean localOnlyMode = false;
     /** 来源切换是否正在执行(单飞:快速连点只重建最终目标,不并发开多个扫描/构建线程) */
     private boolean sourceSwitchInFlight = false;
+    /**
+     * 连点防抖窗口(ms)。
+     * 一次切换 = 一次全量重建(云端 815 首:读缓存 + 遍历目录 + 组装 + 排序 + 去重 ≈ 600ms CPU,
+     * 外加 815 个 MusicBean 副本)。车机实测连点 20 次就是 20 次重建,持续高分配把主线程
+     * GC 卡到 345ms(表现为"按钮+持久化=345ms"、遮罩上屏延迟 1520ms),最终崩溃重启。
+     * 防抖后:窗口内的连发点击只按**最终目标模式**重建一次;按钮与状态区仍然即时响应。
+     */
+    private static final long SOURCE_SWITCH_DEBOUNCE_MS = 250L;
+    /** 当前列表实际是按哪个模式构建的(用于短路:目标模式没变就不需要重建) */
+    private boolean lastAppliedMode = false;
+    /** 防抖后的真正切换动作(合并连点,按最终目标模式重建一次) */
+    private final Runnable pendingSourceSwitch = new Runnable() {
+        @Override
+        public void run() {
+            if (sourceSwitchInFlight) {
+                // 上一次重建还在跑:再等一轮,完成后由 finishSourceSwitch 收敛到最终目标
+                handler.postDelayed(pendingSourceSwitch, SOURCE_SWITCH_DEBOUNCE_MS);
+                return;
+            }
+            if (localOnlyMode == lastAppliedMode) {
+                // 连点后最终目标又切回了当前列表所属模式:一次都不用重建
+                CacheDebugLog.log("切换防抖: 目标模式与当前列表一致,跳过重建");
+                return;
+            }
+            sourceSwitchInFlight = true;
+            applySourceMode(localOnlyMode);
+        }
+    };
 
     /**
      * 列表加载遮罩:本地/云端切换时后台要读歌单 + 排序 + 去重,期间把列表藏掉,
@@ -423,6 +451,8 @@ public class MainActivity extends AppCompatActivity {
         navidromeConfig.migrateAutoCacheOnPlayIfNeeded();
         // 恢复上次的列表模式(true=本地列表,false=云端列表)
         localOnlyMode = navidromeConfig.isLocalMode();
+        // 启动时的列表就是按此模式构建的(loadMusic),作为连点防抖的短路基准
+        lastAppliedMode = localOnlyMode;
         localMusicCache = new LocalMusicCache(this);
         favoriteManager = new FavoriteManager(this);
         lyricOffsetManager = new LyricOffsetManager(this);
@@ -2790,11 +2820,10 @@ public class MainActivity extends AppCompatActivity {
                 + " setShowSourceDot=" + (t2 - t1) + "ms"
                 + " 目录监听=" + (t3 - t2) + "ms"
                 + " 合计=" + (t3 - t0) + "ms");
-        if (sourceSwitchInFlight) {
-            return; // 正在切换,目标已是最新,等完成后自动收敛到最终模式
-        }
-        sourceSwitchInFlight = true;
-        applySourceMode(toLocal);
+        // 连点防抖:窗口内的连发点击合并为一次重建(见 SOURCE_SWITCH_DEBOUNCE_MS 说明)。
+        // 只合并"重建",按钮文案 / 状态区显隐 / 持久化上面都已完成,所以点按手感不变。
+        handler.removeCallbacks(pendingSourceSwitch);
+        handler.postDelayed(pendingSourceSwitch, SOURCE_SWITCH_DEBOUNCE_MS);
     }
 
     /**
@@ -2868,7 +2897,7 @@ public class MainActivity extends AppCompatActivity {
         if (musicList.isEmpty()) {
             tvEmpty.setVisibility(View.VISIBLE);
             tvEmpty.setText(localOnlyMode
-                    ? "本地目录没有找到歌曲\n可在设置中自定义本地模式目录"
+                    ? "本地目录没有找到歌曲\n把歌曲放进 音乐根目录/本地歌曲 即可"
                     : "未找到音乐\n请在设置中配置服务器并同步");
         } else {
             tvEmpty.setVisibility(View.GONE);
@@ -3055,6 +3084,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** 核心:主线程刷新列表 UI(须在主线程调用)。供 applyMusicListToUi 与 applySourceMode 共用 */
     private void applyMusicListCore(final List<MusicBean> list, final boolean toLocal) {
+        // 记录当前列表是按哪个模式构建的:连点防抖用它判断"目标模式没变 → 无需重建"
+        lastAppliedMode = toLocal;
         musicList.clear();
         musicList.addAll(list);
         adapter.setData(list);
@@ -3068,7 +3099,7 @@ public class MainActivity extends AppCompatActivity {
         if (musicList.isEmpty()) {
             tvEmpty.setVisibility(View.VISIBLE);
             tvEmpty.setText(toLocal
-                    ? "本地目录没有找到歌曲\n可在设置中自定义本地模式目录"
+                    ? "本地目录没有找到歌曲\n把歌曲放进 音乐根目录/本地歌曲 即可"
                     : "未找到音乐\n请在设置中配置服务器并同步");
         } else {
             tvEmpty.setVisibility(View.GONE);
