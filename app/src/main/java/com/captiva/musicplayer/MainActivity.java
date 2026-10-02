@@ -207,6 +207,13 @@ public class MainActivity extends AppCompatActivity {
     private LyricOffsetManager lyricOffsetManager;
     /** 是否正在只显示收藏(收藏夹模式) */
     private boolean favoritesOnly = false;
+    /**
+     * 云端收藏拉取的代次。
+     * 拉取是异步的(几十毫秒到几秒),这期间用户可能已经退出收藏夹甚至又进了一次;
+     * 每次发起拉取 / 退出收藏夹都 ++,让在途结果自动作废,
+     * 避免旧结果回来后把用户当前的列表状态覆盖回去。
+     */
+    private int cloudFavGen = 0;
     /** 本地/云端切换:false=云端模式(默认,云端歌单全部,已下载本地播/未下载联网播);true=本地模式(仅已下载的歌) */
     private boolean localOnlyMode = false;
     /** 来源切换是否正在执行(单飞:快速连点只重建最终目标,不并发开多个扫描/构建线程) */
@@ -999,7 +1006,11 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn);
                 Log.i(TAG, "[FavToggle] 切回全部歌曲 query='" + currentSearchQuery + "'");
-                // 退出收藏夹:清掉云端收藏集合与过滤模式,恢复完整列表
+                // 退出收藏夹:清掉云端收藏集合与过滤模式,恢复完整列表。
+                // 先把在途的云端收藏拉取代次作废 —— 它回来后若发现 favoritesOnly 已为 false
+                // 就只会更新缓存、不再动列表(否则会把刚恢复的"全部歌曲"又切回收藏夹)。
+                cloudFavGen++;
+                DownloadDiag.log("[收藏夹] 退出 → 恢复全部歌曲(收藏集合已清空)");
                 adapter.setCloudStarredIds(null);
                 adapter.setFavoritesMode(false);
                 // 恢复搜索或全部
@@ -1097,9 +1108,17 @@ public class MainActivity extends AppCompatActivity {
             if (favoritesOnly) {
                 String sid = current.getStreamId();
                 if (adapter.isCloudFavoritesMode() && sid != null && !sid.isEmpty()) {
-                    adapter.updateCloudStarredId(sid, nowFav);
+                    boolean changed = adapter.updateCloudStarredId(sid, nowFav);
                     updateCloudFavEmptyHint();
+                    DownloadDiag.log("[收藏夹] " + (nowFav ? "收藏" : "取消收藏")
+                            + " " + current.getTitle() + " sid=" + sid
+                            + " 集合改动=" + changed
+                            + " 收藏夹剩余=" + adapter.getCloudStarredCount() + " 首");
                 } else {
+                    DownloadDiag.log("[收藏夹] " + (nowFav ? "收藏" : "取消收藏")
+                            + " 走本机过滤分支 sid="
+                            + (sid == null ? "(空)" : sid)
+                            + " 云端模式=" + adapter.isCloudFavoritesMode());
                     applyFavoritesFilter();
                 }
             }
@@ -1287,6 +1306,9 @@ public class MainActivity extends AppCompatActivity {
             applyFavoritesFilter();
             return;
         }
+        // 本次拉取的代次:网络回来之前用户可能已经退出收藏夹、甚至又进了一次,
+        // 旧结果必须作废(否则会把用户当前的列表状态覆盖回去)
+        final int gen = ++cloudFavGen;
         Toast.makeText(this, "正在获取云端收藏...", Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
@@ -1301,6 +1323,12 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        if (gen != cloudFavGen) {
+                            // 已经有更新的拉取在跑/已完成,这次结果直接丢弃
+                            DownloadDiag.log("云端收藏: 丢弃过期结果(gen=" + gen
+                                    + " 当前=" + cloudFavGen + ")");
+                            return;
+                        }
                         if (result == null) {
                             Toast.makeText(MainActivity.this,
                                     "获取云端收藏失败,改用本地收藏", Toast.LENGTH_SHORT).show();
@@ -1327,9 +1355,17 @@ public class MainActivity extends AppCompatActivity {
                         }
                         DownloadDiag.log("云端收藏: 服务器 " + result.size() + " 首, 有效 ID "
                                 + ids.size() + " 个, 当前列表匹配 " + matched + " 首");
+                        // 集合照常更新(下次进收藏夹就能秒开),但**不一定**要动列表:
+                        // 网络是异步的,这几十毫秒到几秒里用户可能已经点了退出收藏夹。
+                        // 以前这里无条件 filterFavorites,于是把用户刚恢复的"全部歌曲"
+                        // 又强行切回收藏夹 —— 表现就是"取消收藏后列表没切回全部歌曲"。
+                        adapter.setCloudStarredIds(ids);
+                        if (!favoritesOnly) {
+                            DownloadDiag.log("云端收藏: 用户已退出收藏夹,只更新缓存不动列表");
+                            return;
+                        }
                         Toast.makeText(MainActivity.this,
                                 "云端收藏 " + ids.size() + " 首", Toast.LENGTH_SHORT).show();
-                        adapter.setCloudStarredIds(ids);
                         adapter.filterFavorites(null);
                         updateCount();
                         if (ids.isEmpty()) {
