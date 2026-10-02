@@ -172,6 +172,29 @@
                 android:layout_marginEnd="6dp"
                 android:background="@drawable/bg_side_index"
                 android:visibility="gone" />
+
+            <!-- 列表加载遮罩:本地/云端切换时后台要读歌单 + 排序 + 去重,期间用它盖住整个列表区,
+                 免得旧列表与新列表交接时"闪一下"(文案与开机 loadMusic 的「正在加载音乐...」一致)。
+                 clickable=true 让遮罩吃掉触摸事件,遮罩期间不会误点到下面旧列表的条目;
+                 半透明而非全遮 —— 旧列表隐约可见,观感上更像"正在刷新"而不是"界面没了" -->
+            <FrameLayout
+                android:id="@+id/fl_loading_mask"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#D9000000"
+                android:clickable="true"
+                android:focusable="true"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tv_loading_mask"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="正在加载音乐..."
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/sub_text_size" />
+            </FrameLayout>
         </FrameLayout>
 
         <!-- 右侧:歌词区(封面放大模糊作为底色,歌词叠加在上) -->

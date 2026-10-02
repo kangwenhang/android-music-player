@@ -204,8 +204,34 @@ public class MainActivity extends AppCompatActivity {
     private boolean localOnlyMode = false;
     /** 来源切换是否正在执行(单飞:快速连点只重建最终目标,不并发开多个扫描/构建线程) */
     private boolean sourceSwitchInFlight = false;
+
+    /**
+     * 列表加载遮罩:本地/云端切换时后台要读歌单 + 排序 + 去重,期间用「正在加载音乐...」盖住列表区。
+     * 只在"加载确实要花时间"时才出现 —— 延迟 {@link #LOADING_MASK_DELAY_MS} 再显示,
+     * 秒开(本地缓存命中)的场景根本不会闪一下。
+     */
+    private boolean loadingMaskActive = false;
+    /** 遮罩延迟显示的阈值:快于此值的切换不显示遮罩,避免"刚盖上去就撤掉"的闪烁 */
+    private static final long LOADING_MASK_DELAY_MS = 150;
+    /** 本轮列表重建的开始时间 / 遮罩真正显示的时间(仅用于日志:遮罩是否盖住了加载窗口) */
+    private long listLoadStartTs = 0;
+    private long listMaskShownTs = 0;
+    /** 被 handler.postDelayed 排队的"显示遮罩"任务(撤回用同一个实例) */
+    private final Runnable showLoadingMaskTask = new Runnable() {
+        @Override
+        public void run() {
+            if (flLoadingMask == null) return;
+            loadingMaskActive = true;
+            listMaskShownTs = System.currentTimeMillis();
+            flLoadingMask.setVisibility(View.VISIBLE);
+        }
+    };
+
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
+
+    /** 列表加载遮罩层(盖住 rv_list + 索引条) */
+    private View flLoadingMask;
 
     /** 右侧 A-Z 索引条(被动显示:跟随列表滚动高亮"当前字母") */
     private SideIndexBar sideIndexBar;
@@ -471,6 +497,7 @@ public class MainActivity extends AppCompatActivity {
     private void initViews() {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
+        flLoadingMask = findViewById(R.id.fl_loading_mask);
         sideIndexBar = findViewById(R.id.side_index_bar);
         tvCount = findViewById(R.id.tv_count);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
@@ -2705,8 +2732,51 @@ public class MainActivity extends AppCompatActivity {
         sourceSwitchInFlight = false;
         if (appliedToLocal != localOnlyMode) {
             sourceSwitchInFlight = true;
-            applySourceMode(localOnlyMode);
+            applySourceMode(localOnlyMode);   // 新一轮:遮罩保持(或重新排队),由新列表就绪时撤掉
+        } else {
+            // 已收敛到最终模式:兜底撤掉遮罩。
+            // 云端不可用回退本地、本地扫描为空保留缓存等路径不会走 applyMusicListCore,
+            // 不在这里撤的话会一直停在「正在加载音乐...」。
+            hideLoadingMask();
         }
+    }
+
+    /**
+     * 显示列表加载遮罩(可任意线程调用,内部切主线程)。
+     * 延迟 {@link #LOADING_MASK_DELAY_MS} 才真正显示:本地缓存命中这类秒开场景
+     * 在延迟内就被 {@link #hideLoadingMask()} 撤掉排队任务,不会出现"闪一下"。
+     */
+    private void showLoadingMask() {
+        handler.removeCallbacks(showLoadingMaskTask);
+        listLoadStartTs = System.currentTimeMillis();
+        handler.postDelayed(showLoadingMaskTask, LOADING_MASK_DELAY_MS);
+    }
+
+    /** 撤掉列表加载遮罩(可任意线程调用,内部切主线程) */
+    private void hideLoadingMask() {
+        handler.removeCallbacks(showLoadingMaskTask);   // 还没显示就被撤:直接取消排队
+        if (!loadingMaskActive) {
+            // 本轮重建没走到"需要遮罩"的程度(< 阈值就结束了),记一笔便于对照车机实际表现
+            if (listLoadStartTs > 0) {
+                CacheDebugLog.log("列表加载遮罩: 未显示(列表就绪仅 "
+                        + (System.currentTimeMillis() - listLoadStartTs) + "ms < " + LOADING_MASK_DELAY_MS + "ms)");
+                listLoadStartTs = 0;
+            }
+            return;
+        }
+        loadingMaskActive = false;
+        final long now = System.currentTimeMillis();
+        if (listLoadStartTs > 0) {
+            CacheDebugLog.log("列表加载遮罩: 覆盖 " + (now - listMaskShownTs) + "ms, 本轮列表重建全程 "
+                    + (now - listLoadStartTs) + "ms");
+            listLoadStartTs = 0;
+        }
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (flLoadingMask != null) flLoadingMask.setVisibility(View.GONE);
+            }
+        });
     }
 
     /**
@@ -2718,6 +2788,9 @@ public class MainActivity extends AppCompatActivity {
      * 完成(或云端不可用时回退)后通过 finishSourceSwitch 收尾,以便收敛到最终目标模式。
      */
     private void applySourceMode(final boolean toLocal) {
+        // 切换期间先排队遮罩:后台要读歌单 + 排序 + 去重,新列表回来才 setData,
+        // 中间这段时间让用户看到「正在加载音乐...」,而不是点完没反应 / 旧列表一闪。
+        showLoadingMask();
         final String syncPath = navidromeConfig.getCloudDir();
         final String localDir = navidromeConfig.getLocalScanPath();
         final String serverType = navidromeConfig.getServerType();
@@ -2848,6 +2921,8 @@ public class MainActivity extends AppCompatActivity {
             localMusicCache.forceSaveAsync(musicList);
         }
         updatePlayingHighlight();
+        // 新列表已进 UI,撤掉加载遮罩(未显示时为空操作)
+        hideLoadingMask();
     }
 
     /** 将列表交给主线程刷新 UI(供 FileObserver 重扫描等无单飞场景) */
