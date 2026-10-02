@@ -769,30 +769,44 @@ public class MusicService extends Service {
         }
         // 播放优先使用缓存:列表状态可能滞后(如刚在别的入口下载完成),
         // 播放前再做一次本地文件检查,已缓存则直接转本地播放,绝不联网重复拉流。
+        //
+        // ===== 主线程耗时诊断 =====
+        // 本方法由 binder 调用,与服务端同进程 → 整体跑在主线程上,任何一步的
+        // 磁盘 I/O / 网络请求都会直接变成 UI 卡顿。下面逐段计时并汇总成一行日志
+        // (CacheDebugLog 已改为异步落盘,记录本身不产生阻塞)。
+        final long tStart = System.currentTimeMillis();
         bean = promoteToLocalIfCached(bean);
         // 更新全局当前播放歌曲(供 EqualizerActivity 等获取)
         MusicDataHolder.getInstance().setCurrentPlayingMusic(bean);
         // 增加 token:每次切歌都递增,旧请求自动作废
         final int token = ++playToken;
-        
+        final long tPromote = System.currentTimeMillis() - tStart;
+
         // 先重置 MediaPlayer,取消之前的异步准备
         resetPlayer();
-        
+        final long tReset = System.currentTimeMillis() - tStart - tPromote;
+        long tAuth = 0L;
+        long tSetDs = 0L;
+
         try {
             // 网络歌曲:用 Navidrome stream URL
             // 本地歌曲:优先用 content uri,失败回退文件路径
             if (bean.isNetwork() && bean.getStreamUrl() != null) {
+                long tA = System.currentTimeMillis();
                 // 部分数据源(如飞牛)的流地址不含凭据,必须走请求头
                 java.util.Map<String, String> headers = null;
                 MusicSourceApi src = MusicDataHolder.getInstance().getMusicSourceApi();
                 if (src != null) {
                     headers = src.getAuthHeaders();
                 }
+                tAuth = System.currentTimeMillis() - tA;
+                long tB = System.currentTimeMillis();
                 if (headers != null && !headers.isEmpty()) {
                     player.setDataSource(this, android.net.Uri.parse(bean.getStreamUrl()), headers);
                 } else {
                     player.setDataSource(bean.getStreamUrl());
                 }
+                tSetDs = System.currentTimeMillis() - tB;
             } else if (bean.getUri() != null && !bean.getUri().isEmpty()) {
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
             } else if (bean.getData() != null && !bean.getData().isEmpty()) {
@@ -881,7 +895,18 @@ public class MusicService extends Service {
             });
             player.prepareAsync();
             // 云端歌曲:按设置异步下载到本地(自动缓存),不影响当前播放
+            long tC = System.currentTimeMillis();
             maybeAutoCache(bean);
+            long tAuto = System.currentTimeMillis() - tC;
+            // 主线程点击路径耗时汇总:定位"点击未下载歌曲卡一下"这类问题的直接证据
+            CacheDebugLog.log("点击播放主线程耗时: " + bean.getTitle()
+                    + " promote=" + tPromote + "ms"
+                    + " reset=" + tReset + "ms"
+                    + " auth=" + tAuth + "ms"
+                    + " setDataSource=" + tSetDs + "ms"
+                    + " maybeAutoCache=" + tAuto + "ms"
+                    + " 合计=" + (System.currentTimeMillis() - tStart) + "ms"
+                    + " network=" + bean.isNetwork());
         } catch (Exception e) {
             Log.e(TAG, "prepareAndPlay failed", e);
             isPrepared = false;
@@ -987,7 +1012,12 @@ public class MusicService extends Service {
         cacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
-                // 进度节流:仅百分比变化时广播(总长未知时按 500ms 节流)
+                // 进度节流(三重),避免"每个百分点广播一次"把主线程刷爆:
+                // 整首下载原本会发上百次广播,每次都要写一行诊断日志 + 重绑一行列表,
+                // 在车机上表现为播放过程中持续卡顿。
+                //   1) 完成(100%)必发
+                //   2) 总长未知:按 500ms 心跳
+                //   3) 总长已知:最快 250ms 一次,且进度至少跳 2%(4dp 进度条看不出更细的差别)
                 final long[] lastTime = {0L};
                 final int[] lastPct = {-100};
                 final boolean[] firstLogged = {false};
@@ -995,11 +1025,27 @@ public class MusicService extends Service {
                         new MusicSourceApi.DownloadProgressListener() {
                     @Override
                     public void onProgress(long bytes, long contentLength) {
-                        int pct = contentLength > 0
+                        final int pct = contentLength > 0
                                 ? (int) (bytes * 100 / contentLength) : -1;
-                        long now = System.currentTimeMillis();
-                        if (pct == lastPct[0] && (pct >= 0 || now - lastTime[0] < 500)) {
-                            return;
+                        final long now = System.currentTimeMillis();
+                        final boolean finished = pct >= 100;
+                        if (!finished) {
+                            if (pct < 0) {
+                                // 总长未知:只能按时间心跳
+                                if (now - lastTime[0] < 500) {
+                                    return;
+                                }
+                            } else {
+                                if (pct == lastPct[0]) {
+                                    return;
+                                }
+                                if (now - lastTime[0] < 250) {
+                                    return;
+                                }
+                                if (lastPct[0] >= 0 && pct - lastPct[0] < 2) {
+                                    return;
+                                }
+                            }
                         }
                         if (!firstLogged[0]) {
                             firstLogged[0] = true;

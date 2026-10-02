@@ -269,10 +269,13 @@ public class MainActivity extends AppCompatActivity {
             if (MusicService.ACTION_CACHE_AVAILABILITY_CHANGED.equals(action)) {
                 // bean 已由 MusicService 原地翻转为本地可用(与界面列表共享同一对象),
                 // 这里只刷新列表视图与高亮,无需重新构建列表。
+                String sid = intent.getStringExtra("streamId");
                 if (adapter != null) {
-                    // 下载完成:清除该行的缓存进度条,再整体刷新来源标识
-                    adapter.clearCacheProgress(intent.getStringExtra("streamId"));
-                    adapter.notifyDataSetChanged();
+                    // 下载完成:清除该行的缓存进度条,再单独刷新这一行的来源标识。
+                    // 注意:这里不能用 notifyDataSetChanged() —— 整表重绑在车机上会明显卡顿,
+                    // 而实际只有一个格子的状态点(云端→本地)变了。
+                    adapter.clearCacheProgress(sid);
+                    adapter.refreshRowByStreamId(sid);
                 }
                 updatePlayingHighlight();
             } else if (MusicService.ACTION_CACHE_PROGRESS.equals(action)) {
@@ -528,13 +531,24 @@ public class MainActivity extends AppCompatActivity {
         adapter.setOnItemClickListener((position, bean) -> {
             if (service != null && bound) {
                 // service 已绑定:直接播放
+                // 分段计时:把"UI 侧查找/拷贝"与"服务侧 prepareAndPlay"的代价分开,
+                // 便于定位卡顿到底发生在哪一段(日志异步落盘,本身不阻塞)
+                long tClick = System.currentTimeMillis();
                 List<MusicBean> displayList = adapter.getDisplayList();
                 int realPos = adapter.findPositionByBean(bean);
+                long tFind = System.currentTimeMillis() - tClick;
                 if (realPos >= 0 && realPos != position) {
                     position = realPos;
                 }
                 service.setPlayList(displayList, position);
+                long tSetList = System.currentTimeMillis() - tClick - tFind;
                 service.playIndex(position);
+                long tPlayIndex = System.currentTimeMillis() - tClick - tFind - tSetList;
+                CacheDebugLog.log("点击处理耗时(UI侧): " + (bean != null ? bean.getTitle() : "?")
+                        + " findPosition=" + tFind + "ms"
+                        + " setPlayList=" + tSetList + "ms"
+                        + " playIndex=" + tPlayIndex + "ms"
+                        + " 合计=" + (System.currentTimeMillis() - tClick) + "ms");
             } else {
                 // service 还没绑定好:记录待播放位置,绑定完成后自动播放
                 pendingPlayIndex = position;

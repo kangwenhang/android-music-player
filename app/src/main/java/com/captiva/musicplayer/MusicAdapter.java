@@ -505,6 +505,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
     }
 
+    /** 按 streamId 单独刷新一行(供"云端→本地"来源标识变化时调用) */
+    public void refreshRowByStreamId(String streamId) {
+        if (streamId == null || streamId.isEmpty()) {
+            return;
+        }
+        notifyRowByStreamId(streamId);
+    }
+
     /** 按 streamId 找到可见列表中的行并单独刷新(避免 notifyDataSetChanged 全表重绑) */
     private void notifyRowByStreamId(String streamId) {
         for (int i = 0; i < data.size(); i++) {
