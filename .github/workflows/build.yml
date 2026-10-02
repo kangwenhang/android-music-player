@@ -130,28 +130,19 @@ jobs:
         run: |
           APK_PATH=$(find ${{ steps.buildinfo.outputs.apk_dir }} -name "*.apk" | head -1)
 
-          # 查询最新正式版(prerelease=false)的 tag 作为基础版本
-          LATEST_STABLE=""
-          ALL_RELEASES=$(gh api "repos/${{ github.repository }}/releases?per_page=30" 2>/dev/null || echo "[]")
-          LATEST_STABLE=$(echo "$ALL_RELEASES" | python3 -c "
-          import sys, json
-          try:
-            data = json.load(sys.stdin)
-            for r in data:
-                if not r.get('prerelease', False):
-                    print(r.get('tag_name', ''))
-                    break
-          except:
-            pass
-          " 2>/dev/null || echo "")
-          echo "最新正式版: ${LATEST_STABLE:-无}"
-
-          # 基于最新正式版生成预发布版本号
-          # 去掉 v 前缀,取主版本号(如 2.0),加上 commit 数作为补丁号
-          if [ -n "$LATEST_STABLE" ]; then
-            BASE_VER=$(echo "$LATEST_STABLE" | sed 's/^v//' | cut -d. -f1-2)
-          else
+          # 基础版本:预发布 tag 的 v<主>.<次> 前缀
+          # 注意:不要靠 release 列表去扫"最新正式版"。releases 接口按 created_at 排序,
+          # 而预发布版本会持续堆到列表顶部,正式版被挤到 per_page 窗口之外,
+          # 一旦扫不到就静默退化成 1.0(实际发生过:tag 变成 v1.0.285-pre)。
+          # 改为直接在本地 tag(workflow 已 git fetch --tags)里找正式版标签,稳定且不耗 API 配额。
+          LATEST_STABLE=$(git tag --list | grep -E '^v[0-9]+(\.[0-9]+)+$' | sort -V | tail -1)
+          if [ -z "$LATEST_STABLE" ]; then
+            LATEST_STABLE="无"
             BASE_VER="1.0"
+            echo "警告: 未找到正式版 tag,基础版本回退为 1.0"
+          else
+            BASE_VER=$(echo "$LATEST_STABLE" | sed 's/^v//' | cut -d. -f1-2)
+            echo "基础版本: ${BASE_VER} (来自正式版 tag ${LATEST_STABLE})"
           fi
           COMMIT_COUNT=$(git rev-list --count HEAD)
           TAG="v${BASE_VER}.${COMMIT_COUNT}-pre"
@@ -237,7 +228,14 @@ jobs:
               --prerelease
           fi
 
-          # 3) 校验产物确实挂上去了:某些情况下 gh 会"成功但不落库",
+          # 3) 让固定入口 tag 指向本次构建的 commit
+          #    否则该 tag 会永远停在"第一次创建它"的那个 commit 上,
+          #    点进 tag 看到的代码与包里的代码不一致(包是新的,代码是旧的)
+          gh api --method PATCH "repos/${{ github.repository }}/git/refs/tags/${LATEST_TAG}" \
+            -f sha="$GITHUB_SHA" -F force=true >/dev/null 2>&1 \
+            || echo "警告: 固定入口 tag 未移动到最新 commit(不影响 APK 下载)"
+
+          # 4) 校验产物确实挂上去了:某些情况下 gh 会"成功但不落库",
           #    这里显式断言,杜绝"步骤绿了但没包"的静默失败
           for T in "$TAG" "$LATEST_TAG"; do
             ASSETS=$(gh release view "$T" --json assets --jq '.assets | length' 2>/dev/null || echo 0)
