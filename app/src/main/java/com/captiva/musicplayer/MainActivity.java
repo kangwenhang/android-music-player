@@ -206,13 +206,16 @@ public class MainActivity extends AppCompatActivity {
     private boolean sourceSwitchInFlight = false;
 
     /**
-     * 列表加载遮罩:本地/云端切换时后台要读歌单 + 排序 + 去重,期间用「正在加载音乐...」盖住列表区。
+     * 列表加载遮罩:本地/云端切换时后台要读歌单 + 排序 + 去重,期间把列表藏掉,
+     * 空区里显示「正在加载音乐...」—— 与开机 loadMusic 的观感完全一致。
      * 只在"加载确实要花时间"时才出现 —— 延迟 {@link #LOADING_MASK_DELAY_MS} 再显示,
      * 秒开(本地缓存命中)的场景根本不会闪一下。
      */
     private boolean loadingMaskActive = false;
     /** 遮罩延迟显示的阈值:快于此值的切换不显示遮罩,避免"刚盖上去就撤掉"的闪烁 */
     private static final long LOADING_MASK_DELAY_MS = 150;
+    /** 遮罩期间 tvEmpty 显示的文案(hide 时用文案比对判断是否需要兜底恢复空提示) */
+    private static final String LOADING_MASK_TEXT = "正在加载音乐...";
     /** 本轮列表重建的开始时间 / 遮罩真正显示的时间(仅用于日志:遮罩是否盖住了加载窗口) */
     private long listLoadStartTs = 0;
     private long listMaskShownTs = 0;
@@ -220,18 +223,21 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable showLoadingMaskTask = new Runnable() {
         @Override
         public void run() {
-            if (flLoadingMask == null) return;
+            if (tvEmpty == null || rvList == null) return;
             loadingMaskActive = true;
             listMaskShownTs = System.currentTimeMillis();
-            flLoadingMask.setVisibility(View.VISIBLE);
+            tvEmpty.setText(LOADING_MASK_TEXT);
+            tvEmpty.setVisibility(View.VISIBLE);
+            // 藏掉列表与索引条:和开机一样的"干净空区 + 一行加载文案",
+            // 而不是半透明蒙层压在旧列表上(旧内容隐约晃动,观感发卡)。
+            // INVISIBLE 不参与触摸分发,遮罩期间也不会误点旧条目。
+            rvList.setVisibility(View.INVISIBLE);
+            if (sideIndexBar != null) sideIndexBar.setVisibility(View.GONE);
         }
     };
 
     /** 从设置页返回时需重新加载 */
     private boolean needReload = false;
-
-    /** 列表加载遮罩层(盖住 rv_list + 索引条) */
-    private View flLoadingMask;
 
     /** 右侧 A-Z 索引条(被动显示:跟随列表滚动高亮"当前字母") */
     private SideIndexBar sideIndexBar;
@@ -497,7 +503,6 @@ public class MainActivity extends AppCompatActivity {
     private void initViews() {
         rvList = findViewById(R.id.rv_list);
         tvEmpty = findViewById(R.id.tv_empty);
-        flLoadingMask = findViewById(R.id.fl_loading_mask);
         sideIndexBar = findViewById(R.id.side_index_bar);
         tvCount = findViewById(R.id.tv_count);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
@@ -2774,9 +2779,28 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (flLoadingMask != null) flLoadingMask.setVisibility(View.GONE);
+                if (rvList != null) rvList.setVisibility(View.VISIBLE);
+                // 索引条按当前列表内容恢复(空列表/搜索态会保持隐藏)
+                if (sideIndexBar != null) refreshIndexBar();
+                // tvEmpty 正常由 applyMusicListCore 恢复;若走的是回退分支(云端不可用等),
+                // tvEmpty 还停在加载文案,这里兜底恢复成正确的空提示
+                if (tvEmpty != null && LOADING_MASK_TEXT.contentEquals(tvEmpty.getText())) {
+                    restoreEmptyHintForCurrentMode();
+                }
             }
         });
+    }
+
+    /** 按当前模式与列表内容恢复 tvEmpty 空提示(遮罩兜底用,与 applyMusicListCore 的分支一致) */
+    private void restoreEmptyHintForCurrentMode() {
+        if (musicList.isEmpty()) {
+            tvEmpty.setVisibility(View.VISIBLE);
+            tvEmpty.setText(localOnlyMode
+                    ? "本地目录没有找到歌曲\n可在设置中自定义本地模式目录"
+                    : "未找到音乐\n请在设置中配置服务器并同步");
+        } else {
+            tvEmpty.setVisibility(View.GONE);
+        }
     }
 
     /**
