@@ -183,6 +183,13 @@ public class MainActivity extends AppCompatActivity {
     private boolean autoPlayPending = false;
     /** 用户点击歌曲时 service 还没绑定好,记录待播放位置,onServiceConnected 后自动播放 */
     private int pendingPlayIndex = -1;
+    /**
+     * 点击歌曲后"下一帧再启动播放"的回调。
+     * 用 Choreographer 而不是 Handler.post:post 只是排到消息队列末尾,不保证高亮那一帧
+     * 已经画出来;postFrameCallback 是在下一次 VSYNC 回调,此时高亮帧必然已上屏。
+     * 保存引用是为了连点时能取消上一次,避免排队重复触发播放。
+     */
+    private Choreographer.FrameCallback pendingPlayFrame;
 
     /** 当前音乐列表(扫描同步目录) */
     private final List<MusicBean> musicList = new ArrayList<>();
@@ -634,27 +641,46 @@ public class MainActivity extends AppCompatActivity {
         });
         adapter.setOnItemClickListener((position, bean) -> {
             if (service != null && bound) {
-                // service 已绑定:直接播放
-                // 分段计时:把"UI 侧查找/拷贝"与"服务侧 prepareAndPlay"的代价分开,
-                // 便于定位卡顿到底发生在哪一段(日志异步落盘,本身不阻塞)
+                // ===== 点击反馈优先:先高亮,下一帧再启动播放 =====
+                // 原来高亮要等播放真正开始后才有值可查(updatePlayingHighlight 依赖
+                // service.getCurrentMusic()),而在此之前 playIndex 已经在主线程做完了
+                // promoteToLocalIfCached(磁盘 stat)、resetPlayer、setDataSource
+                // (联网歌曲可能触发 HTTPS 握手)—— 车机上这段几百毫秒,
+                // 表现就是"点下去没反应,过一会儿才亮"。
+                // 现在:点击瞬间先把高亮挪过去(只重绑两行,极快),播放的重活推到下一帧。
                 long tClick = System.currentTimeMillis();
-                List<MusicBean> displayList = adapter.getDisplayList();
+                final List<MusicBean> displayList = adapter.getDisplayList();
                 int realPos = adapter.findPositionByBean(bean);
-                long tFind = System.currentTimeMillis() - tClick;
                 if (realPos >= 0 && realPos != position) {
                     position = realPos;
                 }
-                service.setPlayList(displayList, position);
-                long tSetList = System.currentTimeMillis() - tClick - tFind;
-                service.playIndex(position);
-                long tPlayIndex = System.currentTimeMillis() - tClick - tFind - tSetList;
-                CacheDebugLog.log("点击处理耗时(UI侧): " + (bean != null ? bean.getTitle() : "?")
-                        + " findPosition=" + tFind + "ms"
-                        + " setPlayList=" + tSetList + "ms"
-                        + " playIndex=" + tPlayIndex + "ms"
-                        + " 合计=" + (System.currentTimeMillis() - tClick) + "ms");
+                adapter.setPlayingIndex(position);
+                final long tHighlight = System.currentTimeMillis() - tClick;
+                final int playPos = position;
+
+                // 连点时取消上一次待执行的播放,避免排队重复触发
+                if (pendingPlayFrame != null) {
+                    Choreographer.getInstance().removeFrameCallback(pendingPlayFrame);
+                }
+                pendingPlayFrame = new Choreographer.FrameCallback() {
+                    @Override
+                    public void doFrame(long frameTimeNanos) {
+                        pendingPlayFrame = null;
+                        long t0 = System.currentTimeMillis();
+                        service.setPlayList(displayList, playPos);
+                        long tSetList = System.currentTimeMillis() - t0;
+                        service.playIndex(playPos);
+                        CacheDebugLog.log("点击播放(下一帧): "
+                                + (bean != null ? bean.getTitle() : "?")
+                                + " 高亮=" + tHighlight + "ms"
+                                + " setPlayList=" + tSetList + "ms"
+                                + " playIndex=" + (System.currentTimeMillis() - t0 - tSetList) + "ms");
+                    }
+                };
+                Choreographer.getInstance().postFrameCallback(pendingPlayFrame);
             } else {
-                // service 还没绑定好:记录待播放位置,绑定完成后自动播放
+                // service 还没绑定好:同样先给高亮反馈,再记录待播放位置
+                adapter.setPlayingIndex(position);
                 pendingPlayIndex = position;
                 Toast.makeText(this, "正在初始化播放器,请稍候...", Toast.LENGTH_SHORT).show();
             }
