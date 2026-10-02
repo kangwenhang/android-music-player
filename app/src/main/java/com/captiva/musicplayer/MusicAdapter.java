@@ -174,6 +174,18 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return key != null ? key.hashCode() : RecyclerView.NO_ID;
     }
 
+    /** 诊断用:把列表前 n 个身份键拼成字符串,用于排查"第一首下面是第13首"这类缺段问题 */
+    private static String diagKeys(List<MusicBean> l, int n) {
+        if (l == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        int m = Math.min(n, l.size());
+        for (int i = 0; i < m; i++) {
+            MusicBean b = l.get(i);
+            sb.append(i).append(':').append(b == null ? "null" : b.getIdentityKey()).append(' ');
+        }
+        return sb.toString();
+    }
+
     /**
      * 设置完整数据(主线程调用)
      * 替换 fullData,重建 filteredData,加载第一批到 data
@@ -220,6 +232,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         long elapsed = System.currentTimeMillis() - t0;
         Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                 + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
+        // 诊断:第一首下面是第13首 → 确认 2~12 首到底在不在 fullData / filteredData 里
+        DownloadDiag.log("[列表诊断] setData: fullData=" + fullData.size()
+                + " filtered=" + r.filtered.size() + " data=" + data.size()
+                + " fullData前20=" + diagKeys(fullData, 20)
+                + " | filtered前20=" + diagKeys(r.filtered, 20));
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("setData", "fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                     + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
@@ -434,6 +451,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             hasMore = loadedCount < filteredData.size();
                         }
                         diffToApply.dispatchUpdatesTo(MusicAdapter.this);
+                        // 诊断:过滤后确认 data 前 20 个身份键是否连续(1,2,3...),揪出"第一首下面是第13首"
+                        DownloadDiag.log("[列表诊断] 过滤后: favMode=" + favMode
+                                + " filtered=" + r.filtered.size() + " data=" + data.size()
+                                + " data前20=" + diagKeys(data, 20));
                         if (needLog) {
                             DownloadDiag.log("[列表] 过滤完成 模式=" + (favMode ? "仅收藏" : "全部")
                                     + " 关键词='" + filterKeyword + "' 显示=" + r.filtered.size()
