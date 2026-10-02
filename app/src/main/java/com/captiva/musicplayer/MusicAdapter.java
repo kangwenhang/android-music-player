@@ -166,12 +166,22 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         setHasStableIds(true);
     }
 
+    /** 稳定 ID 映射:身份键 → 唯一 long,避免 String.hashCode() 碰撞导致不同歌曲被当成同一行而漏绘 */
+    private final java.util.Map<String, Long> stableIdMap = new java.util.HashMap<>();
+    private long nextStableId = 1;
+
     @Override
     public long getItemId(int position) {
         if (position < 0 || position >= data.size()) return RecyclerView.NO_ID;
         MusicBean bean = data.get(position);
         String key = getSongKey(bean);
-        return key != null ? key.hashCode() : RecyclerView.NO_ID;
+        if (key == null) return RecyclerView.NO_ID;
+        Long id = stableIdMap.get(key);
+        if (id == null) {
+            id = nextStableId++;
+            stableIdMap.put(key, id);
+        }
+        return id;
     }
 
     /** 诊断用:把列表前 n 个身份键拼成字符串,用于排查"第一首下面是第13首"这类缺段问题 */
@@ -218,17 +228,20 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             }
         }
         loadedCount = 0;
-        List<MusicBean> oldData = new ArrayList<>(data);
         FilterResult r = computeFilteredUnsafe(favoritesMode, pendingFm, cloudStarredIds);
+        // 先以「当前(旧)data」为基线算 Diff,在 adapter 仍是旧状态时 dispatch,
+        // 再替换 backing data。若先 swap 再 dispatch,会把按旧列表算出的增删位置错套到
+        // 新列表上,挤掉本该留下的行(表现:"第一首下面是第13首")。
+        List<MusicBean> oldData = new ArrayList<>(data);
+        long t0 = System.currentTimeMillis();
+        DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new FilterDiffCallback(oldData, r.firstBatch), false);
+        diff.dispatchUpdatesTo(this);
         data.clear();
         data.addAll(r.firstBatch);
         filteredData.clear();
         filteredData.addAll(r.filtered);
         loadedCount = r.loadCount;
         hasMore = loadedCount < filteredData.size();
-        long t0 = System.currentTimeMillis();
-        DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new FilterDiffCallback(oldData, r.firstBatch), false);
-        diff.dispatchUpdatesTo(this);
         long elapsed = System.currentTimeMillis() - t0;
         Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                 + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
@@ -443,6 +456,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                                     new FilterDiffCallback(curData, r.firstBatch), false);
                         }
                         synchronized (MusicAdapter.this) {
+                            // 关键:dispatch 必须在 swap 之前!
+                            // 此时 adapter.data 仍是「旧列表」,基于旧基线算出的增删位置才正确。
+                            // 若先 swap 再 dispatch,dispatch 时 adapter 已是新列表,
+                            // getItemId(基于新 data 算稳定 ID)会和旧→新过渡的 notify 位置错套,
+                            // 把本该留下的行挤掉 → 表现"第一首下面是第13首"。
+                            // 同一根因已修在 setData(先 dispatchUpdatesTo 再 clear/addAll)。
+                            diffToApply.dispatchUpdatesTo(MusicAdapter.this);
                             data.clear();
                             data.addAll(r.firstBatch);
                             filteredData.clear();
@@ -450,7 +470,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             loadedCount = r.loadCount;
                             hasMore = loadedCount < filteredData.size();
                         }
-                        diffToApply.dispatchUpdatesTo(MusicAdapter.this);
                         // 诊断:过滤后确认 data 前 20 个身份键是否连续(1,2,3...),揪出"第一首下面是第13首"
                         DownloadDiag.log("[列表诊断] 过滤后: favMode=" + favMode
                                 + " filtered=" + r.filtered.size() + " data=" + data.size()
