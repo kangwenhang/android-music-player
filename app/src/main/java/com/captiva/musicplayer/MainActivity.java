@@ -743,6 +743,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshIndexBarInternal() {
+        final long t0 = System.currentTimeMillis();
         boolean searchEmpty = currentSearchQuery == null || currentSearchQuery.trim().isEmpty();
         // 收藏夹模式下列表仍按标题 A-Z 排序,字母索引不会错位,因此不再隐藏;
         // 仅在有搜索关键词(子集过滤)或当前显示列表为空时隐藏。
@@ -750,6 +751,7 @@ public class MainActivity extends AppCompatActivity {
         if (!searchEmpty || list == null || list.isEmpty()) {
             sideIndexBar.setVisibility(View.GONE);
             updateIndexBarTouchDelegate();
+            logIndexBarCost(t0, 0);
             return;
         }
 
@@ -767,6 +769,18 @@ public class MainActivity extends AppCompatActivity {
         updateIndexBarTouchDelegate();
         // 被动模式:根据当前顶部可见项高亮"当前字母"
         updateCurrentLetterFromScroll();
+        logIndexBarCost(t0, list.size());
+    }
+
+    /**
+     * 索引条刷新是「每次列表数据变化」的必经路径(800 首就要逐首取拼音首字母),
+     * 超过 30ms 才记一笔:既能看到它是不是卡顿源,又不会刷屏。
+     */
+    private void logIndexBarCost(long t0, int count) {
+        long cost = System.currentTimeMillis() - t0;
+        if (cost >= 30) {
+            CacheDebugLog.log("索引条刷新耗时=" + cost + "ms 条数=" + count);
+        }
     }
 
     /**
@@ -2714,13 +2728,24 @@ public class MainActivity extends AppCompatActivity {
      * 一次重建,杜绝并发扫描/多次 setData 卡顿。
      */
     private void toggleSource() {
+        final long t0 = System.currentTimeMillis();
         final boolean toLocal = !localOnlyMode;
         localOnlyMode = toLocal;
         navidromeConfig.setLocalMode(toLocal);
         updateSourceToggleUi();
         // 本地模式隐藏来源状态点(全部是本地歌,点无信息量)
+        final long t1 = System.currentTimeMillis();
         adapter.setShowSourceDot(!toLocal);
+        final long t2 = System.currentTimeMillis();
         syncLocalDirObserver();
+        final long t3 = System.currentTimeMillis();
+        // 这三段都在主线程上,且发生在遮罩「上屏」之前 —— 若某段大,
+        // 用户看到的就是"点完先僵一下,加载文案才出来"。
+        // 注意 notifyDataSetChanged 的真正成本落在下一次 traversal,这里只记调用耗时。
+        CacheDebugLog.log("切换UI侧: 按钮+持久化=" + (t1 - t0) + "ms"
+                + " setShowSourceDot=" + (t2 - t1) + "ms"
+                + " 目录监听=" + (t3 - t2) + "ms"
+                + " 合计=" + (t3 - t0) + "ms");
         if (sourceSwitchInFlight) {
             return; // 正在切换,目标已是最新,等完成后自动收敛到最终模式
         }
@@ -2772,8 +2797,11 @@ public class MainActivity extends AppCompatActivity {
         loadingMaskActive = false;
         final long now = System.currentTimeMillis();
         if (listLoadStartTs > 0) {
-            CacheDebugLog.log("列表加载遮罩: 覆盖 " + (now - listMaskShownTs) + "ms, 本轮列表重建全程 "
-                    + (now - listLoadStartTs) + "ms");
+            // 「上屏延迟」= 排队显示到真正可见的间隔。阈值只有 150ms,若远大于它,
+            // 说明点完按钮后主线程被别的重活占住,遮罩排不上队(会表现为"点完先僵一下")。
+            CacheDebugLog.log("列表加载遮罩: 覆盖 " + (now - listMaskShownTs) + "ms"
+                    + ", 上屏延迟 " + (listMaskShownTs - listLoadStartTs) + "ms(阈值 " + LOADING_MASK_DELAY_MS + "ms)"
+                    + ", 本轮列表重建全程 " + (now - listLoadStartTs) + "ms");
             listLoadStartTs = 0;
         }
         runOnUiThread(new Runnable() {
@@ -2824,7 +2852,9 @@ public class MainActivity extends AppCompatActivity {
                 if (toLocal) {
                     // 本地模式:优先从 local_songs.json 缓存秒开(缓存即上一次成功扫描、已去重的完整结果),
                     // 避免每首 MediaMetadataRetriever 全量重扫导致切换卡顿数秒、列表迟迟不出。
+                    final long tBg0 = System.currentTimeMillis();
                     List<MusicBean> cached = localMusicCache.load();
+                    final long tCacheLoad = System.currentTimeMillis();
                     if (cached != null && !cached.isEmpty()) {
                         warmKeys(cached);            // 后台预热 getCanonicalPath,避免 setData 主线程掉帧
                         // 先秒开缓存(预览,不收尾);收尾交给扫描结果
@@ -2837,15 +2867,27 @@ public class MainActivity extends AppCompatActivity {
                         });
                         // 后台扫描刷新:扫描完成直接以新结果覆盖显示(不再仅在数量变化时刷新),
                         // 保证新增/替换/删除的歌即时出现;扫描为空(目录不存在/无音频)则保留缓存,不覆盖
+                        final long tScan0 = System.currentTimeMillis();
                         List<MusicBean> fresh = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
+                        final long tScan = System.currentTimeMillis();
                         java.util.Collections.sort(fresh, MusicTitleComparator.INSTANCE);
+                        final long tSort = System.currentTimeMillis();
                         List<MusicBean> deduped = dedupeList(fresh);
+                        final long tDedupe = System.currentTimeMillis();
+                        CacheDebugLog.log("切换重建[本地] 读列表缓存=" + (tCacheLoad - tBg0) + "ms"
+                                + " 目录扫描=" + (tScan - tScan0) + "ms"
+                                + " 排序=" + (tSort - tScan) + "ms"
+                                + " 去重=" + (tDedupe - tSort) + "ms"
+                                + " 后台合计=" + (tDedupe - tBg0) + "ms 条数=" + deduped.size());
                         if (!deduped.isEmpty()) {
                             final List<MusicBean> finalList = deduped;
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
+                                    final long tUi0 = System.currentTimeMillis();
                                     applyMusicListCore(finalList, true);
+                                    CacheDebugLog.log("切换重建[本地] 主线程刷新="
+                                            + (System.currentTimeMillis() - tUi0) + "ms");
                                     finishSourceSwitch(true);
                                 }
                             });
@@ -2856,20 +2898,33 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     }
                     // 无缓存:全量扫描(首启 / 缓存损坏)
+                    final long tScan0 = System.currentTimeMillis();
                     List<MusicBean> list = MusicScanner.scanDirectoryOnly(MainActivity.this, localDir);
+                    final long tScan = System.currentTimeMillis();
                     java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
+                    final long tSort = System.currentTimeMillis();
                     final List<MusicBean> finalList = dedupeList(list);
+                    final long tDedupe = System.currentTimeMillis();
+                    CacheDebugLog.log("切换重建[本地-无缓存] 目录扫描=" + (tScan - tScan0) + "ms"
+                            + " 排序=" + (tSort - tScan) + "ms"
+                            + " 去重=" + (tDedupe - tSort) + "ms"
+                            + " 后台合计=" + (tDedupe - tBg0) + "ms 条数=" + finalList.size());
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            final long tUi0 = System.currentTimeMillis();
                             applyMusicListCore(finalList, true);
+                            CacheDebugLog.log("切换重建[本地] 主线程刷新="
+                                    + (System.currentTimeMillis() - tUi0) + "ms");
                             finishSourceSwitch(true);
                         }
                     });
                     return;
                 }
                 // 云端模式:读云端缓存构建列表(与本地无关)
+                final long tBg0 = System.currentTimeMillis();
                 List<MusicBean> list = buildCloudDrivenList(serverType, syncPath);
+                final long tBuild = System.currentTimeMillis();
                 if (list == null) {
                     // 云端不可用:回退本地模式
                     runOnUiThread(new Runnable() {
@@ -2888,7 +2943,9 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
+                final long tSort = System.currentTimeMillis();
                 List<MusicBean> deduped = dedupeList(list);
+                final long tDedupe = System.currentTimeMillis();
                 // 后台预热:已下载本地播的云端歌在 buildCloudDrivenList 里被置为 network=false + 本地路径,
                 // 但其去重/身份键走 getIdentityKey = net_{streamId}(流式身份,无需磁盘路径),
                 // 故预热 getIdentityKey(而非 getCachedKey)即可,避免对全部已下载歌做无谓的
@@ -2896,11 +2953,20 @@ public class MainActivity extends AppCompatActivity {
                 // 注:「切换成云端很卡」的主因曾是 buildCloudDrivenList 对每首歌做 localPathKey(getCanonicalPath)
                 // + exists() + length() 的 ~1620 次散落 stat,现已改为「单次目录遍历 + O(1) 查表」根治。
                 warmKeys(deduped);
+                final long tWarm = System.currentTimeMillis();
+                CacheDebugLog.log("切换重建[云端] 构建列表=" + (tBuild - tBg0) + "ms"
+                        + " 排序=" + (tSort - tBuild) + "ms"
+                        + " 去重=" + (tDedupe - tSort) + "ms"
+                        + " 预热=" + (tWarm - tDedupe) + "ms"
+                        + " 后台合计=" + (tWarm - tBg0) + "ms 条数=" + deduped.size());
                 final List<MusicBean> finalList = deduped;
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        final long tUi0 = System.currentTimeMillis();
                         applyMusicListCore(finalList, false);
+                        CacheDebugLog.log("切换重建[云端] 主线程刷新="
+                                + (System.currentTimeMillis() - tUi0) + "ms");
                         finishSourceSwitch(false);
                     }
                 });

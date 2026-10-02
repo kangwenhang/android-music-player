@@ -35,6 +35,20 @@ public final class PinyinUtils {
     }
 
     /**
+     * 汉字 → 首字母 记忆化表。
+     *
+     * 为什么必须缓存:firstLetter 的主要调用方是**排序比较器**与**A-Z 索引条**。
+     * 排序时每次 compare 都要对两侧各取一次首字母,800 首要比较约 800·log2(800)≈7700 次,
+     * 即约 1.5 万次调用;而 gb2312Letter 内部每次都要 `getBytes("GB2312")`
+     * (Charset 查找 + 编码器分配 + String 构造),在车机上这足以让一次列表重建多花上百毫秒。
+     * 同一声母的汉字在歌名里高度集中,缓存后绝大多数调用退化成一次 HashMap 命中。
+     *
+     * 用 ConcurrentHashMap:排序在后台线程(SourceModeToggle)、索引条刷新在主线程,可能并发。
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<Character, Character> LETTER_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<Character, Character>();
+
+    /**
      * 取标题首字母
      *
      * @return 'A'~'Z' 或 '#'
@@ -51,8 +65,15 @@ public final class PinyinUtils {
 
         // 汉字:走 GB2312 区位码
         if (c >= 0x4E00 && c <= 0x9FA5) {
+            Character cached = LETTER_CACHE.get(c);
+            if (cached != null) {
+                return cached;
+            }
             char letter = gb2312Letter(c);
-            if (letter != 0) return letter;
+            // letter==0 也缓存:'#' 同样是稳定结果,避免生僻字每次重算
+            char result = letter != 0 ? letter : '#';
+            LETTER_CACHE.put(c, result);
+            return result;
         }
         return '#';
     }
