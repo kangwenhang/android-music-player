@@ -2893,6 +2893,7 @@ public class MainActivity extends AppCompatActivity {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                try {
                 if (toLocal) {
                     // 本地模式:优先从 local_songs.json 缓存秒开(缓存即上一次成功扫描、已去重的完整结果),
                     // 避免每首 MediaMetadataRetriever 全量重扫导致切换卡顿数秒、列表迟迟不出。
@@ -3019,6 +3020,23 @@ public class MainActivity extends AppCompatActivity {
                         finishSourceSwitch(false);
                     }
                 });
+                } catch (final Throwable t) {
+                    // 后台线程未捕获异常会直接杀进程(连点切换时任何一次构建抛错都是闪退)。
+                    // 兜底:记录完整堆栈、复位单飞、撤遮罩,保留旧列表;用户再点即可重试。
+                    Log.e(TAG, "切换重建异常", t);
+                    CacheDebugLog.log("切换重建异常: " + Log.getStackTraceString(t));
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            sourceSwitchInFlight = false;
+                            hideLoadingMask();
+                            restoreEmptyHintForCurrentMode();
+                            Toast.makeText(MainActivity.this,
+                                    "切换失败: " + t.getClass().getSimpleName(),
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
             }
         }, "SourceModeToggle").start();
     }

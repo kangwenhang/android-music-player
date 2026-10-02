@@ -190,6 +190,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (more == null || more.isEmpty()) {
             return;
         }
+        // 结构性修改 data/filteredData 前,使在途异步过滤的 dispatch 失效:
+        // 否则在途 diff 按旧快照 dispatch 会造成 RecyclerView 位置不一致(崩溃)
+        filterGeneration++;
         // 1. 用 HashSet O(1) 去重,只收集真正新增的歌曲
         List<MusicBean> newlyAdded = new ArrayList<>();
         for (MusicBean b : more) {
@@ -550,6 +553,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (position < 0 || position >= filteredData.size()) {
             return false;
         }
+        // 结构性追加 data 前使在途异步过滤 dispatch 失效(同 appendData 的理由)
+        filterGeneration++;
         // 如果位置已超出当前加载范围,一次性补充加载所有需要的批次
         // 然后只通知一次(原来每批 notifyItemRangeInserted,目标在 3000 时触发 60 次通知)
         while (loadedCount <= position && hasMore) {
