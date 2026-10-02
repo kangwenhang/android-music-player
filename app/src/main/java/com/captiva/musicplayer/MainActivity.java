@@ -1390,7 +1390,9 @@ public class MainActivity extends AppCompatActivity {
                         }
                         Toast.makeText(MainActivity.this,
                                 "云端收藏 " + ids.size() + " 首", Toast.LENGTH_SHORT).show();
-                        adapter.filterFavorites(null);
+                        // 强制通道:"收藏列表刚拿回来,必须切过去"是关键操作,
+                        // 不能被防抖当成重复请求静默跳过
+                        adapter.filterFavorites(null, true);
                         updateCount();
                         if (ids.isEmpty()) {
                             tvEmpty.setVisibility(View.VISIBLE);
