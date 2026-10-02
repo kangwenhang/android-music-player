@@ -910,6 +910,7 @@ public class MusicService extends Service {
             }
             java.io.File localFile = MusicSyncManager.buildLocalFile(bean, cloudDir);
             if (localFile.exists() && localFile.length() > 1024) {
+                Log.i(TAG, "promoteToLocalIfCached: 已缓存,本地播放 " + bean.getTitle());
                 bean.setNetwork(false);
                 bean.setData(localFile.getAbsolutePath());
                 bean.setUri(null);
@@ -931,7 +932,15 @@ public class MusicService extends Service {
      * 的情况都直接返回,绝不影响正在进行的播放。
      */
     private void maybeAutoCache(final MusicBean bean) {
-        if (bean == null || !bean.isNetwork() || bean.getStreamUrl() == null) {
+        if (bean == null) {
+            return;
+        }
+        // 诊断日志:无论走不走缓存,都记录决策依据(定位"看不到进度条"类问题)
+        Log.i(TAG, "maybeAutoCache: " + bean.getTitle()
+                + " network=" + bean.isNetwork()
+                + " autoCacheOnPlay=" + (navidromeConfig != null && navidromeConfig.isAutoCacheOnPlay())
+                + " streamId=" + bean.getStreamId());
+        if (!bean.isNetwork() || bean.getStreamUrl() == null) {
             return;
         }
         if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
@@ -974,6 +983,7 @@ public class MusicService extends Service {
                 try {
                     boolean ok = MusicSyncManager.autoCacheSong(
                             getApplicationContext(), api, bean, syncPath, maxBytes, listener);
+                    Log.i(TAG, "autoCacheSong result=" + ok + ": " + bean.getTitle());
                     if (ok) {
                         // 即时把当前播放条目标记为本地可用(与手动同步后行为一致)。
                         // bean 是 service.playList 与界面列表共享的同一对象,原地修改即生效。
