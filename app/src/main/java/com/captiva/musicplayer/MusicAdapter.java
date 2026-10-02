@@ -616,13 +616,25 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             // 下载结束:移除进度并刷新对应行(恢复普通状态)
             if (old != null) {
                 cacheProgress.remove(streamId);
-                notifyRowByStreamId(streamId);
+                notifyRowProgress(streamId);
             }
             return;
         }
         if (old != null && old.equals(percent)) return;
         cacheProgress.put(streamId, percent);
-        notifyRowByStreamId(streamId);
+        notifyRowProgress(streamId);
+    }
+
+    /**
+     * 只刷新进度条那一格(局部刷新)。
+     * 注意与 {@link #refreshRowByStreamId} 的区别:后者是"来源标识 云端→本地"
+     * 这种整行状态变化(下载完成才一次),必须整行重绑。
+     */
+    private void notifyRowProgress(String streamId) {
+        int pos = findRowByStreamId(streamId);
+        if (pos >= 0) {
+            notifyItemChanged(pos, PAYLOAD_CACHE_PROGRESS);
+        }
     }
 
     /** 清除某首歌的缓存进度显示(下载完成转本地后调用) */
@@ -643,16 +655,47 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     /** 按 streamId 找到可见列表中的行并单独刷新(避免 notifyDataSetChanged 全表重绑) */
     private void notifyRowByStreamId(String streamId) {
-        for (int i = 0; i < data.size(); i++) {
-            MusicBean b = data.get(i);
-            if (b != null && streamId.equals(b.getStreamId())) {
-                notifyItemChanged(i);
-                return;
-            }
+        int pos = findRowByStreamId(streamId);
+        if (pos >= 0) {
+            notifyItemChanged(pos);
+            return;
         }
         // 诊断:可见列表中找不到对应行(如该歌尚未加载到当前批次)→ 进度条不会显示
         CacheDebugLog.log("进度刷新未命中可见行 streamId=" + streamId
                 + " data=" + data.size() + " filtered=" + filteredData.size());
+    }
+
+    /**
+     * 找 streamId 对应的行号。
+     *
+     * 为什么要有"上次命中"缓存:这是**每次下载进度广播**都要走的路径 ——
+     * 一首歌下载期间会连发几十次,而 data 现在最多是**全量 810 首**
+     * ("退出收藏夹恢复全部歌曲"修好之后才变成这样;以前收藏夹里只有 61 首,
+     *  从头扫一遍几乎无感)。每次广播都线性扫 810 行再叠加一次重绑,
+     * 滚动时就是明显的掉帧。而连续广播针对的**总是同一首歌、同一位置**,
+     * 所以命中上次结果即可直接复用。
+     *
+     * 安全性:缓存只作为"快速路径",每次都会校验下标未越界且该行的 streamId 确实匹配;
+     * 列表被替换/重排后必然不匹配,自然退回全扫描。
+     */
+    private int findRowByStreamId(String streamId) {
+        if (streamId.equals(lastRowSid) && lastRowPos >= 0 && lastRowPos < data.size()) {
+            MusicBean b = data.get(lastRowPos);
+            if (b != null && streamId.equals(b.getStreamId())) {
+                return lastRowPos;                 // 连续广播命中同一行,O(1)
+            }
+        }
+        for (int i = 0; i < data.size(); i++) {
+            MusicBean b = data.get(i);
+            if (b != null && streamId.equals(b.getStreamId())) {
+                lastRowSid = streamId;
+                lastRowPos = i;
+                return i;
+            }
+        }
+        lastRowSid = streamId;   // 未命中也要记住,免得下次再白扫一遍
+        lastRowPos = -1;
+        return -1;
     }
 
     /**
@@ -850,6 +893,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 复用的 StringBuilder(避免每次 onBind 创建新 String 对象,减少 GC) */
     private final StringBuilder bindBuffer = new StringBuilder(64);
 
+    /** 行查找的"上次命中"缓存(见 {@link #findRowByStreamId});只在主线程读写 */
+    private String lastRowSid = null;
+    private int lastRowPos = -1;
+
+    /** 局部刷新的 payload 标记:只更新缓存进度条,不重绑整行 */
+    private static final Object PAYLOAD_CACHE_PROGRESS = new Object();
+
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
         long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
@@ -899,6 +949,37 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("onBind", System.currentTimeMillis() - t0);
+        }
+    }
+
+    /**
+     * 局部刷新:只更新缓存进度条,**不重绑整行**。
+     *
+     * 为什么必须分开:下载进度广播一首歌要连发几十次,走整行重绑就等于
+     * 每 1% 都重新 setText(标题/副标题/序号)+ 重新 setImageBitmap(封面)
+     * —— 封面位图设置是这里最贵的一步,而进度条其实才是唯一变化的控件。
+     * 车机 2 核上,这正是"下载时滚列表明显掉帧"的直接来源。
+     */
+    @Override
+    public void onBindViewHolder(@NonNull VH holder, int position, @NonNull List<Object> payloads) {
+        if (payloads.isEmpty()) {
+            onBindViewHolder(holder, position);
+            return;
+        }
+        if (position < 0 || position >= data.size()) {
+            return;
+        }
+        MusicBean bean = data.get(position);
+        String sid = bean.getStreamId();
+        Integer prog = (sid != null && !sid.isEmpty()) ? cacheProgress.get(sid) : null;
+        if (prog != null && bean.isNetwork()) {
+            holder.pbCache.setVisibility(View.VISIBLE);
+            holder.pbCache.setIndeterminate(prog < 0);
+            if (prog >= 0) {
+                holder.pbCache.setProgress(prog);
+            }
+        } else {
+            holder.pbCache.setVisibility(View.GONE);
         }
     }
 
