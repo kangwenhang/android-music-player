@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
+import java.util.regex.Pattern;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -43,6 +44,12 @@ public class MusicService extends Service {
     private static final String TAG = "MusicService";
     public static final int NOTIF_ID = 1001;
     private static final String CHANNEL_ID = "captiva_music_channel";
+    /**
+     * LRC 时间轴标签,形如 [00:12.34]。
+     * 用来区分「带时间轴的 LRC」和「纯文本歌词」——
+     * 只判断「含 [ 且含 : 且含 ]」会把「作词: 某某」这类纯文本误判成 LRC。
+     */
+    private static final Pattern LRC_TIME_TAG = Pattern.compile("\\[\\d{1,2}:\\d{2}");
 
     /** 自动缓存完成广播:通知界面刷新来源标识(云端→本地) */
     public static final String ACTION_CACHE_AVAILABILITY_CHANGED =
@@ -645,6 +652,17 @@ public class MusicService extends Service {
                     }
                 }
 
+                // 5. 服务器也没词 → 公开歌词源兜底(lrclib.net,按歌手+歌名)
+                if (lyrics == null || lyrics.isEmpty()) {
+                    List<LrcEntry> pub = fetchFromPublicSource(bean);
+                    if (pub != null && !pub.isEmpty()) {
+                        lyrics = pub;
+                        Log.d(TAG, "本地歌曲从公开歌词源获取: " + lyrics.size() + " 行,写回本地");
+                        LyricCache pubCache = new LyricCache(MusicService.this);
+                        pubCache.saveBoth(filePath, bean.getStreamId(), lyrics);
+                    }
+                }
+
                 final List<LrcEntry> result = lyrics != null ? lyrics : new ArrayList<LrcEntry>();
                 // 在主线程更新歌词并通知 UI
                 mainHandler.post(new Runnable() {
@@ -674,6 +692,29 @@ public class MusicService extends Service {
         String aKey = (a.getTitle() != null ? a.getTitle() : "") + "|" + (a.getArtist() != null ? a.getArtist() : "");
         String bKey = (b.getTitle() != null ? b.getTitle() : "") + "|" + (b.getArtist() != null ? b.getArtist() : "");
         return aKey.equals(bKey);
+    }
+
+    /**
+     * 公开歌词源兜底:服务器(飞牛 / Navidrome)也取不到词时,按歌手 + 歌名到 lrclib.net 再试一次。
+     * 必须在后台线程调用(内部发网络请求);取不到 / 外网不通 / TLS 失败一律返回 null,静默降级。
+     */
+    private List<LrcEntry> fetchFromPublicSource(MusicBean bean) {
+        try {
+            long durationSec = bean.getDuration() > 0 ? bean.getDuration() / 1000 : 0;
+            String text = LrclibClient.fetchLyrics(bean.getArtist(), bean.getTitle(), durationSec);
+            if (text == null || text.trim().isEmpty()) {
+                return null;
+            }
+            // 判断是否带时间轴:[00:12.34] 这样的标签才算 LRC。
+            // 不能用「含 [ 且含 : 且含 ]」—— 纯文本里的「作词: 某某」会被误判成时间轴歌词。
+            if (LRC_TIME_TAG.matcher(text).find()) {
+                return LrcParser.parseLrcText(text);
+            }
+            return LrcParser.parsePlainTextLyrics(text, 5000);
+        } catch (Exception e) {
+            Log.w(TAG, "公开歌词源兜底失败", e);
+            return null;
+        }
     }
 
     /** 异步加载网络歌曲歌词 */
@@ -739,6 +780,16 @@ public class MusicService extends Service {
                     // 获取成功,缓存到本地(断网下次可用)
                     if (lyrics != null && !lyrics.isEmpty()) {
                         Log.d(TAG, "网络歌词获取成功: " + lyrics.size() + " 行,缓存到本地");
+                        lyricCache.save(songId, lyrics);
+                    }
+                }
+
+                // 服务器也没词 → 公开歌词源兜底(lrclib.net,按歌手+歌名)
+                if (lyrics == null || lyrics.isEmpty()) {
+                    List<LrcEntry> pub = fetchFromPublicSource(bean);
+                    if (pub != null && !pub.isEmpty()) {
+                        lyrics = pub;
+                        Log.d(TAG, "网络歌曲从公开歌词源获取: " + lyrics.size() + " 行,缓存到本地");
                         lyricCache.save(songId, lyrics);
                     }
                 }
