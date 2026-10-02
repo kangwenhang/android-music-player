@@ -149,6 +149,8 @@ public class MusicService extends Service {
         MusicDataHolder.getInstance().setEqualizerManager(equalizerManager);
         // 恢复上次播放模式
         NavidromeConfig config = new NavidromeConfig(this);
+        // 一次性迁移:旧的"播放时自动缓存=关"重置为开(与 MainActivity 幂等,双保险)
+        config.migrateAutoCacheOnPlayIfNeeded();
         playMode = PlayMode.fromValue(config.getPlayMode());
     }
 

@@ -30,6 +30,7 @@ public class NavidromeConfig {
     private static final String KEY_FN_RELAY = "fn_relay";    // 上次解析出的地址是否走飞牛中继
     private static final String KEY_AUTO_CACHE_ON_PLAY = "auto_cache_on_play"; // 播放时自动缓存
     private static final String KEY_AUTO_CACHE_MAX_MB = "auto_cache_max_mb"; // 自动缓存上限(MB)
+    private static final String KEY_AUTO_CACHE_MIGRATED = "auto_cache_migrated_v1"; // 播放自动缓存一次性迁移标记
     private static final int DEFAULT_MIN_DURATION = 30; // 默认30秒
 
     private final SharedPreferences prefs;
@@ -240,6 +241,25 @@ public class NavidromeConfig {
     /** 设置自动缓存上限(MB),负数按 0(不限)处理 */
     public void setAutoCacheMaxMb(int mb) {
         prefs.edit().putInt(KEY_AUTO_CACHE_MAX_MB, mb < 0 ? 0 : mb).apply();
+    }
+
+    /**
+     * 一次性迁移:云端改为「点击播放按需缓存」模式后,把历史遗留的
+     * isAutoCacheOnPlay=false 重置为 true。
+     *
+     * 背景:该开关旧版本默认关闭,用户在旧版本里打开过设置页并保存就会把 false
+     * 持久化下来;仅改默认值对老用户无效,表现为"点击播放没有缓存、也没有进度条"。
+     * 迁移只执行一次(带标记),此后用户的开关选择会被正常尊重。
+     * 幂等:重复调用只读一次标记,不做任何写入。
+     */
+    public void migrateAutoCacheOnPlayIfNeeded() {
+        if (prefs.getBoolean(KEY_AUTO_CACHE_MIGRATED, false)) {
+            return;
+        }
+        prefs.edit()
+                .putBoolean(KEY_AUTO_CACHE_ON_PLAY, true)
+                .putBoolean(KEY_AUTO_CACHE_MIGRATED, true)
+                .apply();
     }
 
     /** 判断是否已配置完整的服务器信息 */

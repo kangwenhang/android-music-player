@@ -376,6 +376,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         navidromeConfig = new NavidromeConfig(this);
+        // 一次性迁移:把旧版本遗留的"播放时自动缓存=关"重置为开(云端已改为点击播放按需缓存)
+        navidromeConfig.migrateAutoCacheOnPlayIfNeeded();
         // 恢复上次的列表模式(true=本地列表,false=云端列表)
         localOnlyMode = navidromeConfig.isLocalMode();
         localMusicCache = new LocalMusicCache(this);
