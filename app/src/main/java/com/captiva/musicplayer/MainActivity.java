@@ -450,6 +450,12 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // 车机场景:界面在前台时保持屏幕常亮(用户明确要求),
+        // 否则系统息屏超时一到就黑屏,看歌词/封面都得先点一下唤醒。
+        // 用 FLAG_KEEP_SCREEN_ON 而不是唤醒锁:不需要权限,Activity 不可见时系统自动失效,
+        // 不存在忘记释放导致电量泄漏的问题(音乐后台播放仍靠 MediaPlayer 的 PARTIAL_WAKE_LOCK)。
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
         // 全屏沉浸模式:隐藏状态栏和虚拟导航键
         hideSystemUI();
 

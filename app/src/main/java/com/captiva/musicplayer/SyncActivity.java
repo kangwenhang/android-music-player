@@ -35,6 +35,9 @@ public class SyncActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // 车机场景:界面在前台时保持屏幕常亮(与主界面一致),避免看设置/歌词时被系统息屏打断。
+        // FLAG_KEEP_SCREEN_ON:不需要权限,Activity 不可见时系统自动失效,无泄漏风险。
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUI();
         setContentView(R.layout.activity_sync);
 
