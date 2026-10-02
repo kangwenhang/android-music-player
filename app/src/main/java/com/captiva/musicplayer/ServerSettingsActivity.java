@@ -143,6 +143,13 @@ public class ServerSettingsActivity extends AppCompatActivity {
         // 回填自动缓存设置(默认:开启 / 上限 2048MB)
         cbAutoCache.setChecked(config.isAutoCacheOnPlay());
         etAutoCacheMax.setText(String.valueOf(config.getAutoCacheMaxMb()));
+        // 勾选即时生效(不依赖点"保存"按钮):避免"勾了没保存 → 设置未生效"的陷阱
+        cbAutoCache.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(android.widget.CompoundButton buttonView, boolean isChecked) {
+                config.setAutoCacheOnPlay(isChecked);
+            }
+        });
     }
 
     // ==================== 目录选择器 ====================

@@ -948,17 +948,30 @@ public class MusicService extends Service {
                 + " streamId=" + bean.getStreamId()
                 + " streamUrl=" + (bean.getStreamUrl() != null ? "有" : "无"));
         if (!bean.isNetwork() || bean.getStreamUrl() == null) {
+            CacheDebugLog.log("跳过缓存: 已是本地歌或流地址为空 network=" + bean.isNetwork()
+                    + " streamUrl=" + (bean.getStreamUrl() != null));
             return;
         }
-        if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
+        if (navidromeConfig == null) {
+            CacheDebugLog.log("跳过缓存: navidromeConfig 为空");
+            return;
+        }
+        if (!navidromeConfig.isAutoCacheOnPlay()) {
+            CacheDebugLog.log("跳过缓存: 设置里「播放时自动缓存」为关(请在设置中勾选)");
             return;
         }
         final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
-        if (api == null || bean.getStreamId() == null || bean.getStreamId().isEmpty()) {
+        if (api == null) {
+            CacheDebugLog.log("跳过缓存: 数据源 api 为空");
+            return;
+        }
+        if (bean.getStreamId() == null || bean.getStreamId().isEmpty()) {
+            CacheDebugLog.log("跳过缓存: streamId 为空");
             return;
         }
         final String syncPath = navidromeConfig.getCloudDir();
         if (syncPath == null || syncPath.isEmpty()) {
+            CacheDebugLog.log("跳过缓存: 云端目录为空");
             return;
         }
         final long maxBytes = navidromeConfig.getAutoCacheMaxMb() > 0
