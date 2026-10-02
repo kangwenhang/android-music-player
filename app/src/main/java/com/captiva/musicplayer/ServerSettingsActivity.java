@@ -153,15 +153,6 @@ public class ServerSettingsActivity extends AppCompatActivity {
         ScreenOnKeeper.release();
     }
 
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-        super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
-            // 焦点变化时补回常亮标志(某些系统重算窗口属性时会丢)
-            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
-    }
-
     // ==================== 目录选择器 ====================
 
     /**
@@ -642,6 +633,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
+            // 焦点变化时补回常亮标志(某些系统重算窗口属性时会丢)
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             hideSystemUI();
         }
     }
