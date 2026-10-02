@@ -87,7 +87,38 @@ public class SongCache {
             }
             doSave(songs);
             lastSavedCount = songs.size();
-            invalidateMemoryCache();   // 文件已变,内存缓存作废
+            // 写穿:保存后立刻把内存缓存刷新为刚写入的内容(不再作废)。
+            // 原实现在这里 invalidateMemoryCache(),而"播放自动缓存完成"会触发 save(),
+            // 结果紧接着的云端切换就从「2ms 内存命中」退化成「570~590ms 重新解析 JSON」
+            // (车机实测:读云端缓存=586ms(重新解析) 遍历同步目录=1176ms 合计 1974ms)。
+            refreshMemoryCacheAfterSave(songs);
+        }
+    }
+
+    /**
+     * 保存后直写内存缓存:用刚写入的内容 + 新文件指纹重建 memList/memKey。
+     * beans 必须交副本 —— memList 是只读模板,load() 还会再 copy 一次给调用方就地改写。
+     * 任何异常都退回作废,宁可慢也不能拿到脏数据。
+     */
+    private void refreshMemoryCacheAfterSave(List<MusicBean> songs) {
+        try {
+            if (songs == null || songs.isEmpty()) {
+                invalidateMemoryCache();
+                return;
+            }
+            List<MusicBean> snapshot = new ArrayList<>(songs.size());
+            for (int i = 0; i < songs.size(); i++) {
+                MusicBean b = songs.get(i);
+                if (b != null) {
+                    snapshot.add(b.copy());
+                }
+            }
+            memList = snapshot;
+            memKey = cacheFile.getAbsolutePath() + "|" + cacheFile.length()
+                    + "|" + cacheFile.lastModified();
+        } catch (Throwable t) {
+            Log.w(TAG, "保存后刷新内存缓存失败,退回作废", t);
+            invalidateMemoryCache();
         }
     }
 
