@@ -248,14 +248,14 @@ public class MainActivity extends AppCompatActivity {
      * 只在"加载确实要花时间"时才出现 —— 延迟 {@link #LOADING_MASK_DELAY_MS} 再显示,
      * 秒开(本地缓存命中)的场景根本不会闪一下。
      */
-    private boolean loadingMaskActive = false;
+    private volatile boolean loadingMaskActive = false;
     /** 遮罩延迟显示的阈值:快于此值的切换不显示遮罩,避免"刚盖上去就撤掉"的闪烁 */
     private static final long LOADING_MASK_DELAY_MS = 150;
     /** 遮罩期间 tvEmpty 显示的文案(hide 时用文案比对判断是否需要兜底恢复空提示) */
     private static final String LOADING_MASK_TEXT = "正在加载音乐...";
     /** 本轮列表重建的开始时间 / 遮罩真正显示的时间(仅用于日志:遮罩是否盖住了加载窗口) */
-    private long listLoadStartTs = 0;
-    private long listMaskShownTs = 0;
+    private volatile long listLoadStartTs = 0;
+    private volatile long listMaskShownTs = 0;
     /** 被 handler.postDelayed 排队的"显示遮罩"任务(撤回用同一个实例) */
     private final Runnable showLoadingMaskTask = new Runnable() {
         @Override
@@ -452,8 +452,11 @@ public class MainActivity extends AppCompatActivity {
 
         // 车机场景:界面在前台时保持屏幕常亮(用户明确要求),
         // 否则系统息屏超时一到就黑屏,看歌词/封面都得先点一下唤醒。
-        // 用 FLAG_KEEP_SCREEN_ON 而不是唤醒锁:不需要权限,Activity 不可见时系统自动失效,
-        // 不存在忘记释放导致电量泄漏的问题(音乐后台播放仍靠 MediaPlayer 的 PARTIAL_WAKE_LOCK)。
+        // 两层保障:
+        // 1) FLAG_KEEP_SCREEN_ON —— 不需要权限,Activity 不可见时系统自动失效,无泄漏;
+        // 2) ScreenOnKeeper(前台 SCREEN_BRIGHT_WAKE_LOCK)—— 窗口标志依赖 WindowManager
+        //    的 hold-screen 记账,息屏/解锁/弹窗之后偶尔会没被重新认定(表现为"标志还在
+        //    却照样黑屏"),直接持锁绕开这层;onResume 申请 / onPause 释放,后台不持锁。
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         // 全屏沉浸模式:隐藏状态栏和虚拟导航键
@@ -3041,38 +3044,77 @@ public class MainActivity extends AppCompatActivity {
     /** 撤掉列表加载遮罩(可任意线程调用,内部切主线程) */
     private void hideLoadingMask() {
         handler.removeCallbacks(showLoadingMaskTask);   // 还没显示就被撤:直接取消排队
-        if (!loadingMaskActive) {
+        final long now = System.currentTimeMillis();
+        final boolean wasActive = loadingMaskActive;
+        if (!wasActive) {
             // 本轮重建没走到"需要遮罩"的程度(< 阈值就结束了),记一笔便于对照车机实际表现
             if (listLoadStartTs > 0) {
                 CacheDebugLog.log("列表加载遮罩: 未显示(列表就绪仅 "
-                        + (System.currentTimeMillis() - listLoadStartTs) + "ms < " + LOADING_MASK_DELAY_MS + "ms)");
+                        + (now - listLoadStartTs) + "ms < " + LOADING_MASK_DELAY_MS + "ms)");
                 listLoadStartTs = 0;
             }
-            return;
+        } else {
+            loadingMaskActive = false;
+            if (listLoadStartTs > 0) {
+                // 「上屏延迟」= 排队显示到真正可见的间隔。阈值只有 150ms,若远大于它,
+                // 说明点完按钮后主线程被别的重活占住,遮罩排不上队(会表现为"点完先僵一下")。
+                CacheDebugLog.log("列表加载遮罩: 覆盖 " + (now - listMaskShownTs) + "ms"
+                        + ", 上屏延迟 " + (listMaskShownTs - listLoadStartTs) + "ms(阈值 " + LOADING_MASK_DELAY_MS + "ms)"
+                        + ", 本轮列表重建全程 " + (now - listLoadStartTs) + "ms");
+                listLoadStartTs = 0;
+            }
         }
-        loadingMaskActive = false;
-        final long now = System.currentTimeMillis();
-        if (listLoadStartTs > 0) {
-            // 「上屏延迟」= 排队显示到真正可见的间隔。阈值只有 150ms,若远大于它,
-            // 说明点完按钮后主线程被别的重活占住,遮罩排不上队(会表现为"点完先僵一下")。
-            CacheDebugLog.log("列表加载遮罩: 覆盖 " + (now - listMaskShownTs) + "ms"
-                    + ", 上屏延迟 " + (listMaskShownTs - listLoadStartTs) + "ms(阈值 " + LOADING_MASK_DELAY_MS + "ms)"
-                    + ", 本轮列表重建全程 " + (now - listLoadStartTs) + "ms");
-            listLoadStartTs = 0;
-        }
+        // 无论走上面哪条分支都投一次主线程收尾。
+        // 为什么要这样做:`hideLoadingMask` 允许后台线程调用(applyMusicListCore 在后台线程里),
+        // 而 `loadingMaskActive` 与 `rvList` 的可见性都属于主线程视图状态 —— 两边一旦错开
+        // (后台线程读到旧的 false 就 return),`rvList` 会永久停在 INVISIBLE:
+        // 列表区一片纯黑,而且 INVISIBLE 不接收触摸,用户怎么点都不会自愈。
+        // 所以这里不看标记、直接按 View 的真实状态做自愈。
+        // 收尾动作只在"本分支真的盖过遮罩"或"确实自愈了"时做,避免给秒开的快路径
+        // 白白多加一次 O(n) 的索引条重建(refreshIndexBar)。
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (rvList != null) rvList.setVisibility(View.VISIBLE);
-                // 索引条按当前列表内容恢复(空列表/搜索态会保持隐藏)
-                if (sideIndexBar != null) refreshIndexBar();
-                // tvEmpty 正常由 applyMusicListCore 恢复;若走的是回退分支(云端不可用等),
-                // tvEmpty 还停在加载文案,这里兜底恢复成正确的空提示
-                if (tvEmpty != null && LOADING_MASK_TEXT.contentEquals(tvEmpty.getText())) {
-                    restoreEmptyHintForCurrentMode();
+                if (loadingMaskActive) {
+                    return;   // 新一轮遮罩正盖着,别抢
+                }
+                boolean healed = false;
+                if (rvList != null && rvList.getVisibility() == View.INVISIBLE) {
+                    rvList.setVisibility(View.VISIBLE);
+                    healed = true;
+                    DownloadDiag.log("[界面] 列表区被加载遮罩留在 INVISIBLE,已兜底恢复可见");
+                }
+                if (wasActive || healed) {
+                    // 索引条按当前列表内容恢复(空列表/搜索态会保持隐藏)
+                    if (sideIndexBar != null) refreshIndexBar();
+                    // tvEmpty 正常由 applyMusicListCore 恢复;若走的是回退分支(云端不可用等),
+                    // tvEmpty 还停在加载文案,这里兜底恢复成正确的空提示
+                    if (tvEmpty != null && LOADING_MASK_TEXT.contentEquals(tvEmpty.getText())) {
+                        restoreEmptyHintForCurrentMode();
+                    }
                 }
             }
         });
+    }
+
+    /**
+     * 列表可见性兜底(只在主线程调用)。
+     * 与 hideLoadingMask 里那段自愈逻辑的区别:这是在 Activity 回到前台时做的一次体检,
+     * 覆盖"漏恢复发生在上一次会话里、且之后再没触发过 hideLoadingMask"的情况。
+     */
+    private void ensureListVisible() {
+        if (rvList == null || loadingMaskActive) {
+            return;
+        }
+        if (rvList.getVisibility() != View.INVISIBLE) {
+            return;
+        }
+        rvList.setVisibility(View.VISIBLE);
+        if (sideIndexBar != null) refreshIndexBar();
+        if (tvEmpty != null && LOADING_MASK_TEXT.contentEquals(tvEmpty.getText())) {
+            restoreEmptyHintForCurrentMode();
+        }
+        DownloadDiag.log("[界面] onResume 体检: 列表区曾被遮罩留在 INVISIBLE,已恢复可见");
     }
 
     /** 按当前模式与列表内容恢复 tvEmpty 空提示(遮罩兜底用,与 applyMusicListCore 的分支一致) */
@@ -4491,6 +4533,14 @@ public class MainActivity extends AppCompatActivity {
         long t0 = System.currentTimeMillis();
         super.onResume();
         Log.i(TAG, "[onResume] 开始");
+        // 屏幕常亮:onCreate 已加窗口标志,这里再补一次 —— 息屏/解锁/被系统 UI 打扰之后
+        // 窗口标志偶尔会没被重新认定(见 ScreenOnKeeper 注释),补一次成本几乎为零。
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        ScreenOnKeeper.acquire(this);
+        DownloadDiag.log("[生命周期] onResume | " + DownloadDiag.env());
+        // 遮罩兜底:列表区若被加载遮罩留在 INVISIBLE(纯黑且不接收触摸,用户点不动不会自愈),
+        // 每次回到前台都检查一次
+        ensureListVisible();
         // 从其他页面返回时重新隐藏系统 UI
         hideSystemUI();
         Log.i(TAG, "[onResume] hideSystemUI=" + (System.currentTimeMillis() - t0) + "ms");
@@ -4553,6 +4603,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        DownloadDiag.log("[生命周期] onPause | " + DownloadDiag.env());
+        ScreenOnKeeper.release();
         unregisterReceiver(stateReceiver);
         try {
             unregisterReceiver(cacheReceiver);
@@ -4568,6 +4620,9 @@ public class MainActivity extends AppCompatActivity {
         super.onWindowFocusChanged(hasFocus);
         // 窗口重新获得焦点时(如关闭弹窗后)重新隐藏系统UI,保持全屏
         if (hasFocus) {
+            // 顺带把常亮标志补回来:某些系统在窗口焦点变化时会重算窗口属性,
+            // 标志丢了就会表现为"过一会儿黑屏"
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             hideSystemUI();
         }
     }

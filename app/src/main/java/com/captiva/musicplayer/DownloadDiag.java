@@ -1,6 +1,7 @@
 package com.captiva.musicplayer;
 
 import android.content.Context;
+import android.os.PowerManager;
 import android.util.Log;
 
 import java.io.File;
@@ -43,6 +44,8 @@ public final class DownloadDiag {
 
     private static File file;
     private static boolean inited;
+    /** Application 上下文(只用于 env() 查屏幕状态 / 系统服务,不长期持有 Activity) */
+    private static Context appCtx;
     /** 第一行的启动标记只写一次;出现 N 次 = 进程重启 N 次 = 崩了 N-1 次 */
     private static boolean headerLogged;
 
@@ -55,6 +58,7 @@ public final class DownloadDiag {
             return;
         }
         try {
+            appCtx = ctx.getApplicationContext();
             String root = new NavidromeConfig(ctx.getApplicationContext()).getSyncPath();
             File dir = new File(root);
             if (!dir.exists()) {
@@ -100,6 +104,43 @@ public final class DownloadDiag {
                     .append(": ").append(t.getMessage());
         }
         log(sb.toString());
+    }
+
+    /**
+     * 环境快照:屏幕亮灭 + 堆占用。
+     *
+     * 「过一会儿黑一下、点一下又亮」这类问题最需要的就是这两个数:
+     * - 屏幕=灭 → 是系统把屏幕关了(息屏超时/电源策略),不是 App 把界面画黑;
+     * - 屏幕=亮 而画面确实黑了 → 显示/合成层(模拟器宿主 GPU、SurfaceFlinger)没有合成,
+     *   App 这边无能为力;
+     * - 顺带记堆占用,用来回答"是不是内存回收把界面搞黑的"。
+     *
+     * 注意:所有调用点都在主线程附近的轻量路径上,这里只读几个数字,不做任何阻塞 IO。
+     */
+    public static String env() {
+        String screen;
+        try {
+            Context c = appCtx;
+            if (c == null) {
+                screen = "?";
+            } else {
+                PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                boolean on;
+                if (android.os.Build.VERSION.SDK_INT >= 20) {
+                    // API 20 起 isScreenOn 被 isInteractive 取代
+                    on = pm.isInteractive();
+                } else {
+                    on = pm.isScreenOn();
+                }
+                screen = on ? "亮" : "灭";
+            }
+        } catch (Throwable t) {
+            screen = "?";
+        }
+        long max = Runtime.getRuntime().maxMemory() / (1024 * 1024);
+        long used = (Runtime.getRuntime().totalMemory()
+                - Runtime.getRuntime().freeMemory()) / (1024 * 1024);
+        return "屏幕=" + screen + " 堆=" + used + "/" + max + "MB";
     }
 
     /**

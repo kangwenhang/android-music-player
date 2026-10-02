@@ -106,6 +106,9 @@ public class EqualizerActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 屏幕常亮:第二层保障(窗口标志 + 前台唤醒锁),见 ScreenOnKeeper
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        ScreenOnKeeper.acquire(this);
         // 返回时刷新预设按钮(可能在其他地方添加了自定义预设)
         buildPresetButtons();
         updateSongBindingStatus();
@@ -113,9 +116,17 @@ public class EqualizerActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        ScreenOnKeeper.release();
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
+            // 焦点变化时补回常亮标志(某些系统重算窗口属性时会丢)
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             hideSystemUI();
         }
     }

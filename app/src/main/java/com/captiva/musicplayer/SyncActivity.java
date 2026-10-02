@@ -78,10 +78,19 @@ public class SyncActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 屏幕常亮:第二层保障(窗口标志 + 前台唤醒锁),见 ScreenOnKeeper
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        ScreenOnKeeper.acquire(this);
         hideSystemUI();
         // 更新同步路径(可能从设置修改过)
         tvSyncPath.setText(config.getCloudDir());
         updateSyncedCount();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        ScreenOnKeeper.release();
     }
 
     /** 更新已同步文件数 */
