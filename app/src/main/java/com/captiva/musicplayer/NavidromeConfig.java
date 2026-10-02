@@ -18,13 +18,14 @@ public class NavidromeConfig {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
     private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
-    private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录
+    private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录(即音乐根目录)
     private static final String KEY_AUTO_PLAY = "auto_play"; // 打开软件自动播放
     private static final String KEY_LAST_INDEX = "last_play_index"; // 上次播放索引
     private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)
     private static final String KEY_PLAY_MODE = "play_mode"; // 播放模式(0=顺序,1=单曲循环,2=随机)
     private static final String KEY_SERVER_TYPE = "server_type"; // 服务器类型:navidrome / fnmusic
-    private static final String KEY_LOCAL_SCAN_PATH = "local_scan_path"; // 本地模式自定义扫描目录
+    // 旧配置项 local_scan_path(本地模式自定义扫描目录)已废弃:
+    // 本地目录现固定派生为 根目录/本地歌曲,见 getLocalScanPath()。旧值留在 prefs 里但被忽略。
     private static final String KEY_LOCAL_MODE = "local_mode"; // 列表模式:true=本地列表,false=云端列表
     private static final String KEY_FNID = "fn_id";           // 原始 FN ID(用户填的,可为空)
     private static final String KEY_FN_RELAY = "fn_relay";    // 上次解析出的地址是否走飞牛中继
@@ -161,7 +162,7 @@ public class NavidromeConfig {
      * 云端歌曲实际存储目录:在共享父目录(getSyncPath)下,按服务器类型派生的子目录。
      * - 飞牛(fn音乐): "飞牛"
      * - Navidrome 及其他: "na" + 服务器地址 3 位哈希(如 na3f9),多服务器自动隔离。
-     * 本地歌曲走 getLocalScanPath()(根目录/本地文件夹),与云端子目录相互独立。
+     * 本地歌曲走 getLocalScanPath()(根目录/本地歌曲,自动创建),与云端子目录相互独立。
      */
     public String getCloudDir() {
         return new File(getSyncPath(), getCloudSubfolder()).getAbsolutePath();
@@ -195,20 +196,23 @@ public class NavidromeConfig {
     }
 
     /**
-     * 本地模式扫描目录(本地列表的数据来源,与云端子目录相互独立)。
-     * 未设置时回退为 根目录/本地文件夹(本地歌曲统一放在此处,与云端歌曲分家)。
+     * 本地模式扫描目录(本地列表的数据来源)。
+     *
+     * 不再提供设置项:固定派生为「音乐根目录/本地歌曲」,首次访问自动创建。
+     * 云端歌曲在 根目录/服务器子目录(getCloudDir),本地歌曲在 根目录/本地歌曲,
+     * 两者天然隔离,用户只需要设置一个音乐根目录。
+     *
+     * 历史:旧版本这里是可设置的 local_scan_path,且默认名为「本地文件夹」;
+     * 现统一改为派生值,旧配置项仍留在 SharedPreferences 里但被忽略。
      */
     public String getLocalScanPath() {
-        String path = prefs.getString(KEY_LOCAL_SCAN_PATH, "");
-        if (path == null || path.isEmpty()) {
-            return getSyncPath() + "/本地文件夹";
+        File dir = new File(getSyncPath(), "本地歌曲");
+        if (!dir.exists()) {
+            // 首次访问自动创建;失败(如无存储权限)不抛异常,
+            // 交给扫描流程报"目录没有找到歌曲",设置页再提示授权问题
+            dir.mkdirs();
         }
-        return path;
-    }
-
-    /** 设置本地模式扫描目录;传空串表示回退为同步目录 */
-    public void setLocalScanPath(String path) {
-        prefs.edit().putString(KEY_LOCAL_SCAN_PATH, path != null ? path.trim() : "").apply();
+        return dir.getAbsolutePath();
     }
 
     /** 列表模式:true=本地列表(扫描本地目录),false=云端列表(云端歌单,默认) */

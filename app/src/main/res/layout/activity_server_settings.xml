@@ -189,32 +189,14 @@
                 android:focusable="false"
                 android:clickable="true" />
 
-            <!-- 本地模式目录设置(本地列表的数据来源,与云端/同步目录独立) -->
+            <!-- 本地歌曲目录说明:固定派生为 根目录/本地歌曲(自动创建),与云端歌曲(根目录/服务器子目录)天然隔离,无需设置 -->
             <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="本地模式目录"
-                android:textColor="@color/text_secondary"
-                android:textSize="@dimen/sub_text_size"
-                android:layout_marginTop="20dp"
-                android:layout_marginBottom="6dp" />
-
-            <!-- 本地路径(点击可选择目录;留空 = 默认与同步目录相同) -->
-            <EditText
-                android:id="@+id/et_local_path"
                 android:layout_width="match_parent"
-                android:layout_height="@dimen/search_height"
-                android:background="@drawable/bg_search"
-                android:hint="默认 根目录/本地文件夹,点击自定义"
-                android:textColorHint="@color/search_hint"
-                android:textColor="@color/text_primary"
-                android:textSize="@dimen/search_text_size"
-                android:paddingLeft="@dimen/search_padding"
-                android:paddingRight="@dimen/search_padding"
-                android:gravity="center_vertical"
-                android:singleLine="true"
-                android:focusable="false"
-                android:clickable="true" />
+                android:layout_height="wrap_content"
+                android:text="本地歌曲固定存放在 根目录/本地歌曲(自动创建),与云端歌曲相互隔离"
+                android:textColor="@color/search_hint"
+                android:textSize="@dimen/sub_text_size"
+                android:layout_marginTop="8dp" />
 
             <!-- 播放自动缓存设置 -->
             <TextView
