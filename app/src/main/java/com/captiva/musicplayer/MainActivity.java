@@ -756,9 +756,14 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
 
-                    // 停止滚动后,后台把全部封面从磁盘载入内存
-                    // 之后滚动时全部命中内存缓存,零磁盘IO
-                    CoverLoader.getInstance().preloadAllToMemory(musicList);
+                    // 【性能】不在每次滑动停止都触发「全量封面载入内存」。
+                    // preloadAllToMemory 会顺序读取最多 810 张封面(车机封面缓存多在 U 盘上),
+                    // 在 2 核车机 + 慢速 U 盘上形成一次磁盘 I/O 爆发,挤占封面 load 执行线程与 CPU,
+                    // 表现为「刚停手列表像冻住、封面迟迟不显示」——正是「列表很卡」的元凶之一。
+                    // 全量预热已在扫描/同步完成后由 CoverLoader.preloadAllCovers 末尾触发一次,
+                    // 此处只补可见区上下各 10 首(上面 for 循环已做),足以覆盖滚动需要。
+                    // 若要恢复全量预热,应改为「仅首次进入 IDLE 且内存缓存仍冷」才触发,而非每次停手都跑。
+                    // CoverLoader.getInstance().preloadAllToMemory(musicList);
                 }
             }
 
