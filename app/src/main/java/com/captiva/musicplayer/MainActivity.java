@@ -4719,10 +4719,18 @@ public class MainActivity extends AppCompatActivity {
     private void updatePlayButton(boolean playing) {
         if (playing) {
             btnPlay.setText("❚❚");
+            // 【2026-10-04 v5.7.365】❚❚ 两竖条天然对称,清掉 XML 为 ▶ 预置的
+            // 光学居中 paddingLeft(btn_play_optical_pad),否则 ❚❚ 会被推偏。
+            btnPlay.setPadding(0, btnPlay.getPaddingTop(), 0, btnPlay.getPaddingBottom());
             btnPlay.setBackgroundResource(R.drawable.bg_btn_circle_big_playing);
             btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_playing_text));
         } else {
             btnPlay.setText("▶");
+            // ▶ 字形墨迹质心偏左(车机实测 -6.3% 直径,用户截图量化),恢复
+            // 光学居中补偿:文本中心右移 btn_play_optical_pad/2 ≈ 90% 全量偏移。
+            btnPlay.setPadding(
+                    getResources().getDimensionPixelSize(R.dimen.btn_play_optical_pad),
+                    btnPlay.getPaddingTop(), 0, btnPlay.getPaddingBottom());
             btnPlay.setBackgroundResource(R.drawable.bg_btn_circle_big_paused);
             btnPlay.setTextColor(ContextCompat.getColor(this, R.color.btn_paused_text));
         }

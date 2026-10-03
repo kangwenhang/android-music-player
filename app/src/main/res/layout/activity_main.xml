@@ -297,20 +297,29 @@
                     android:layout_marginRight="@dimen/btn_circle_spacing"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:padding="0dp"
+                    android:paddingLeft="@dimen/btn_play_optical_pad"
+                    android:paddingTop="0dp"
+                    android:paddingRight="0dp"
+                    android:paddingBottom="0dp"
                     android:gravity="center"
                     android:background="@drawable/bg_btn_circle_big_paused"
                     android:text="▶"
                     android:textColor="@color/btn_paused_text"
                     android:textSize="36sp"
                     android:textStyle="bold" />
+                <!-- 【2026-10-04 v5.7.365 光学居中补偿】▶ 字形(36sp 大号)质心实测偏左
+                     车机 -6.3% 直径(左右墨迹 883/272≈3.25:1,用户截图量化)。
+                     paddingLeft=9dp 使文本中心右移 4.5dp(≈90% 全量偏移,参照 btn_next
+                     91% 收敛到 -0.5% 的经验)。❚❚(播放中)两竖条天然对称,由
+                     MainActivity.updatePlayButton 动态把 padding 清零,防止 ❚❚ 被推偏。
+                     XML 预置 9dp 对应初始暂停态 ▶。 -->
 
                 <!-- 下一首(小圆) -->
                 <!-- 【2026-10-04 v5.7.364 光学居中补偿】▶ 字形几何 bbox 居中但墨迹
                      质心偏左(实测:车机 -4.6%、模拟器 -5.2% 直径,左右像素约 146/53),
                      人眼看着偏左(用户反馈"下一首不居中")。paddingLeft=6dp 使文本
                      中心右移 3dp:模拟器复测质心 -1.3px→约0(与◀镜像对称,bbox ∓2.5px)。
-                     播放大圆 ❚❚/▶ 经质心实测对称,无需补偿。 -->
+                     播放大圆 ▶(36sp)同样偏左(-6.3%),见 btn_play 处补偿。 -->
                 <Button
                     android:id="@+id/btn_next"
                     android:layout_width="@dimen/btn_circle_size"
