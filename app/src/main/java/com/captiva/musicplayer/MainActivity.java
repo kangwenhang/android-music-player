@@ -1169,8 +1169,21 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "未在播放", Toast.LENGTH_SHORT).show();
                 return;
             }
-            boolean nowFav = favoriteManager.toggleFavorite(current);
-            updateFavoriteButton(current);
+            // 【2026-10-04 v5.7.362 修复"收藏中取消收藏,红心不变灰"】
+            // toggle 必须基于"显示态"(本机收藏 ∪ 云端收藏,与 updateFavoriteButton
+            // 同一口径)取反。原先直接 toggleFavorite(只看本机集合):
+            // 1) "云端已收藏但本机未收藏"的歌,点取消会反向变成加收藏;
+            // 2) 红心刷新(updateFavoriteButton)原先在云端集合乐观更新**之前**执行,
+            //    并集读到旧集合 → 恒红,之后也无人再刷。
+            String sid = current.getStreamId();
+            boolean displayed = favoriteManager.isFavorite(current)
+                    || adapter.isCloudStarred(sid);
+            boolean nowFav = !displayed;
+            if (nowFav) {
+                favoriteManager.addFavorite(current);
+            } else {
+                favoriteManager.removeFavorite(current);
+            }
             // 收藏状态变化时刷新列表:
             // - 云端收藏夹:**乐观更新** —— 本地改 ID 集合 + 立即重过滤,列表马上就动。
             //   以前这里要 loadCloudFavorites() 把服务器收藏整个重拉一遍才刷新,
@@ -1178,7 +1191,6 @@ public class MainActivity extends AppCompatActivity {
             //   服务器同步失败时再由 syncStarToServer 回滚(重新拉真实状态)。
             // - 本地收藏夹重新过滤即可
             if (favoritesOnly) {
-                String sid = current.getStreamId();
                 if (adapter.isCloudFavoritesMode() && sid != null && !sid.isEmpty()) {
                     boolean changed = adapter.updateCloudStarredId(sid, nowFav);
                     updateCloudFavEmptyHint();
@@ -1194,6 +1206,8 @@ public class MainActivity extends AppCompatActivity {
                     applyFavoritesFilter();
                 }
             }
+            // 红心刷新必须在云端集合乐观更新**之后**(并集口径包含 isCloudStarred)
+            updateFavoriteButton(current);
             // 云端歌曲:同时同步到服务器收藏(后台线程;失败会回滚并提示)
             syncStarToServer(current, nowFav);
             Toast.makeText(this, nowFav ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
