@@ -4770,6 +4770,14 @@ public class MainActivity extends AppCompatActivity {
                 // 每 10 次 tick(约 2 秒)抽样一次;诊断期结束后两处一起关。
                 if ((progressTick++ % 10) == 0) {
                     long metaDur = (cur != null) ? (long) cur.getDuration() : -1L;
+                    // thumb 实际像素位置:验证填充层 inset 后"填充终点 ≡ 圆点中心"
+                    // (模型:圆点中心 = 11dp_px + (W - 22dp_px) * frac)
+                    String thumbB = "(null)";
+                    try {
+                        android.graphics.Rect tb = sbProgress.getThumb().getBounds();
+                        thumbB = tb.left + ".." + tb.right;
+                    } catch (Throwable ignored) {
+                    }
                     String line = "[进度条] pos=" + pos
                             + " mediaDur=" + dur
                             + " metaDur=" + metaDur
@@ -4777,7 +4785,9 @@ public class MainActivity extends AppCompatActivity {
                             + " secondary=" + sbProgress.getSecondaryProgress()
                             + " frac=" + String.format("%.3f",
                                     sbProgress.getMax() > 0
-                                            ? (float) pos / sbProgress.getMax() : 0f);
+                                            ? (float) pos / sbProgress.getMax() : 0f)
+                            + " w=" + sbProgress.getWidth()
+                            + " thumb=" + thumbB;
                     android.util.Log.i("SeekBarDiag", line);
                     CacheDebugLog.log(line);
                 }
