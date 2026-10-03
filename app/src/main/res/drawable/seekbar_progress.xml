@@ -12,11 +12,16 @@
      与控件边缘不对称,轨道若保持全宽,结尾处圆点右侧会剩一段光轨;
      标定后三层(轨道/缓冲/主进度)都与圆点行程重合。右 inset 以 drawable
      bounds(已扣视图 padding)为基准,模拟器实测结果 = 左右各 9dp,
-     与这里的兜底值一致。若调整运行时 thumb 尺寸(18dp),此处需同步。 -->
+     与这里的兜底值一致。若调整运行时 thumb 尺寸(18dp),此处需同步。
+
+     2026-10-04 v5.7.358:三层高度收窄到"白色圆点大小" —— shape 原本拉满
+     drawable bounds 高(模拟器 24px),比白色内圆(10px)粗;标定时运行时
+     上下各缩进 (H-白核)/2,这里的 top/bottom 7dp 只是首帧兜底。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 背景轨道:与圆点行程同宽(标定后),否则结尾处圆点外多出一段光轨 -->
+    <!-- 背景轨道:与圆点行程同宽同高(标定后),否则结尾处圆点外多出一段光轨 -->
     <item android:id="@android:id/background"
-          android:left="9dp" android:right="9dp">
+          android:left="9dp" android:right="9dp"
+          android:top="7dp" android:bottom="7dp">
         <shape android:shape="rectangle">
             <solid android:color="#2A2A34" />
             <corners android:radius="4dp" />
@@ -24,7 +29,8 @@
     </item>
     <!-- 缓冲(次要进度)= 缓存进度:同色系 40% 透明度淡蓝,与亮蓝主进度"淡一档"区分 -->
     <item android:id="@android:id/secondaryProgress"
-          android:left="9dp" android:right="9dp">
+          android:left="9dp" android:right="9dp"
+          android:top="7dp" android:bottom="7dp">
         <scale android:scaleWidth="100%">
             <shape android:shape="rectangle">
                 <solid android:color="#664FC3F7" />
@@ -34,7 +40,8 @@
     </item>
     <!-- 主进度 -->
     <item android:id="@android:id/progress"
-          android:left="9dp" android:right="9dp">
+          android:left="9dp" android:right="9dp"
+          android:top="7dp" android:bottom="7dp">
         <scale android:scaleWidth="100%">
             <shape android:shape="rectangle">
                 <gradient

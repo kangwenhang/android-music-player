@@ -630,6 +630,9 @@ public class MainActivity extends AppCompatActivity {
         // 3. 设置thumbOffset=0(消除clip与thumb之间的缝隙)
         float density = getResources().getDisplayMetrics().density;
         int thumbSize = (int) (18 * density);
+        // 记录白色内圆直径,供标定时把进度条高度收窄到"白色圆点大小"
+        // (2026-10-04 v5.7.358:白核直径 = thumbSize - 2 - 6*density,与下方 drawCircle 一致)
+        seekbarWhiteDotPx = (int) (thumbSize - 2 - 6 * density);
         android.graphics.Bitmap thumbBmp = android.graphics.Bitmap.createBitmap(
                 thumbSize, thumbSize, android.graphics.Bitmap.Config.ARGB_8888);
         android.graphics.Canvas canvas = new android.graphics.Canvas(thumbBmp);
@@ -4739,6 +4742,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** 上次标定时的 SeekBar 宽度(宽度变化时重新标定) */
     private int seekbarCalibratedWidth = 0;
+    /** 运行时 thumb 的白色内圆直径(px):进度条高度收窄的目标值 */
+    private int seekbarWhiteDotPx = 0;
 
     /**
      * 标定进度条三层(轨道/缓冲/主进度)行程,使"填充终点 ≡ 圆点中心"且
@@ -4816,11 +4821,20 @@ public class MainActivity extends AppCompatActivity {
             int bl = db.left, br = db.right;
             int insL = s - bl;
             int insR = br - e;
-            if (idxBg >= 0) {
-                ld.setLayerInset(idxBg, insL, 0, insR, 0);
+            // 纵向:bar 高度收窄到"白色圆点大小"(2026-10-04 v5.7.358)。
+            // 此前三层 shape 拉满 drawable bounds 高度(模拟器实测 24px),
+            // 比白色内圆(10px)粗一圈;现在上下各缩进 (H-白核)/2,与圆点等粗。
+            int bh = db.height();
+            int insT = 0, insB = 0;
+            if (seekbarWhiteDotPx > 0 && bh > seekbarWhiteDotPx) {
+                insT = (bh - seekbarWhiteDotPx) / 2;
+                insB = bh - seekbarWhiteDotPx - insT;
             }
-            ld.setLayerInset(idxSec, insL, 0, insR, 0);
-            ld.setLayerInset(idxProg, insL, 0, insR, 0);
+            if (idxBg >= 0) {
+                ld.setLayerInset(idxBg, insL, insT, insR, insB);
+            }
+            ld.setLayerInset(idxSec, insL, insT, insR, insB);
+            ld.setLayerInset(idxProg, insL, insT, insR, insB);
             // 【关键坑】API 17 的 setLayerInset 只更新内部字段,子层边界要等
             // drawable 的 bounds 变化触发 onBoundsChange 才会重算。播放过程中
             // SeekBar 的 drawable bounds 永远不变 → 上面三行 inset 永不生效
@@ -4849,6 +4863,7 @@ public class MainActivity extends AppCompatActivity {
                     + " 起点=" + s + " 终点=" + e
                     + " 行程=" + (e - s) + " bounds右=" + br
                     + " inset(左=" + insL + ",右=" + insR + ")"
+                    + " bar高=" + (bh - insT - insB)
                     + " 含轨道层=" + (idxBg >= 0)
                     + " 复测=" + s2 + ".." + e2);
         } catch (Throwable t) {
