@@ -244,7 +244,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                 + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
         // 诊断:第一首下面是第13首 → 确认 2~12 首到底在不在 fullData / filteredData 里
-        DownloadDiag.log("[列表诊断] setData: fullData=" + fullData.size()
+        DownloadDiag.listDiag("[列表诊断] setData: fullData=" + fullData.size()
                 + " filtered=" + r.filtered.size() + " data=" + data.size()
                 + " fullData前20=" + diagKeys(fullData, 20)
                 + " | filtered前20=" + diagKeys(r.filtered, 20));
@@ -332,7 +332,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
             Log.d(TAG, "[filter] 防抖跳过重复请求 keyword='" + kw + "'");
             // 车机看不到 logcat,被跳过这种事必须落到文件里 —— 它正是"点了没反应"的头号嫌疑
-            DownloadDiag.log("[列表] 普通过滤被防抖跳过 keyword='" + kw
+            DownloadDiag.listDiag("[列表] 普通过滤被防抖跳过 keyword='" + kw
                     + "'(距今 " + (now - lastFilterSubmitTime) + "ms < " + FILTER_DEBOUNCE_MS + "ms)");
             return;
         }
@@ -381,7 +381,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (!force && signature.equals(lastFilterSignature)
                 && (now - lastFilterSubmitTime) < FILTER_DEBOUNCE_MS) {
             Log.d(TAG, "[filterFavorites] 防抖跳过重复请求");
-            DownloadDiag.log("[列表] 收藏过滤被防抖跳过(距今 "
+            DownloadDiag.listDiag("[列表] 收藏过滤被防抖跳过(距今 "
                     + (now - lastFilterSubmitTime) + "ms < " + FILTER_DEBOUNCE_MS + "ms)");
             return;
         }
@@ -431,7 +431,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             // 已被**更新的过滤请求**取代,丢弃本次结果。
                             // 车机看不到 logcat,这种"算了但没用上"必须落到文件里,
                             // 否则排查时只能靠猜。
-                            DownloadDiag.log("[列表] 过滤结果作废:已被更新的过滤请求取代"
+                            DownloadDiag.listDiag("[列表] 过滤结果作废:已被更新的过滤请求取代"
                                     + " (本次=" + gen + " 当前=" + filterGeneration + ")");
                             return;
                         }
@@ -470,11 +470,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             }
                         }
                         // 诊断:过滤后确认 data 前 20 个身份键是否连续(1,2,3...),揪出"第一首下面是第13首"
-                        DownloadDiag.log("[列表诊断] 过滤后: favMode=" + favMode
+                        DownloadDiag.listDiag("[列表诊断] 过滤后: favMode=" + favMode
                                 + " filtered=" + r.filtered.size() + " data=" + data.size()
                                 + " data前20=" + diagKeys(data, 20));
                         if (needLog) {
-                            DownloadDiag.log("[列表] 过滤完成 模式=" + (favMode ? "仅收藏" : "全部")
+                            DownloadDiag.listDiag("[列表] 过滤完成 模式=" + (favMode ? "仅收藏" : "全部")
                                     + " 关键词='" + filterKeyword + "' 显示=" + r.filtered.size()
                                     + "/" + fullData.size() + " 首 (重算Diff=" + reDiff + ")");
                         }

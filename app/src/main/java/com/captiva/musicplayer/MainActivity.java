@@ -662,7 +662,7 @@ public class MainActivity extends AppCompatActivity {
                     // 下滑上滑才正常这类位置塌缩)。这是 320 的 notifyDataSetChanged 补不到的一层。
                     rvList.getRecycledViewPool().clear();
                     rvList.scrollToPosition(0);
-                    DownloadDiag.log("[列表] 模式切换: 清池 + 滚顶部");
+                    DownloadDiag.listDiag("[列表] 模式切换: 清池 + 滚顶部");
                 }
                 rvList.postDelayed(new Runnable() {
                     @Override public void run() { dumpVisibleRows("after-filter"); }
@@ -1032,7 +1032,7 @@ public class MainActivity extends AppCompatActivity {
                 // 先把在途的云端收藏拉取代次作废 —— 它回来后若发现 favoritesOnly 已为 false
                 // 就只会更新缓存、不再动列表(否则会把刚恢复的"全部歌曲"又切回收藏夹)。
                 cloudFavGen++;
-                DownloadDiag.log("[收藏夹] 退出 → 恢复全部歌曲(收藏集合已清空)");
+                DownloadDiag.listDiag("[收藏夹] 退出 → 恢复全部歌曲(收藏集合已清空)");
                 adapter.setCloudStarredIds(null);
                 adapter.setFavoritesMode(false);
                 // 恢复搜索或全部
@@ -1072,7 +1072,7 @@ public class MainActivity extends AppCompatActivity {
                         int got = adapter.getTotalFilteredCount();
                         int all = adapter.getTotalCount();
                         if (got < all) {
-                            DownloadDiag.log("[收藏夹] 自愈:退出后列表仍只有 " + got + "/" + all
+                            DownloadDiag.listDiag("[收藏夹] 自愈:退出后列表仍只有 " + got + "/" + all
                                     + " 首 → 重新强制过滤");
                             adapter.filter(currentSearchQuery, true);
                             updateCount();
@@ -1155,12 +1155,12 @@ public class MainActivity extends AppCompatActivity {
                 if (adapter.isCloudFavoritesMode() && sid != null && !sid.isEmpty()) {
                     boolean changed = adapter.updateCloudStarredId(sid, nowFav);
                     updateCloudFavEmptyHint();
-                    DownloadDiag.log("[收藏夹] " + (nowFav ? "收藏" : "取消收藏")
+                    DownloadDiag.listDiag("[收藏夹] " + (nowFav ? "收藏" : "取消收藏")
                             + " " + current.getTitle() + " sid=" + sid
                             + " 集合改动=" + changed
                             + " 收藏夹剩余=" + adapter.getCloudStarredCount() + " 首");
                 } else {
-                    DownloadDiag.log("[收藏夹] " + (nowFav ? "收藏" : "取消收藏")
+                    DownloadDiag.listDiag("[收藏夹] " + (nowFav ? "收藏" : "取消收藏")
                             + " 走本机过滤分支 sid="
                             + (sid == null ? "(空)" : sid)
                             + " 云端模式=" + adapter.isCloudFavoritesMode());
@@ -2830,7 +2830,7 @@ public class MainActivity extends AppCompatActivity {
      * 注意:缓存加载和 MediaStore 扫描都在后台线程,避免阻塞主线程导致点击无响应
      */
     private void loadMusic() {
-        DownloadDiag.log("[BUILD] 321 diag-enabled (含可见行 dump + 模式切换清池滚顶)");
+        DownloadDiag.listDiag("[BUILD] 321 diag-enabled (含可见行 dump + 模式切换清池滚顶)");
         final String syncPath = navidromeConfig.getCloudDir();
         // 本地模式扫描目录(可在设置中自定义;未设置时 = 根目录/本地文件夹)
         final String localDir = navidromeConfig.getLocalScanPath();
@@ -4463,6 +4463,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 诊断用:dump 当前可见行的 槽位→adapter位置→歌曲,定位"第一首下面是第13首"这类位置塌缩 */
     private void dumpVisibleRows(String tag) {
+        if (!DownloadDiag.LIST_DIAG) return;  // 列表调试关掉时整段跳过,零开销
         if (rvList == null) return;
         RecyclerView.LayoutManager lm = rvList.getLayoutManager();
         if (!(lm instanceof LinearLayoutManager)) return;
@@ -4479,7 +4480,7 @@ public class MainActivity extends AppCompatActivity {
             sb.append(" | slot").append(i).append(":ap=").append(ap)
               .append("(").append(b == null ? "null" : b.getTitle()).append(")");
         }
-        DownloadDiag.log("[VISIBLE] " + tag + " " + sb.toString());
+        DownloadDiag.listDiag("[VISIBLE] " + tag + " " + sb.toString());
     }
 
     private void updateCount() {

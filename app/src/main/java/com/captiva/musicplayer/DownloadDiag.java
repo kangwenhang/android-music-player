@@ -31,8 +31,18 @@ public final class DownloadDiag {
 
     private static final String TAG = "DownloadDiag";
 
-    /** 总开关:false = 一行都不写 */
+    /** 总开关:false = 一行都不写(同时关掉下方两类日志) */
     public static final boolean ENABLED = true;
+
+    /**
+     * 列表/收藏夹调试开关:false = 关掉本轮排查"列表错位(第一首下面是第13首)"时
+     * 临时加的 [列表] / [列表诊断] / [VISIBLE] / [BUILD] / [收藏夹] 等诊断日志。
+     *
+     * 与 ENABLED 独立:ENABLED 管的是"下载 / 缓存 / 播放失败"这类真问题日志
+     * (车机无法缓存歌曲、播放失败等),必须常开;LIST_DIAG 只管"列表渲染调试",
+     * 问题修好后关掉即可,不影响上面的失败诊断。
+     */
+    public static final boolean LIST_DIAG = false;
 
     private static final String FILE_NAME = "download_debug.log";
     /** 超过这个体积就整体重写(只保留最新一轮),防止日志把车机存储吃满 */
@@ -91,6 +101,18 @@ public final class DownloadDiag {
         } catch (Throwable ignored) {
             // 线程池拒绝(进程在退出)时静默丢弃,绝不影响播放
         }
+    }
+
+    /**
+     * 列表/收藏夹调试日志:仅当 LIST_DIAG=true 时写。
+     * 用于排查"列表错位(第一首下面是第13首)"时临时加的 [列表]/[列表诊断]/[VISIBLE]/[BUILD]/[收藏夹] 等。
+     * LIST_DIAG=false(默认)时整类静默,不影响 ENABLED 旗下的"下载/缓存/播放失败"诊断。
+     */
+    public static void listDiag(String msg) {
+        if (!LIST_DIAG) {
+            return;
+        }
+        log(msg);
     }
 
     /** 记一行失败原因(带异常类型与 message,不写完整堆栈以控制体积) */
