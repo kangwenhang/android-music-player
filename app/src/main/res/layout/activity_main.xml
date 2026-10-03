@@ -266,6 +266,10 @@
                     android:textStyle="bold" />
 
                 <!-- 上一首(小圆) -->
+                <!-- 【2026-10-04 v5.7.363 光学居中补偿】◀ 字形几何 bbox 虽居中,但墨迹
+                     质心偏右(实测:模拟器 +3.6% 直径,左右像素 53/146),人眼看着偏右。
+                     paddingRight=3dp 使文本中心左移 1.5dp(约 2/3 质心偏移量)。
+                     注意:不能保留 android:padding="0dp",padding 组合会覆盖单项值。 -->
                 <Button
                     android:id="@+id/btn_prev"
                     android:layout_width="@dimen/btn_circle_size"
@@ -273,7 +277,10 @@
                     android:layout_marginLeft="@dimen/btn_circle_spacing"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:padding="0dp"
+                    android:paddingLeft="0dp"
+                    android:paddingTop="0dp"
+                    android:paddingRight="3dp"
+                    android:paddingBottom="0dp"
                     android:gravity="center"
                     android:background="@drawable/bg_btn_circle"
                     android:text="◀"
@@ -299,13 +306,21 @@
                     android:textStyle="bold" />
 
                 <!-- 下一首(小圆) -->
+                <!-- 【2026-10-04 v5.7.363 光学居中补偿】▶ 字形几何 bbox 居中但墨迹
+                     质心偏左(实测:车机 -4.6%、模拟器 -5.2% 直径,左右像素约 146/53),
+                     人眼看着偏左(用户反馈"下一首不居中")。paddingLeft=5dp 使文本
+                     中心右移 2.5dp(约 3/4 质心偏移量)。播放大圆 ❚❚/▶ 经质心实测
+                     对称,无需补偿。 -->
                 <Button
                     android:id="@+id/btn_next"
                     android:layout_width="@dimen/btn_circle_size"
                     android:layout_height="@dimen/btn_circle_size"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:padding="0dp"
+                    android:paddingLeft="5dp"
+                    android:paddingTop="0dp"
+                    android:paddingRight="0dp"
+                    android:paddingBottom="0dp"
                     android:gravity="center"
                     android:background="@drawable/bg_btn_circle"
                     android:text="▶"
