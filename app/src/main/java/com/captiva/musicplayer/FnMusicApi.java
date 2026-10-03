@@ -1,5 +1,6 @@
 package com.captiva.musicplayer;
 
+import android.os.Looper;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -78,6 +79,8 @@ public class FnMusicApi implements MusicSourceApi {
     private long lastLoginAttemptMs = 0;
     /** 本次请求刚遇到过 token 失效,用于重登后重试同一请求 */
     private volatile boolean tokenExpired = false;
+    /** 【2026-10-04 v5.7.377】主线程触发登录后是否已排了后台补登录任务(防重复排) */
+    private boolean mainThreadLoginKick = false;
 
     /** 最近一次失败原因(给设置页展示,避免只有一句"连接失败") */
     private volatile String lastError = null;
@@ -382,6 +385,27 @@ public class FnMusicApi implements MusicSourceApi {
     private synchronized String ensureToken() {
         if (userToken != null) {
             return userToken;
+        }
+        // 【2026-10-04 v5.7.377 主线程网络保护】
+        // 登录是同步 HTTP 请求(超时最长 10+15s)。实测车机上 token 失效时,
+        // 主线程路径(MusicService.prepareAndPlay -> getAuthHeaders)会同步走登录,
+        // 把主线程卡死 38 秒(watchdog 实录 04:46:54 卡顿 38547ms)。
+        // 现在主线程一律不做网络登录:立即返回 null(调用方按"暂未登录"处理),
+        // 同时排一个后台任务补登录 —— 后台登录成功后,下一次请求即可正常带 token。
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            if (!mainThreadLoginKick) {
+                mainThreadLoginKick = true;
+                Thread kick = new Thread(() -> {
+                    try {
+                        ensureToken(); // 后台线程:真正执行登录(受冷却期约束)
+                    } finally {
+                        mainThreadLoginKick = false;
+                    }
+                }, "fnapi-login-kick");
+                kick.setPriority(Thread.MIN_PRIORITY);
+                kick.start();
+            }
+            return null;
         }
         long now = System.currentTimeMillis();
         if (lastLoginAttemptMs != 0 && now - lastLoginAttemptMs < LOGIN_RETRY_COOLDOWN_MS) {

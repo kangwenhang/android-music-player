@@ -749,7 +749,12 @@ public class MainActivity extends AppCompatActivity {
         // 完全禁用 item 动画(车机性能弱,任何动画都卡顿)
         rvList.setItemAnimator(null);
         // 增大缓存池(减少滑动时重新绑定),但不要太大(车机内存有限)
-        rvList.setItemViewCacheSize(10);
+        // 【2026-10-04 v5.7.377 卡顿优化】车机日志(watchdog 18 次卡顿)显示大头是
+        // 滚动时 onCreateViewHolder 的 XML inflate(单个几百 ms)。
+        // 加大 view cache(10→24)与回收池容量(默认 5→24),fling 时跨 position
+        // 复用 ViewHolder,显著减少 create 次数。
+        rvList.setItemViewCacheSize(24);
+        rvList.getRecycledViewPool().setMaxRecycledViews(0, 24);
         // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
         rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
