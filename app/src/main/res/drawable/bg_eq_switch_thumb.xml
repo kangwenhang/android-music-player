@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 均衡器开关 Thumb(圆形滑块)
+     【2026-10-04 v5.7.373】原 Switch 只配了 track 没配 thumb,API 17 默认暗色
+     thumb 贴深灰 track 上不可见(车机反馈"按钮看不到")。
+     checked=白色圆球(贴蓝色渐变 track),unchecked=浅灰圆球(贴深灰 track)。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="oval">
+            <size android:width="26dp" android:height="26dp" />
+            <gradient
+                android:angle="135"
+                android:startColor="#FFFFFF"
+                android:endColor="#DDEEFF" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <size android:width="26dp" android:height="26dp" />
+            <solid android:color="#C8C8D0" />
+        </shape>
+    </item>
+</selector>

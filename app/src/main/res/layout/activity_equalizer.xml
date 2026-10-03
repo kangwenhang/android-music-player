@@ -79,6 +79,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:track="@drawable/bg_eq_switch_track"
+                android:thumb="@drawable/bg_eq_switch_thumb"
                 android:switchMinWidth="56dp" />
         </LinearLayout>
 
