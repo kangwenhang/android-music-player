@@ -1013,17 +1013,16 @@ public class FnMusicApi implements MusicSourceApi {
                 }
             }
             fos.flush();
-            // ★ 必须先关写句柄再 rename:FUSE 分区(/storage/emulated)上 rename 一个
-            // 仍打开写的文件会失败 —— 实测 2026-10-03:代理先 close 再 rename 全成功,
-            // downloadFile 未关就 rename 全失败(红颜如霜/红叶狩/红装 三连"缓存落位
-            // 失败",每次白下 40 秒)。finally 里的 closeQuietly(fos) 对 null 安全。
+            // ★ 必须先关写句柄再 rename:FUSE(/storage/emulated)上 rename 一个
+            // 仍打开写的文件会失败(实测 2026-10-03)。finally 里的 closeQuietly(fos)
+            // 对 null 安全。
             fos.close();
             fos = null;
-            // 原子落位:.part → 最终文件(rename 失败按下载失败处理)
-            if (destFile.exists()) destFile.delete();
-            if (!partFile.renameTo(destFile)) {
+            // 落位:.part → 最终文件;promote 内部 rename 失败自动退化为 复制+删除
+            // (serve 线程持有 .part 读句柄等场景,FUSE rename 不可靠)
+            if (!LocalStreamProxy.promote(partFile, destFile)) {
                 throw new java.io.IOException(
-                        "缓存落位失败(rename): " + destFile.getAbsolutePath());
+                        "缓存落位失败: " + destFile.getAbsolutePath());
             }
             return total;
         } catch (Throwable e) {

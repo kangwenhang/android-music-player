@@ -195,6 +195,69 @@ public final class LocalStreamProxy {
         return st != null && st.downloading && !st.failed;
     }
 
+    /**
+     * 把 .part 落位为最终文件:优先 rename(原子、零拷贝);失败退化为 复制+删除。
+     *
+     * 为什么需要兜底:FUSE(/storage/emulated)上 rename 一个仍被打开(读或写)的
+     * 文件会失败 —— "边下边播"的 serve 线程持有 .part 读句柄流式给 MediaPlayer,
+     * 下载完成时的 rename 正好撞上这种场景(2026-10-03 日志实锤:心里有一场雪
+     * 边播边 rename 必败,失败后又删不掉 .part → 残留全长度 → 416 → 落位再败 → 死循环)。
+     * 复制 3~5MB 闪存耗时 <1s,期间 serve 继续读 .part 不受影响;复制完删 .part
+     * (删不掉也无碍,残留由 416/重下路径处理,新连接优先读 final)。
+     */
+    public static boolean promote(File part, File target) {
+        try {
+            if (target.exists()) {
+                target.delete();   // 删旧(即便 MediaPlayer 还开着旧 fd,unlink 也安全)
+            }
+        } catch (Throwable ignored) {
+        }
+        if (part.renameTo(target)) {
+            return true;
+        }
+        java.io.FileInputStream in = null;
+        java.io.FileOutputStream out = null;
+        try {
+            in = new java.io.FileInputStream(part);
+            out = new java.io.FileOutputStream(target);
+            byte[] buf = new byte[32 * 1024];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+            }
+            out.flush();
+            out.close();
+            out = null;
+            // 长度校验:复制完整才算成功
+            if (target.length() != part.length()) {
+                DownloadDiag.log("promote 复制长度不符: target=" + target.length()
+                        + " part=" + part.length());
+                return false;
+            }
+            try {
+                part.delete();
+            } catch (Throwable ignored) {
+            }
+            return true;
+        } catch (Throwable t) {
+            DownloadDiag.log("promote 复制失败: " + t);
+            return false;
+        } finally {
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (Exception ignored) {
+                }
+            }
+            if (out != null) {
+                try {
+                    out.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
     // ==================== 下载线程 ====================
 
     private Runnable download(final StreamJob st) {
@@ -237,11 +300,8 @@ public final class LocalStreamProxy {
                         conn = null;
                         if (total416 > 0 && start >= total416) {
                             File f = st.finalFile;
-                            if (f.exists()) {
-                                f.delete();
-                            }
-                            if (!st.partFile.renameTo(f)) {
-                                throw new IOException("缓存落位失败(rename): " + f.getAbsolutePath());
+                            if (!promote(st.partFile, f)) {
+                                throw new IOException("缓存落位失败: " + f.getAbsolutePath());
                             }
                             MusicSyncManager.endCache(st.sid);
                             DownloadDiag.log("边下边播: .part 残留已完整,直接落位 "
@@ -321,13 +381,12 @@ public final class LocalStreamProxy {
                     out.flush();
                     out.close();
                     out = null;
-                    // 原子落位:.part → 最终文件(此后 promoteToLocalIfCached 才可见)
+                    // 落位:.part → 最终文件(此后 promoteToLocalIfCached 才可见)
+                    // rename 优先(原子);serve 线程持有 .part 读句柄时 FUSE 上 rename
+                    // 会失败 → promote 内部退化为 复制+删除
                     File f = st.finalFile;
-                    if (f.exists()) {
-                        f.delete();
-                    }
-                    if (!st.partFile.renameTo(f)) {
-                        throw new IOException("缓存落位失败(rename): " + f.getAbsolutePath());
+                    if (!promote(st.partFile, f)) {
+                        throw new IOException("缓存落位失败: " + f.getAbsolutePath());
                     }
                     MusicSyncManager.endCache(st.sid);
                     DownloadDiag.log("边下边播: 缓存完成 " + f.getName() + " " + f.length() + " bytes");
