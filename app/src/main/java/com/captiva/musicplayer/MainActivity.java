@@ -2709,7 +2709,9 @@ public class MainActivity extends AppCompatActivity {
         if (preset == null || preset.isEmpty()) {
             preset = "关闭";
         }
-        btnEq.setText("EQ:" + preset);
+        // 【2026-10-04 v5.7.372】"EQ:"文字前缀升级为竖条图标(布局 drawableLeft),
+        // 这里只更新预设名文字
+        btnEq.setText(preset);
     }
 
     /**
