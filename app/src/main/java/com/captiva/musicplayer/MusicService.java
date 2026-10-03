@@ -118,12 +118,6 @@ public class MusicService extends Service {
     /** 配置(读取自动缓存开关/配额等) */
     private NavidromeConfig navidromeConfig;
 
-    /**
-     * 是否已有一次"下载后重播"在跑。
-     * 联网播放失败时用它兜底一次,避免每首都触发下载、也避免与自动缓存并发写同一文件。
-     */
-    private volatile boolean downloadRetryInFlight = false;
-
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
 
@@ -974,20 +968,22 @@ public class MusicService extends Service {
                             + " url=" + DownloadDiag.safeUrl(currentBean.getStreamUrl())
                             + " network=" + currentBean.isNetwork());
 
-                    // 联网播放失败:先尝试"下载到本地再播",而不是直接跳下一首。
+                    // 联网播放失败:下载到本地再播,下载期间静默等待,不自动跳下一首。
                     // MediaPlayer 的网络栈不走 TlsCompat,HTTPS 站点在安卓 4.2.2 上常因
                     // TLS 过旧握手失败;下载走 HttpURLConnection + TlsCompat(已验证可用),
                     // 下载完用本地文件播放则完全绕开 MediaPlayer 的网络能力。
+                    // 2026-10-03 用户决策(下载期间静默等待):旧逻辑在已有下载在途时直接
+                    // 1 秒跳下一首,造成"每秒一首失败"的级联刷屏、永远等不到缓存完成;
+                    // 现在统一排队下载(单线程队列 + autoCacheSong 的 已缓存/在下载中 判重,
+                    // 不会重复下载同一文件),完成后自动本地重播,只有下载真正失败才跳下一首。
                     if (token == playToken
                             && currentBean.isNetwork()
-                            && currentBean.getStreamUrl() != null
-                            && !downloadRetryInFlight) {
-                        downloadRetryInFlight = true;
+                            && currentBean.getStreamUrl() != null) {
                         downloadThenPlay(currentBean, token);
                         return true;
                     }
 
-                    // 出错时自动跳下一首(避免卡住)
+                    // 本地歌播放失败:自动跳下一首兜底(避免卡住)
                     if (token == playToken) {
                         mainHandler.postDelayed(new Runnable() {
                             @Override
@@ -1023,8 +1019,8 @@ public class MusicService extends Service {
             DownloadDiag.logError("prepareAndPlay 异常: " + bean.getTitle()
                     + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
                     + " network=" + bean.isNetwork(), e);
-            if (bean.isNetwork() && bean.getStreamUrl() != null && !downloadRetryInFlight) {
-                downloadRetryInFlight = true;
+            if (bean.isNetwork() && bean.getStreamUrl() != null) {
+                // 与 onError 路径一致:下载期间静默等待,不再自动跳下一首
                 downloadThenPlay(bean, token);
                 return;
             }
@@ -1049,8 +1045,9 @@ public class MusicService extends Service {
      * 而下载走 HttpURLConnection + TlsCompat(登录、取列表都靠它,已验证可用),
      * 下载完用本地文件播放则完全不依赖 MediaPlayer 的网络能力。
      *
-     * 只兜底一次:失败就跳下一首,绝不循环重试(避免卡死与流量浪费)。
-     * 同一首的并发下载由 MusicSyncManager.IN_FLIGHT 挡住,不会与自动缓存抢写同一文件。
+     * 下载期间静默等待(2026-10-03 用户决策):联网播放失败后不再自动跳下一首,
+     * 排队下载、完成即自动本地重播;仅下载真正失败才跳下一首(postNextIfCurrent)。
+     * 同一首的并发下载由 MusicSyncManager.IN_FLIGHT 与"已缓存"检查挡住,不会抢写同一文件。
      */
     private void downloadThenPlay(final MusicBean bean, final int token) {
         cacheExecutor.submit(new Runnable() {
@@ -1102,8 +1099,6 @@ public class MusicService extends Service {
                     // 下载任务静默死亡、下一条任务照常跑,日志里毫无痕迹(2026-10-03 根因)
                     DownloadDiag.logError("下载后重播异常: " + bean.getTitle(), e);
                     postNextIfCurrent(token);
-                } finally {
-                    downloadRetryInFlight = false;
                 }
             }
         });
