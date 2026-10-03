@@ -169,6 +169,8 @@ public class MainActivity extends AppCompatActivity {
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
+    /** 缓存背景去重:同一首歌的暂停/恢复等状态刷新不重置缓冲段(2026-10-03 用户要求) */
+    private String lastCacheBarSid;
     private Button btnPrev, btnPlay, btnNext, btnMode, btnFav;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
@@ -4522,7 +4524,7 @@ public class MainActivity extends AppCompatActivity {
             tvNowArtist.setText("");
             sbProgress.setMax(0);
             sbProgress.setProgress(0);
-            sbProgress.setSecondaryProgress(0);
+            updateCacheBarBackground(null);
             tvCurrentTime.setText("00:00");
             tvTotalTime.setText("00:00");
             // 清除歌词区封面
@@ -4535,8 +4537,9 @@ public class MainActivity extends AppCompatActivity {
         tvNowTitle.setText(bean.getTitle());
         tvNowArtist.setText(bean.getArtist());
         sbProgress.setMax((int) bean.getDuration());
-        // 切歌:清空缓冲段(若新歌正在边下边播/按需下载,~500ms 内的进度广播会重新写入)
-        sbProgress.setSecondaryProgress(0);
+        // 缓存背景:本地歌(含已缓存完成的)整条淡蓝;未缓存的云端歌清零,
+        // 由边下边播/按需下载的进度广播逐段点亮(2026-10-03 用户要求)
+        updateCacheBarBackground(bean);
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
 
         // 更新底栏收藏按钮状态
@@ -4675,6 +4678,28 @@ public class MainActivity extends AppCompatActivity {
                 tvCurrentTime.setText(MusicBean.formatDuration(pos));
                 tvTotalTime.setText(MusicBean.formatDuration(dur));
             }
+        }
+    }
+
+    /**
+     * 播放进度条的"缓存背景"(secondaryProgress,淡蓝)初始化:
+     * - 本地歌(含已缓存完成转本地的)→ 整条铺满淡蓝(2026-10-03 用户要求:
+     *   "已经缓存完成的,就用蓝色的进度条背景,不用恢复灰色");
+     * - 未缓存的云端歌 → 清零,由进度广播(边下边播心跳/按需下载)逐段点亮;
+     * - 同一首歌的暂停/恢复等状态刷新不清零(保留已点亮的缓冲段)。
+     */
+    private void updateCacheBarBackground(MusicBean bean) {
+        String sid = (bean != null) ? bean.getStreamId() : null;
+        if (sid != null && sid.equals(lastCacheBarSid)
+                && sbProgress.getSecondaryProgress() > 0) {
+            return;   // 同一首且已有背景:状态刷新不动它
+        }
+        lastCacheBarSid = sid;
+        int max = sbProgress.getMax();
+        if (bean != null && !bean.isNetwork() && max > 0) {
+            sbProgress.setSecondaryProgress(max);
+        } else {
+            sbProgress.setSecondaryProgress(0);
         }
     }
 
