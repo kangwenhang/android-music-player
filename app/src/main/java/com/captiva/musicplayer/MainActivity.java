@@ -1648,8 +1648,10 @@ public class MainActivity extends AppCompatActivity {
             "时长过滤设置", "刷新歌曲列表", "屏幕分辨率与DPI", "清除列表缓存", "关于"
         };
         // 图标只用 BMP 老字符(Unicode 1.1 时代):车机 4.2.2 的字体没有 SMP emoji
-        // 区块(1F3xx+),📡⏱🔄📐🗑 这类全显示空白;☁⌛↻▭✕ⓘ 为旧字体必有字形
-        final String[] itemIcons = {"♪", "☁", "▶", "⌛", "↻", "▭", "✕", "ⓘ"};
+        // 区块(1F3xx+),📡⏱🔄📐🗑 这类全显示空白;☁⌛↻✕ 为车机实测有字形。
+        // 【2026-10-04 v5.7.369】▭(U+25AD)车机实测无字形(用户截图空白),换 GB2312
+        // 一级符号 □(U+25A1);ⓘ(U+24D8)同属非 GB2312 高危字形,预防性换字母 i。
+        final String[] itemIcons = {"♪", "☁", "▶", "⌛", "↻", "□", "✕", "i"};
 
         // 自定义 Adapter:图标 + 文字 + 箭头
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
@@ -1838,7 +1840,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 屏幕分辨率与DPI信息对话框(全屏美化) */
     private void showScreenInfoDialog() {
-        final SubDialog sd = createSubDialog("▭", "屏幕分辨率与DPI");
+        final SubDialog sd = createSubDialog("□", "屏幕分辨率与DPI");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
@@ -1985,7 +1987,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 关于对话框(全屏美化) */
     private void showAboutDialog() {
-        final SubDialog sd = createSubDialog("ⓘ", "关于");
+        final SubDialog sd = createSubDialog("i", "关于");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
