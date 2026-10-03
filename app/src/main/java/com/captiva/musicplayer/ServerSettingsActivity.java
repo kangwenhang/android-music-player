@@ -43,8 +43,10 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private NavidromeConfig config;
     // 诊断日志目录(仅测试版 DEBUG 显示)
     private View vgLogDir;
-    private EditText etLogDir;
+    private TextView tvLogDir;       // 点击选择目录(替代手填)
     private TextView tvLogPath;
+    /** 目录选择器当前目标:false=同步目录(音乐根目录),true=诊断日志目录 */
+    private boolean pickingLogDir = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,26 +74,17 @@ public class ServerSettingsActivity extends AppCompatActivity {
         cbAutoCache = findViewById(R.id.cb_auto_cache);
         etAutoCacheMax = findViewById(R.id.et_auto_cache_max);
 
-        // 诊断日志目录(测试版专属 UI,正式版隐藏)
+        // 诊断日志目录(测试版专属 UI,正式版隐藏):点击选择目录,而非手填
         vgLogDir = findViewById(R.id.vg_log_dir);
-        etLogDir = findViewById(R.id.et_log_dir);
+        tvLogDir = findViewById(R.id.tv_log_dir);
         tvLogPath = findViewById(R.id.tv_log_path);
         if (BuildConfig.DEBUG) {
             vgLogDir.setVisibility(View.VISIBLE);
-            etLogDir.setText(config.getLogDir());
-            etLogDir.addTextChangedListener(new android.text.TextWatcher() {
-                @Override
-                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-                }
-
-                @Override
-                public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    updateLogPathPreview();
-                }
-
-                @Override
-                public void afterTextChanged(android.text.Editable s) {
-                }
+            String curLog = config.getLogDir();
+            tvLogDir.setText(curLog.isEmpty() ? "默认: 音乐根目录" : curLog);
+            tvLogDir.setOnClickListener(v -> {
+                pickingLogDir = true;
+                showDirectoryPicker();
             });
             updateLogPathPreview();
         }
@@ -150,9 +143,12 @@ public class ServerSettingsActivity extends AppCompatActivity {
             saveConfig();
         });
 
-        // 点击同步路径输入框 → 弹出目录选择器(含手动输入选项)
+        // 点击同步路径输入框 → 弹出目录选择器(音乐根目录,重置为同步目录模式)
         // 本地歌曲目录不再提供设置:固定为 根目录/本地歌曲(自动创建),与云端歌曲隔离
-        etSyncPath.setOnClickListener(v -> showDirectoryPicker());
+        etSyncPath.setOnClickListener(v -> {
+            pickingLogDir = false;
+            showDirectoryPicker();
+        });
 
         // 回填自动缓存设置(默认:开启 / 上限 2048MB)
         cbAutoCache.setChecked(config.isAutoCacheOnPlay());
@@ -257,7 +253,7 @@ public class ServerSettingsActivity extends AppCompatActivity {
         String[] labels = quickLabels.toArray(new String[0]);
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("选择同步目录");
+        builder.setTitle(pickingLogDir ? "选择诊断日志目录" : "选择同步目录");
         builder.setItems(labels, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
@@ -274,11 +270,16 @@ public class ServerSettingsActivity extends AppCompatActivity {
         builder.show();
     }
 
-    /** 手动输入同步路径对话框 */
+    /** 手动输入目录对话框(同步目录 / 诊断日志目录共用,由 pickingLogDir 区分) */
     private void showManualPathInput() {
         final EditText etInput = new EditText(this);
         etInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
-        String currentPath = etSyncPath.getText().toString().trim();
+        String currentPath;
+        if (pickingLogDir) {
+            currentPath = config.getLogDir();
+        } else {
+            currentPath = etSyncPath.getText().toString().trim();
+        }
         if (currentPath.isEmpty()) {
             currentPath = Environment.getExternalStorageDirectory()
                     .getAbsolutePath() + "/Music";
@@ -292,8 +293,9 @@ public class ServerSettingsActivity extends AppCompatActivity {
         etInput.setBackgroundResource(R.drawable.bg_search);
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("手动输入同步目录");
-        builder.setMessage("请输入完整的目录路径\n路径必须以 / 开头");
+        builder.setTitle(pickingLogDir ? "手动输入诊断日志目录" : "手动输入同步目录");
+        builder.setMessage((pickingLogDir ? "诊断日志目录:" : "同步目录:")
+                + " 请输入完整的目录路径\n路径必须以 / 开头");
         builder.setView(etInput);
         builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
             @Override
@@ -386,17 +388,35 @@ public class ServerSettingsActivity extends AppCompatActivity {
         Toast.makeText(this, "已设置同步目录: " + path, Toast.LENGTH_LONG).show();
     }
 
-    /** 目录选择器统一落点:写入同步目录(本地目录固定派生,无需设置) */
+    /** 目录选择器统一落点:按当前模式写入 同步目录 或 诊断日志目录 */
     private void applyPickedPath(String path) {
-        setSyncPath(path);
+        if (pickingLogDir) {
+            setLogDir(path);
+        } else {
+            setSyncPath(path);
+        }
     }
 
-    /** 实时预览 download_debug.log 实际落盘的绝对路径(测试版诊断日志目录设置用) */
+    /** 设置诊断日志目录:立即持久化 + 更新 UI + 重初始化诊断日志落盘(即时生效) */
+    private void setLogDir(String path) {
+        config.setLogDir(path);
+        tvLogDir.setText(path.isEmpty() ? "默认: 音乐根目录" : path);
+        File dir = new File(path);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        DownloadDiag.reinit(this);
+        updateLogPathPreview();
+        Toast.makeText(this, "已设置诊断日志目录: "
+                + (path.isEmpty() ? "音乐根目录(默认)" : path), Toast.LENGTH_LONG).show();
+    }
+
+    /** 实时预览诊断日志实际落盘的绝对路径(测试版诊断日志目录设置用;下载/缓存/崩溃三类日志同目录) */
     private void updateLogPathPreview() {
         if (tvLogPath == null) {
             return;
         }
-        String typed = etLogDir.getText().toString().trim();
+        String typed = config.getLogDir();
         if (!typed.isEmpty() && !typed.startsWith("/")) {
             tvLogPath.setText("路径必须以 / 开头(留空则使用音乐根目录)");
             return;
@@ -404,7 +424,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
         try {
             String dir = DownloadDiag.resolveLogDir(ServerSettingsActivity.this);
             File f = new File(dir, "download_debug.log");
-            tvLogPath.setText("实际日志路径: " + f.getAbsolutePath() + "\n(修改后返回主界面即生效)");
+            tvLogPath.setText("实际日志路径: " + f.getAbsolutePath()
+                    + "\n(本目录同时存放 download_debug.log / cache_debug.log / crash_log.txt)");
         } catch (Throwable t) {
             tvLogPath.setText("实际日志路径: 计算失败");
         }
@@ -618,9 +639,8 @@ public class ServerSettingsActivity extends AppCompatActivity {
         }
         config.setAutoCacheMaxMb(maxMb);
         // 诊断日志目录(测试版设置项,仅 DEBUG 下 UI 可见;正式版字符串为空=音乐根目录)
-        if (BuildConfig.DEBUG && etLogDir != null) {
-            config.setLogDir(etLogDir.getText().toString().trim());
-            DownloadDiag.reinit(this);
+        // 已在选择时通过 setLogDir 即时持久化并重初始化,这里仅做保存后的预览刷新
+        if (BuildConfig.DEBUG) {
             updateLogPathPreview();
         }
         config.setEnabled(true);

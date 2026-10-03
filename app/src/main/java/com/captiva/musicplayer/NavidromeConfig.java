@@ -19,7 +19,7 @@ public class NavidromeConfig {
     private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
     private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
     private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录(即音乐根目录)
-    private static final String KEY_LOG_DIR = "diag_log_dir"; // 诊断日志(download_debug.log)自定义存储目录;空=音乐根目录(测试版设置页可填)
+    private static final String KEY_LOG_DIR = "diag_log_dir"; // 统一诊断日志目录(下载/缓存/崩溃三类日志);空=音乐根目录(测试版设置页可选目录)
     private static final String KEY_AUTO_PLAY = "auto_play"; // 打开软件自动播放
     private static final String KEY_LAST_INDEX = "last_play_index"; // 上次播放索引
     private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)

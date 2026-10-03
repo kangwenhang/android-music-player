@@ -14,7 +14,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 下载 / 联网播放诊断日志 → 音乐根目录/download_debug.log
+ * 下载 / 联网播放诊断日志(统一诊断日志目录入口)
+ *
+ * 三类诊断日志(下载/缓存/崩溃)都通过本类的 resolveLogDir() 取"统一存放目录":
+ * 1. download_debug.log —— 本类负责(只记失败与异常,常开)
+ * 2. cache_debug.log   —— CacheDebugLog.init(dir) 传入 resolveLogDir()
+ * 3. crash_log.txt     —— App.installCrashLogger() 写入 resolveLogDir()
+ *
+ * 目录规则:设置页(测试版)可选定一个自定义目录;为空或不可写时回退音乐根目录(getSyncPath)。
+ * 因此"诊断日志目录"是三类日志的唯一真相来源,改一处即三处生效。
  *
  * 存在的理由:车机没有 adb,logcat 拿不到;而"云端歌曲播不了/下不动"这类问题的
  * 失败原因在界面上完全不可见(播放失败只是静默跳下一首,下载失败只是 result=false)。
@@ -25,7 +33,7 @@ import java.util.concurrent.Executors;
  * - 这里只记**异常与失败**,正常播放不写一行,体积极小,可以长期开着。
  * - 两者 ENABLED 开关独立,互不牵连。
  *
- * 想彻底关掉:把 ENABLED 改成 false(所有写入变 no-op)。
+ * 想彻底关掉:把 ENABLED 改成 false(本类所有写入变 no-op;cached/crash 各自另有开关)。
  */
 public final class DownloadDiag {
 
@@ -87,7 +95,8 @@ public final class DownloadDiag {
     }
 
     /**
-     * 解析日志目录:优先用设置里的自定义目录(测试版设置页可填),
+     * 解析统一诊断日志目录:三类日志(download_debug.log / cache_debug.log / crash_log.txt)
+     * 都从这里取目录。优先用设置里的自定义目录(测试版设置页可选,仅 DEBUG 下 UI 可见),
      * 父级不可写或为空时回退到音乐根目录(getSyncPath,默认行为)。
      */
     public static String resolveLogDir(Context ctx) {

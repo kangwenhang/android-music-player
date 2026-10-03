@@ -252,17 +252,18 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="诊断日志目录(测试版:download_debug.log 存放位置)"
+                    android:text="诊断日志目录(测试版:点击选择,所有诊断日志统一存放处)"
                     android:textColor="@color/text_secondary"
                     android:textSize="@dimen/sub_text_size"
                     android:layout_marginBottom="6dp" />
 
-                <EditText
-                    android:id="@+id/et_log_dir"
+                <!-- 点击选择目录(复用同步目录的目录选择器,而非手填) -->
+                <TextView
+                    android:id="@+id/tv_log_dir"
                     android:layout_width="match_parent"
                     android:layout_height="@dimen/search_height"
                     android:background="@drawable/bg_search"
-                    android:hint="留空=音乐根目录,如 /sdcard/logs"
+                    android:hint="留空=音乐根目录,点击选择目录"
                     android:textColorHint="@color/search_hint"
                     android:textColor="@color/text_primary"
                     android:textSize="@dimen/search_text_size"
@@ -270,7 +271,8 @@
                     android:paddingRight="@dimen/search_padding"
                     android:gravity="center_vertical"
                     android:singleLine="true"
-                    android:inputType="text" />
+                    android:clickable="true"
+                    android:focusable="false" />
 
                 <TextView
                     android:id="@+id/tv_log_path"

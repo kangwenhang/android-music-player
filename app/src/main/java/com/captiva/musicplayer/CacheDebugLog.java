@@ -18,7 +18,8 @@ import java.util.concurrent.TimeUnit;
  * 用途:车机/手机上不方便接 adb 抓 logcat 时,把关键诊断信息直接落盘成文本文件,
  * 用任意文件管理器打开即可查看(如「点击播放没有出现缓存进度条」这类问题)。
  *
- * 日志文件路径: &lt;Music根目录&gt;/cache_debug.log
+ * 日志文件路径: 统一诊断日志目录 /cache_debug.log
+ * (目录由调用方传入 DownloadDiag.resolveLogDir 的结果,与 download_debug.log / crash_log.txt 同目录)
  *
  * 【写入策略 —— 全异步,绝不阻塞调用线程】
  * 早期实现是"每次 log() 都 open→write→flush→close",这在主线程上代价极高:
@@ -82,7 +83,8 @@ public class CacheDebugLog {
 
     /**
      * 初始化日志目录(建议在加载音乐 / 播放服务启动时调用)。
-     * 与 perf_log.txt 同目录(云端歌曲目录),首次调用会写入一行含完整路径的文件头。
+     * dir 由调用方传入 DownloadDiag.resolveLogDir(统一诊断日志目录)的结果,
+     * 与 download_debug.log / crash_log.txt 同目录;首次调用会写入一行含完整路径的文件头。
      * 本方法只入队,不做磁盘 I/O,可从主线程安全调用。
      */
     public static void init(Context context, String dir) {
