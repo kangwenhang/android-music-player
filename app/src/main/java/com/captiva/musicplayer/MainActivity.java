@@ -2716,6 +2716,8 @@ public class MainActivity extends AppCompatActivity {
      * 弹出均衡器预设快速切换弹窗
      * 显示所有预设(内置+自定义),点击即切换
      * 含"进入均衡器"入口
+     * 【2026-10-04 v5.7.370】原生 AlertDialog → 与设置菜单同款的深色卡片弹窗:
+     * 渐变头部 + 圆角卡片行 + 当前激活预设高亮(✓ + 亮色) + 歌曲绑定状态条。
      */
     private void showEqualizerQuickSwitch() {
         EqualizerManager eqMgr = MusicDataHolder.getInstance().getEqualizerManager();
@@ -2726,6 +2728,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 获取所有预设名(内置 + 自定义)
         List<String> allPresets = eqMgr.getAllPresetNames();
+        String activePreset = eqMgr.getActivePreset();
         // 在末尾添加"进入均衡器"和"绑定当前歌曲"选项
         List<String> items = new ArrayList<>(allPresets);
         items.add("进入均衡器调节");
@@ -2742,38 +2745,88 @@ public class MainActivity extends AppCompatActivity {
         }
 
         final String[] itemsArray = items.toArray(new String[0]);
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("均衡器模式" + (currentSong != null && songEq != null
-                ? "  (歌曲已绑定: " + songEq + ")" : ""));
-        // 自定义适配器,加大列表项字体(车机电阻屏优化)
+
+        // 深色卡片弹窗(与设置菜单同款结构)
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_eq_quick, null);
+        TextView tvTitle = (TextView) dialogView.findViewById(R.id.tv_eq_title);
+        TextView tvSongBind = (TextView) dialogView.findViewById(R.id.tv_eq_songbind);
+        ListView lv = (ListView) dialogView.findViewById(R.id.lv_eq_presets);
+
+        if (currentSong != null && songEq != null) {
+            tvSongBind.setVisibility(View.VISIBLE);
+            tvSongBind.setText("当前歌曲「" + currentSong.getTitle() + "」已绑定: " + songEq);
+        } else {
+            tvSongBind.setVisibility(View.GONE);
+        }
+
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_list_item_1, itemsArray) {
+                R.layout.dialog_eq_item, itemsArray) {
             @Override
             public View getView(int position, View convertView, android.view.ViewGroup parent) {
-                View view = super.getView(position, convertView, parent);
-                if (view instanceof TextView) {
-                    TextView tv = (TextView) view;
-                    tv.setTextSize(20f);
-                    tv.setPadding(48, 32, 48, 32);
+                if (convertView == null) {
+                    convertView = LayoutInflater.from(getContext()).inflate(
+                            R.layout.dialog_eq_item, parent, false);
                 }
-                return view;
+                TextView tvIcon = (TextView) convertView.findViewById(R.id.tv_eq_icon);
+                TextView tvText = (TextView) convertView.findViewById(R.id.tv_eq_text);
+                TextView tvCheck = (TextView) convertView.findViewById(R.id.tv_eq_check);
+                String item = itemsArray[position];
+                boolean isPreset = position < allPresets.size();
+                boolean isActive = isPreset && item.equals(activePreset);
+
+                if (isPreset) {
+                    tvIcon.setText("♪");
+                } else if (item.startsWith("进入均衡器")) {
+                    tvIcon.setText("⚙");
+                } else if (item.startsWith("取消当前歌曲")) {
+                    tvIcon.setText("♥");
+                } else {
+                    tvIcon.setText("♥");
+                }
+                tvText.setText(item);
+                // 当前激活预设:高亮 + ✓;其余恢复默认色
+                if (isActive) {
+                    tvText.setTextColor(0xFF4FC3F7);
+                    tvText.setTypeface(null, android.graphics.Typeface.BOLD);
+                    tvCheck.setVisibility(View.VISIBLE);
+                } else {
+                    tvText.setTextColor(ContextCompat.getColor(getContext(), R.color.text_primary));
+                    tvText.setTypeface(null, android.graphics.Typeface.NORMAL);
+                    tvCheck.setVisibility(View.GONE);
+                }
+                return convertView;
             }
         };
-        builder.setAdapter(adapter, new DialogInterface.OnClickListener() {
+        lv.setAdapter(adapter);
+
+        final Dialog dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(dialogView);
+        tvTitle.setText("均衡器模式" + (currentSong != null && songEq != null
+                ? "  (歌曲已绑定)" : ""));
+        dialogView.findViewById(R.id.btn_eq_close).setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onClick(DialogInterface dialog, int which) {
-                if (which < allPresets.size()) {
+            public void onClick(View v) { dialog.dismiss(); }
+        });
+
+        lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(android.widget.AdapterView<?> parent, View view,
+                                    int position, long id) {
+                if (position < allPresets.size()) {
                     // 选择了预设模式
-                    String preset = allPresets.get(which);
+                    String preset = allPresets.get(position);
                     eqMgr.applyPreset(preset);
                     // 如果有当前歌曲,也更新绑定(如果之前有绑定的话保持绑定,否则只改全局)
                     updateEqButtonText(preset);
                     Toast.makeText(MainActivity.this,
                             "均衡器: " + preset, Toast.LENGTH_SHORT).show();
-                } else if (itemsArray[which].startsWith("进入均衡器")) {
+                    dialog.dismiss();
+                } else if (itemsArray[position].startsWith("进入均衡器")) {
                     // 进入均衡器界面
+                    dialog.dismiss();
                     openEqualizer();
-                } else if (itemsArray[which].startsWith("绑定当前EQ")) {
+                } else if (itemsArray[position].startsWith("绑定当前EQ")) {
                     // 绑定当前EQ到当前歌曲
                     if (currentSong != null) {
                         String currentActive = eqMgr.getActivePreset();
@@ -2782,7 +2835,8 @@ public class MainActivity extends AppCompatActivity {
                                 "已将 \"" + currentActive + "\" 绑定到此歌曲",
                                 Toast.LENGTH_SHORT).show();
                     }
-                } else if (itemsArray[which].startsWith("取消当前歌曲")) {
+                    dialog.dismiss();
+                } else if (itemsArray[position].startsWith("取消当前歌曲")) {
                     // 取消绑定
                     if (currentSong != null) {
                         eqMgr.unbindSongEq(currentSong);
@@ -2790,10 +2844,11 @@ public class MainActivity extends AppCompatActivity {
                                 "已取消此歌曲的EQ绑定", Toast.LENGTH_SHORT).show();
                         updateEqButtonText(eqMgr.getActivePreset());
                     }
+                    dialog.dismiss();
                 }
             }
         });
-        builder.show();
+        dialog.show();
     }
 
     // ==================== 服务器状态显示 ====================

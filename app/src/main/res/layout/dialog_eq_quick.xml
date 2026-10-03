@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 均衡器快捷切换弹窗(全屏:渐变头部 + 圆角卡片预设列表)
+     【2026-10-04 v5.7.370】替代原生 AlertDialog(与 app 深色圆角风格统一) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg_main">
+
+    <!-- 头部(蓝色渐变,与设置弹窗同款) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="20dp"
+        android:background="@drawable/bg_settings_header">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="♪"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:layout_marginRight="12dp" />
+
+        <TextView
+            android:id="@+id/tv_eq_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="均衡器模式"
+            android:textColor="#FFFFFF"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_eq_close"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:background="@drawable/bg_dialog_close"
+            android:text="✕"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp" />
+    </LinearLayout>
+
+    <!-- 歌曲绑定状态条(无绑定时隐藏;高亮显示当前歌曲绑定的预设) -->
+    <TextView
+        android:id="@+id/tv_eq_songbind"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingLeft="20dp"
+        android:paddingRight="20dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:textSize="17sp"
+        android:textColor="#8AB4FF"
+        android:background="#1A2A4A"
+        android:visibility="gone" />
+
+    <!-- 预设列表(卡片行,Java 填充) -->
+    <ListView
+        android:id="@+id/lv_eq_presets"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="8dp"
+        android:padding="16dp"
+        android:scrollbars="none" />
+
+</LinearLayout>
