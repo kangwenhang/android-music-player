@@ -306,18 +306,18 @@
                     android:textStyle="bold" />
 
                 <!-- 下一首(小圆) -->
-                <!-- 【2026-10-04 v5.7.363 光学居中补偿】▶ 字形几何 bbox 居中但墨迹
+                <!-- 【2026-10-04 v5.7.364 光学居中补偿】▶ 字形几何 bbox 居中但墨迹
                      质心偏左(实测:车机 -4.6%、模拟器 -5.2% 直径,左右像素约 146/53),
-                     人眼看着偏左(用户反馈"下一首不居中")。paddingLeft=5dp 使文本
-                     中心右移 2.5dp(约 3/4 质心偏移量)。播放大圆 ❚❚/▶ 经质心实测
-                     对称,无需补偿。 -->
+                     人眼看着偏左(用户反馈"下一首不居中")。paddingLeft=6dp 使文本
+                     中心右移 3dp:模拟器复测质心 -1.3px→约0(与◀镜像对称,bbox ∓2.5px)。
+                     播放大圆 ❚❚/▶ 经质心实测对称,无需补偿。 -->
                 <Button
                     android:id="@+id/btn_next"
                     android:layout_width="@dimen/btn_circle_size"
                     android:layout_height="@dimen/btn_circle_size"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
-                    android:paddingLeft="5dp"
+                    android:paddingLeft="6dp"
                     android:paddingTop="0dp"
                     android:paddingRight="0dp"
                     android:paddingBottom="0dp"
