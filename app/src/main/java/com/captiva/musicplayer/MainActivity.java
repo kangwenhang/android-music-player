@@ -183,8 +183,6 @@ public class MainActivity extends AppCompatActivity {
     private int lockedDurationMs = 0;
     /** lockedDurationMs 对应的歌(sid),用于切歌时失效重锁 */
     private String lockedDurationSid = null;
-    /** updateProgress 抽样诊断日志的计数器 */
-    private int progressTick = 0;
     private Button btnPrev, btnPlay, btnNext, btnMode, btnFav;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
@@ -2879,8 +2877,10 @@ public class MainActivity extends AppCompatActivity {
             PerfLogger.log("loadMusic 开始, syncPath=" + syncPath);
         }
 
-        // 缓存诊断日志:正式版也开(与 perf_log.txt 同目录,便于车机上直接查看)
-        CacheDebugLog.init(this, syncPath);
+        // 缓存诊断日志:目录统一用 DownloadDiag.resolveLogDir(与 download_debug.log /
+        // crash_log.txt 同目录)。此前这里传 syncPath(云端歌曲目录),与 MusicService 侧的
+        // init 互相覆盖 dirPath,导致 cache_debug.log 被劈成两份(2026-10-04 修正)。
+        CacheDebugLog.init(this, DownloadDiag.resolveLogDir(this));
         CacheDebugLog.log("loadMusic 开始, 模式=" + (localOnlyMode ? "本地" : "云端")
                 + " 云端目录=" + syncPath
                 + " 播放自动缓存=" + navidromeConfig.isAutoCacheOnPlay()
@@ -4799,11 +4799,10 @@ public class MainActivity extends AppCompatActivity {
             ld.setLayerInset(idxProg, s, 0, w - e, 0);
             sbProgress.invalidate();
             seekbarCalibratedWidth = w;
+            // 标定结果只进 logcat(接 adb 时可查,一次标定仅一行);诊断期已结束,不再落盘
             android.util.Log.i("SeekBarDiag", "[标定] w=" + w
                     + " 起点=" + s + " 终点=" + e
                     + " 行程=" + (e - s) + " inset(左=" + s + ",右=" + (w - e) + ")");
-            CacheDebugLog.log("[标定] w=" + w + " 起点=" + s + " 终点=" + e
-                    + " 行程=" + (e - s));
         } catch (Throwable t) {
             // 标定失败不影响播放,维持 XML 默认 inset
         }
@@ -4872,33 +4871,6 @@ public class MainActivity extends AppCompatActivity {
                 tvCurrentTime.setText(MusicBean.formatDuration(pos));
                 // 总时长与 max 同源(锁定值),保证"数字"和"圆点"用的是同一把尺
                 tvTotalTime.setText(MusicBean.formatDuration(sbProgress.getMax()));
-                // 诊断:确认"元数据时长/媒体实测时长/锁定值"三者在真机上是否一致。
-                // 若 locked != mediaDur 说明比例尺仍在被换,圆点会与深蓝条不同步。
-                // 双写:logcat(模拟器/接 adb 时) + cache_debug.log(车机无 adb 时导文件),
-                // 每 10 次 tick(约 2 秒)抽样一次;诊断期结束后两处一起关。
-                if ((progressTick++ % 10) == 0) {
-                    long metaDur = (cur != null) ? (long) cur.getDuration() : -1L;
-                    // thumb 实际像素位置:验证填充层 inset 后"填充终点 ≡ 圆点中心"
-                    // (模型:圆点中心 = 11dp_px + (W - 22dp_px) * frac)
-                    String thumbB = "(null)";
-                    try {
-                        android.graphics.Rect tb = sbProgress.getThumb().getBounds();
-                        thumbB = tb.left + ".." + tb.right;
-                    } catch (Throwable ignored) {
-                    }
-                    String line = "[进度条] pos=" + pos
-                            + " mediaDur=" + dur
-                            + " metaDur=" + metaDur
-                            + " locked=" + sbProgress.getMax()
-                            + " secondary=" + sbProgress.getSecondaryProgress()
-                            + " frac=" + String.format("%.3f",
-                                    sbProgress.getMax() > 0
-                                            ? (float) pos / sbProgress.getMax() : 0f)
-                            + " w=" + sbProgress.getWidth()
-                            + " thumb=" + thumbB;
-                    android.util.Log.i("SeekBarDiag", line);
-                    CacheDebugLog.log(line);
-                }
             }
         }
     }

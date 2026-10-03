@@ -44,11 +44,11 @@ public class CacheDebugLog {
      * 每次播放/切换都会往 U 盘目录写文件,在车机上属于无谓的 I/O 与噪音。
      * 需要重新排查时:把这里改回 true 重新构建即可,调用点无需改动(log 内部短路)。
      *
-     * 【2026-10-03 晚 打开】诊断期:进度条"圆点与深蓝条速度不一致"排查,
-     * updateProgress 每 2 秒写一行 [进度条](pos/mediaDur/metaDur/locked/secondary/frac),
-     * 车机上装好后播一首歌,导 cache_debug.log(与 download_debug.log 同目录)即可定案。
+     * 【2026-10-04 关闭】进度条"圆点与深蓝条不同步"排查定案(v5.7.353 运行时标定
+     * 模拟器全程验证通过:frac 0.006~0.940 填充终点与圆点中心偏差 ≤1px),
+     * 诊断期结束,正式版关闭落盘。
      */
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false;
 
     private static final String FILE_NAME = "cache_debug.log";
     /** 单文件大小上限(超过即重建),避免长期运行把存储写满 */
