@@ -4772,8 +4772,11 @@ public class MainActivity extends AppCompatActivity {
             }
             android.graphics.drawable.LayerDrawable ld =
                     (android.graphics.drawable.LayerDrawable) pd;
-            int idxSec = indexOfLayerById(ld, R.id.secondaryProgress);
-            int idxProg = indexOfLayerById(ld, R.id.progress);
+            // 注意:seekbar_progress.xml 里用的是框架 id(@android:id/progress 等),
+            // 所以这里必须用 android.R.id 而不是项目 R.id(项目未定义这两个 id,
+            // 引用 R.id 会导致编译错误 "cannot find symbol")。
+            int idxSec = indexOfLayerById(ld, android.R.id.secondaryProgress);
+            int idxProg = indexOfLayerById(ld, android.R.id.progress);
             if (idxSec < 0 || idxProg < 0) {
                 return;
             }
