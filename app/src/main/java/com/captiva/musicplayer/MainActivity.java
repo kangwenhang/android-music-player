@@ -650,6 +650,15 @@ public class MainActivity extends AppCompatActivity {
         sbProgress.setBackgroundDrawable(null);
         // 消除clip与thumb之间的缝隙
         sbProgress.setThumbOffset(0);
+        // 布局完成后标定填充层行程,使"填充终点 ≡ 圆点中心"全程恒成立
+        // (2026-10-03 v5.7.352:运行时 thumb 是 18dp BitmapDrawable,且实测其
+        //  行程两端不对称,无法用固定 inset 对齐 —— 只能实测标定,见方法注释)
+        sbProgress.post(new Runnable() {
+            @Override
+            public void run() {
+                calibrateSeekbarFillInsets();
+            }
+        });
 
         btnPrev = findViewById(R.id.btn_prev);
         btnPlay = findViewById(R.id.btn_play);
@@ -4728,6 +4737,98 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** 上次标定时的 SeekBar 宽度(宽度变化时重新标定) */
+    private int seekbarCalibratedWidth = 0;
+
+    /**
+     * 标定进度条填充层行程,使"填充终点 ≡ 圆点中心"全程恒成立
+     * (2026-10-03 v5.7.352,修复"刚开始填充在圆点左侧、快结束跑到右侧")。
+     *
+     * 背景:thumb 行程由 AbsSeekBar 内部公式决定(实测 center = A + B*frac,
+     * 两端 inset 不对称且随设备/密度变化),而填充层默认按 drawable bounds
+     * 全宽缩放 —— 两个映射不一致,50% 处交叉,越往两端错得越多。
+     *
+     * 做法:布局完成后把 progress 置 max / 0 各读一次 thumb 实际圆心,
+     * 得到行程两端 s、e,再用 LayerDrawable.setLayerInset 把 progress 与
+     * secondaryProgress 层的左右 inset 精确设为 (s, W-e) —— 填充层从此与
+     * thumb 用同一线性映射,任何 frac 下填充终点都落在圆点中心。
+     * 拖动定位也随之更准(触摸目标即圆点本身)。
+     *
+     * 注意:setProgress(0) 可能触发 API 17 的 secondaryProgress 钳制,
+     * 标定完恢复原值;标定在首帧绘制前(post)执行,无可见闪烁。
+     */
+    private void calibrateSeekbarFillInsets() {
+        try {
+            final int w = sbProgress.getWidth();
+            if (w <= 0 || sbProgress.getThumb() == null || sbProgress.getMax() <= 0) {
+                return;
+            }
+            if (seekbarCalibratedWidth == w) {
+                return;   // 已按此宽度标定过
+            }
+            android.graphics.drawable.Drawable pd = sbProgress.getProgressDrawable();
+            if (!(pd instanceof android.graphics.drawable.LayerDrawable)) {
+                return;
+            }
+            android.graphics.drawable.LayerDrawable ld =
+                    (android.graphics.drawable.LayerDrawable) pd;
+            int idxSec = indexOfLayerById(ld, R.id.secondaryProgress);
+            int idxProg = indexOfLayerById(ld, R.id.progress);
+            if (idxSec < 0 || idxProg < 0) {
+                return;
+            }
+            int max = sbProgress.getMax();
+            int posRestore = sbProgress.getProgress();
+            int secRestore = sbProgress.getSecondaryProgress();
+            // 量行程:先 max 后 0(保证两次 setProgress 都实际变更、都刷新 bounds)
+            sbProgress.setProgress(max);
+            int e = thumbCenterX();
+            sbProgress.setProgress(0);
+            int s = thumbCenterX();
+            sbProgress.setProgress(posRestore);
+            if (sbProgress.getSecondaryProgress() != secRestore) {
+                sbProgress.setSecondaryProgress(secRestore);
+            }
+            if (s < 0 || e < 0 || e <= s + 10 || e > w || s < 0) {
+                return;   // 量出的行程异常,不动 drawable
+            }
+            ld.setLayerInset(idxSec, s, 0, w - e, 0);
+            ld.setLayerInset(idxProg, s, 0, w - e, 0);
+            sbProgress.invalidate();
+            seekbarCalibratedWidth = w;
+            android.util.Log.i("SeekBarDiag", "[标定] w=" + w
+                    + " 起点=" + s + " 终点=" + e
+                    + " 行程=" + (e - s) + " inset(左=" + s + ",右=" + (w - e) + ")");
+            CacheDebugLog.log("[标定] w=" + w + " 起点=" + s + " 终点=" + e
+                    + " 行程=" + (e - s));
+        } catch (Throwable t) {
+            // 标定失败不影响播放,维持 XML 默认 inset
+        }
+    }
+
+    /** thumb 圆心的视图坐标 x(bounds 取整,误差 ≤0.5px);异常返回 -1 */
+    private int thumbCenterX() {
+        try {
+            android.graphics.Rect b = sbProgress.getThumb().getBounds();
+            if (b.width() <= 0) {
+                return -1;
+            }
+            return (b.left + b.right) / 2;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /** 在 LayerDrawable 里按 layer id 找子层下标;找不到返回 -1 */
+    private int indexOfLayerById(android.graphics.drawable.LayerDrawable ld, int id) {
+        for (int i = 0; i < ld.getNumberOfLayers(); i++) {
+            if (ld.getId(i) == id) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /**
      * 锁定并应用进度条 max(2026-10-03 v5.7.348)。
      * 一首歌只认第一次拿到的有效时长:此后无论 updateNowPlaying(元数据)还是
@@ -4753,6 +4854,10 @@ public class MainActivity extends AppCompatActivity {
     private void updateProgress() {
         if (service == null || !bound) {
             return;
+        }
+        // 宽度变化(旋转/重建)时重新标定填充层行程;未标定过(宽 0)也会在此补上
+        if (sbProgress.getWidth() != seekbarCalibratedWidth) {
+            calibrateSeekbarFillInsets();
         }
         if (service.isPlaying() || service.getCurrentPosition() > 0) {
             int pos = service.getCurrentPosition();
