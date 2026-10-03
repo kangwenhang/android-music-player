@@ -118,6 +118,67 @@ public class MusicService extends Service {
     /** 配置(读取自动缓存开关/配额等) */
     private NavidromeConfig navidromeConfig;
 
+    /**
+     * 本地流代理(LocalStreamProxy)缓存回调:边下边播完成/失败时回调(后台线程)。
+     * 完成后与 autoCacheSong 成功路径相同的三件套登记(StreamIdIndex / AutoCacheManifest /
+     * 配额清理),并在主线程把当前 bean 原地转为本地歌 + 广播来源变化 + 触发预缓存后三首。
+     */
+    private final LocalStreamProxy.CacheCallback proxyCallback =
+            new LocalStreamProxy.CacheCallback() {
+        @Override
+        public void onCached(final String streamId, final java.io.File finalFile) {
+            // ---- 后台线程:登记(与 autoCacheSongLocked 成功路径一致) ----
+            try {
+                MusicBean song = findBeanByStreamId(streamId);
+                String syncPath = navidromeConfig != null
+                        ? navidromeConfig.getCloudDir() : null;
+                if (song != null && syncPath != null && !syncPath.isEmpty()) {
+                    StreamIdIndex.registerSong(MusicService.this, song, syncPath);
+                }
+                if (finalFile != null) {
+                    AutoCacheManifest.add(MusicService.this,
+                            finalFile.getAbsolutePath(), finalFile.length());
+                    if (navidromeConfig != null && syncPath != null
+                            && navidromeConfig.getAutoCacheMaxMb() > 0) {
+                        long maxBytes =
+                                (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L;
+                        AutoCacheManifest.evictToFit(MusicService.this, syncPath, maxBytes);
+                    }
+                }
+                DownloadDiag.log("边下边播: 缓存登记完成 sid=" + streamId);
+            } catch (Throwable t) {
+                DownloadDiag.log("边下边播: 缓存登记异常 " + t);
+            }
+            // ---- 主线程:UI 状态 + 预缓存 ----
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    MusicBean cur = getCurrentMusic();
+                    if (cur != null && streamId.equals(cur.getStreamId())
+                            && cur.isNetwork()) {
+                        // 正在播的就是这首歌:原地转为本地歌(下次切回来直接走本地 fd)
+                        cur.setNetwork(false);
+                        cur.setData(finalFile.getAbsolutePath());
+                        cur.setUri(null);
+                        MusicDataHolder.getInstance().setCurrentPlayingMusic(cur);
+                        Intent i = new Intent(ACTION_CACHE_AVAILABILITY_CHANGED);
+                        i.putExtra("streamId", streamId);
+                        sendBroadcast(i);
+                    }
+                    // 带宽先给正在播的歌:现在它缓存完了,才开始预缓存后面的歌
+                    preCacheUpcoming(3);
+                }
+            });
+        }
+
+        @Override
+        public void onFailed(String streamId, String reason) {
+            // 失败只记日志:当前歌由 MediaPlayer 报错走 downloadThenPlay 兜底,
+            // 预缓存由下一次播放成功路径触发,这里不抢带宽。
+            DownloadDiag.log("边下边播: 缓存失败 sid=" + streamId + " 原因=" + reason);
+        }
+    };
+
     // 当前歌词(供 UI 查询)
     private List<LrcEntry> currentLrc = new ArrayList<>();
 
@@ -838,6 +899,8 @@ public class MusicService extends Service {
         final long tReset = System.currentTimeMillis() - tStart - tPromote;
         long tAuth = 0L;
         long tSetDs = 0L;
+        /** 本次播放是否走了本地流代理(边下边播):决定预缓存的触发时机 */
+        boolean viaProxy = false;
 
         try {
             // 网络歌曲:用 Navidrome stream URL
@@ -852,6 +915,37 @@ public class MusicService extends Service {
                 }
                 tAuth = System.currentTimeMillis() - tA;
                 long tB = System.currentTimeMillis();
+                // ===== 边下边播:本地流代理优先 =====
+                // MediaPlayer 直连 HTTPS 走它自己的老网络栈(4.2.2 只开 SSLv3/TLSv1.0),
+                // 飞牛中继等要求 TLS 1.2 的站点必然握手失败(-1011)。代理把链路倒过来:
+                // MediaPlayer 连本机 127.0.0.1 纯 HTTP(无 TLS 问题),代理用 TlsCompat
+                // 拉上游流并同步写 .part 落盘,客户端从"正在增长的本地文件"读 ——
+                // 起播只需 1~2 秒(上游握手+首批字节),不再等整首下完。
+                // 注册失败(端口占用/autoCacheSong 正在下载同一首/已完整缓存)则回退直连。
+                try {
+                    String proxySyncPath = navidromeConfig != null
+                            ? navidromeConfig.getCloudDir() : null;
+                    if (navidromeConfig != null && navidromeConfig.isAutoCacheOnPlay()
+                            && proxySyncPath != null && !proxySyncPath.isEmpty()
+                            && bean.getStreamId() != null && !bean.getStreamId().isEmpty()) {
+                        java.io.File target =
+                                MusicSyncManager.buildLocalFile(bean, proxySyncPath);
+                        // 已完整缓存的目标不走代理(promoteToLocalIfCached 通常已拦截,这里双保险)
+                        if (target != null && !(target.exists() && target.length() > 1024)
+                                && LocalStreamProxy.get().register(bean.getStreamId(),
+                                        bean.getStreamUrl(), headers, target, proxyCallback)) {
+                            player.setDataSource(this, android.net.Uri.parse(
+                                    LocalStreamProxy.get().url(bean.getStreamId())));
+                            viaProxy = true;
+                            DownloadDiag.log("联网播放: 走本地流代理(边下边播) "
+                                    + bean.getTitle());
+                        }
+                    }
+                } catch (Throwable t) {
+                    // 代理任何异常都不能影响播放:回退直连
+                    DownloadDiag.log("边下边播代理异常,回退直连: " + t);
+                }
+                if (!viaProxy) {
                 // 注意:MediaPlayer 自己发网络请求,**不走 TlsCompat**。
                 // 安卓 4.2.2 的媒体栈只开 SSLv3/TLSv1.0,遇到要求 TLS 1.2 的 HTTPS 站点
                 // (飞牛中继等)会直接握手失败 —— 这就是"列表能刷出来、点击却播不了"的典型根因。
@@ -862,6 +956,7 @@ public class MusicService extends Service {
                     player.setDataSource(this, android.net.Uri.parse(bean.getStreamUrl()), headers);
                 } else {
                     player.setDataSource(bean.getStreamUrl());
+                }
                 }
                 tSetDs = System.currentTimeMillis() - tB;
             } else if (bean.getUri() != null && bean.getUri().startsWith("content://")) {
@@ -999,9 +1094,15 @@ public class MusicService extends Service {
             });
             player.prepareAsync();
             // 云端歌曲:按设置异步下载到本地(自动缓存),不影响当前播放
+            // (走代理时 autoCacheSong 会因 IN_FLIGHT 被代理占用而快速跳过,不双写)
             long tC = System.currentTimeMillis();
             maybeAutoCache(bean);
             long tAuto = System.currentTimeMillis() - tC;
+            // 预缓存后三首:非代理路径在当前歌的自动缓存任务之后入队(cacheExecutor 单线程,
+            // 队列顺序保证带宽先给当前歌);代理路径等 onCached 回调后再排队,同样先当前歌。
+            if (!viaProxy) {
+                preCacheUpcoming(3);
+            }
             // 主线程点击路径耗时汇总:定位"点击未下载歌曲卡一下"这类问题的直接证据
             CacheDebugLog.log("点击播放主线程耗时: " + bean.getTitle()
                     + " promote=" + tPromote + "ms"
@@ -1114,6 +1215,71 @@ public class MusicService extends Service {
                 }
             }
         }, 300);
+    }
+
+    /** 在当前播放列表里按 streamId 找 bean(代理缓存回调的登记用) */
+    private MusicBean findBeanByStreamId(String sid) {
+        if (sid == null) {
+            return null;
+        }
+        for (MusicBean b : playList) {
+            if (b != null && sid.equals(b.getStreamId())) {
+                return b;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 预缓存播放列表中当前歌曲之后的 count 首(只有网络歌占名额,本地歌直接跳过)。
+     *
+     * 复用 cacheExecutor 单线程串行队列:autoCacheSong 内部有 已缓存/IN_FLIGHT 判重,
+     * 不会重复下载、不会双写同一文件。触发时机:
+     * - 非代理路径:prepareAndPlay 末尾触发 —— 当前歌的自动缓存任务先入队,
+     *   队列顺序保证带宽先给当前歌;
+     * - 代理路径:当前歌 onCached 回调触发 —— 边下边播占着带宽,播完才开始预缓存。
+     */
+    private void preCacheUpcoming(int count) {
+        if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
+            return;
+        }
+        final String syncPath = navidromeConfig.getCloudDir();
+        if (syncPath == null || syncPath.isEmpty()) {
+            return;
+        }
+        final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+        if (api == null) {
+            return;
+        }
+        final long maxBytes = navidromeConfig.getAutoCacheMaxMb() > 0
+                ? (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L : 0L;
+        int queued = 0;
+        for (int i = currentIndex + 1; i < playList.size() && queued < count; i++) {
+            final MusicBean b = playList.get(i);
+            if (b == null || !b.isNetwork() || b.getStreamUrl() == null
+                    || b.getStreamId() == null || b.getStreamId().isEmpty()) {
+                continue;   // 本地歌/信息不全:不占预缓存名额
+            }
+            final String title = b.getTitle();
+            queued++;
+            cacheExecutor.submit(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        boolean ok = MusicSyncManager.autoCacheSong(
+                                MusicService.this, api, b, syncPath, maxBytes, null);
+                        DownloadDiag.log("预缓存: " + (ok ? "成功 " : "跳过/失败 ") + title);
+                    } catch (Throwable t) {
+                        // 接 Throwable:getContentLengthLong 一类的 Error 曾让任务静默死亡
+                        DownloadDiag.logError("预缓存异常: " + title, t);
+                    }
+                }
+            });
+        }
+        if (queued > 0) {
+            DownloadDiag.log("预缓存: 已排队 " + queued + " 首(当前位置 "
+                    + currentIndex + ",列表 " + playList.size() + " 首)");
+        }
     }
 
     /**

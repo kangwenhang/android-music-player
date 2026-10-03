@@ -223,6 +223,24 @@ public class MusicSyncManager {
         }
     }
 
+    /**
+     * 供本地流代理(LocalStreamProxy)占用"同一首只允许一个下载"互斥:
+     * 代理边下边播期间,autoCacheSong 会因 IN_FLIGHT 命中而跳过,绝不双写同一目标文件。
+     */
+    public static boolean beginCache(String sid) {
+        if (sid == null || sid.isEmpty()) {
+            return false;
+        }
+        return IN_FLIGHT.add(sid);
+    }
+
+    /** 释放 beginCache 占用的互斥(下载完成或失败时调用) */
+    public static void endCache(String sid) {
+        if (sid != null) {
+            IN_FLIGHT.remove(sid);
+        }
+    }
+
     /** 真正的下载实现(调用前已确保同一首不在下载中) */
     private static boolean autoCacheSongLocked(Context context, MusicSourceApi api,
                                                MusicBean song, String syncPath, long maxBytes,

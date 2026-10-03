@@ -925,6 +925,7 @@ public class FnMusicApi implements MusicSourceApi {
         HttpURLConnection conn = null;
         InputStream is = null;
         FileOutputStream fos = null;
+        File partFile = null;
         String urlStr = null;
         try {
             urlStr = getStreamUrl(songId);
@@ -967,7 +968,11 @@ public class FnMusicApi implements MusicSourceApi {
                 contentLength = conn.getContentLength(); // int 版,API 1 就有;mp3 远小于 2GB 够用
             }
             is = conn.getInputStream();
-            fos = new FileOutputStream(destFile);
+            // 一律写 .part 临时文件、完成后 rename:任何时刻"最终路径"要么不存在要么完整,
+            // 防止半截文件被 promoteToLocalIfCached 的 exists/length 检查误判为已缓存
+            // (与 LocalStreamProxy / 自动缓存同一一致性约定)。
+            partFile = new File(destFile.getParentFile(), destFile.getName() + ".part");
+            fos = new FileOutputStream(partFile);
             byte[] buf = new byte[8192];
             int len;
             long total = 0;
@@ -979,6 +984,12 @@ public class FnMusicApi implements MusicSourceApi {
                 }
             }
             fos.flush();
+            // 原子落位:.part → 最终文件(rename 失败按下载失败处理)
+            if (destFile.exists()) destFile.delete();
+            if (!partFile.renameTo(destFile)) {
+                throw new java.io.IOException(
+                        "缓存落位失败(rename): " + destFile.getAbsolutePath());
+            }
             return total;
         } catch (Throwable e) {
             // 注意:必须接 Throwable 而非 Exception —— NoSuchMethodError 这类 Error
@@ -988,6 +999,7 @@ public class FnMusicApi implements MusicSourceApi {
                     + " songId=" + songId + " relayMode=" + relayMode
                     + " 目标=" + destFile.getAbsolutePath(), e);
             if (destFile.exists()) destFile.delete();
+            if (partFile != null && partFile.exists()) partFile.delete();
             return -1;
         } finally {
             closeQuietly(fos);
