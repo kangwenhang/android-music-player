@@ -733,7 +733,9 @@ public class CoverLoader {
                 java.util.Arrays.sort(files, new java.util.Comparator<File>() {
                     @Override
                     public int compare(File a, File b) {
-                        return Long.compare(a.lastModified(), b.lastModified());
+                        // 不要用 Long.compare:API 19 才有,车机(API 17)会 NoSuchMethodError
+                        long la = a.lastModified(), lb = b.lastModified();
+                        return la < lb ? -1 : (la == lb ? 0 : 1);
                     }
                 });
                 for (File f : files) {

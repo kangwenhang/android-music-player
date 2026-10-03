@@ -957,7 +957,15 @@ public class FnMusicApi implements MusicSourceApi {
                         + " 302 未带 mode=relay Cookie 时中继链路会失败)");
                 return -1;
             }
-            long contentLength = conn.getContentLengthLong();
+            // 兼容 API 17(车机 4.2.2):getContentLengthLong() 是 API 19 才有的方法,
+            // 低版本运行时抛 NoSuchMethodError —— 它是 Error,catch(Exception) 接不住,
+            // 会导致下载线程静默死亡(表现为"autoCacheSong 开始"后再无任何 成功/失败 日志)。
+            long contentLength;
+            if (android.os.Build.VERSION.SDK_INT >= 19) {
+                contentLength = conn.getContentLengthLong();
+            } else {
+                contentLength = conn.getContentLength(); // int 版,API 1 就有;mp3 远小于 2GB 够用
+            }
             is = conn.getInputStream();
             fos = new FileOutputStream(destFile);
             byte[] buf = new byte[8192];
@@ -972,7 +980,9 @@ public class FnMusicApi implements MusicSourceApi {
             }
             fos.flush();
             return total;
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // 注意:必须接 Throwable 而非 Exception —— NoSuchMethodError 这类 Error
+            // 曾让下载线程静默死亡(日志里"下载请求"之后再无任何输出,根因排查 2026-10-03)
             Log.e(TAG, "downloadFile failed: " + songId, e);
             DownloadDiag.logError("下载异常: url=" + DownloadDiag.safeUrl(urlStr)
                     + " songId=" + songId + " relayMode=" + relayMode

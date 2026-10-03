@@ -23,6 +23,8 @@ public class LrcEntry implements Comparable<LrcEntry> {
 
     @Override
     public int compareTo(LrcEntry another) {
-        return Long.compare(this.time, another.time);
+        // 不要用 Long.compare:API 19 才有,车机(API 17)上会 NoSuchMethodError,
+        // 歌词解析线程会静默死亡(表现为歌词不显示且无任何报错)
+        return this.time < another.time ? -1 : (this.time == another.time ? 0 : 1);
     }
 }

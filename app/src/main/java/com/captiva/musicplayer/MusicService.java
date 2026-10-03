@@ -1070,7 +1070,9 @@ public class MusicService extends Service {
                             prepareAndPlay();
                         }
                     });
-                } catch (Exception e) {
+                } catch (Throwable e) {
+                    // 接 Throwable(不只是 Exception):NoSuchMethodError 这类 Error 曾让
+                    // 下载任务静默死亡、下一条任务照常跑,日志里毫无痕迹(2026-10-03 根因)
                     DownloadDiag.logError("下载后重播异常: " + bean.getTitle(), e);
                     postNextIfCurrent(token);
                 } finally {
@@ -1248,8 +1250,12 @@ public class MusicService extends Service {
                         i.putExtra("streamId", bean.getStreamId());
                         sendBroadcast(i);
                     }
-                } catch (Exception e) {
+                } catch (Throwable e) {
+                    // 接 Throwable(不只是 Exception)并写入 download_debug.log:
+                    // 之前只 Log.w 到 logcat —— NoSuchMethodError(getContentLengthLong,
+                    // API 19+)这类 Error 曾让下载任务无声死亡,车机日志里毫无痕迹
                     Log.w(TAG, "auto cache failed: " + bean.getTitle(), e);
+                    DownloadDiag.logError("自动缓存异常: " + bean.getTitle(), e);
                 } finally {
                     // 无论成功失败都通知界面结束该条的进度条显示(percent=-2)
                     Intent pi = new Intent(ACTION_CACHE_PROGRESS);

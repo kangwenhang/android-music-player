@@ -760,7 +760,14 @@ public class NavidromeApi implements MusicSourceApi {
                 return -1;
             }
 
-            long contentLength = conn.getContentLengthLong();
+            // 兼容 API 17(车机 4.2.2):getContentLengthLong() 是 API 19 才有的方法,
+            // 低版本运行时抛 NoSuchMethodError(Error),会导致下载线程静默死亡。
+            long contentLength;
+            if (android.os.Build.VERSION.SDK_INT >= 19) {
+                contentLength = conn.getContentLengthLong();
+            } else {
+                contentLength = conn.getContentLength(); // int 版,API 1 就有
+            }
             is = conn.getInputStream();
             fos = new FileOutputStream(destFile);
             byte[] buf = new byte[8192];
@@ -776,7 +783,8 @@ public class NavidromeApi implements MusicSourceApi {
             fos.flush();
             Log.d(TAG, "下载完成: " + songId + " -> " + destFile.getName() + " (" + total + " bytes)");
             return total;
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            // 必须接 Throwable:NoSuchMethodError 这类 Error 曾让下载线程静默死亡
             Log.e(TAG, "downloadFile failed: " + songId, e);
             DownloadDiag.logError("下载异常: url=" + DownloadDiag.safeUrl(urlStr)
                     + " songId=" + songId + " 目标=" + destFile.getAbsolutePath()
