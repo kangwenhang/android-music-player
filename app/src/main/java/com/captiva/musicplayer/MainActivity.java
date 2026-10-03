@@ -32,6 +32,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
@@ -183,7 +184,9 @@ public class MainActivity extends AppCompatActivity {
     private int lockedDurationMs = 0;
     /** lockedDurationMs 对应的歌(sid),用于切歌时失效重锁 */
     private String lockedDurationSid = null;
-    private Button btnPrev, btnPlay, btnNext, btnMode, btnFav;
+    private Button btnPrev, btnPlay, btnNext, btnFav;
+    /** 播放模式按钮(v5.7.366 起为 ImageView:文字"随/顺/单"升级为 Material 图标) */
+    private ImageView btnMode;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
 
@@ -4736,10 +4739,11 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 更新播放模式按钮文字(顺/随/单) */
+    /** 更新播放模式按钮图标(2026-10-04 v5.7.366:文字"随/顺/单"升级为 Material 图标) */
     private void updatePlayModeIcon(PlayMode mode) {
-        btnMode.setText(mode.getShortLabel());
-        btnMode.setCompoundDrawables(null, null, null, null);
+        btnMode.setImageResource(mode.getIconRes());
+        // 无障碍描述随模式更新(ImageView 无文字,读屏靠 contentDescription)
+        btnMode.setContentDescription(mode.getLabel());
     }
 
     /**

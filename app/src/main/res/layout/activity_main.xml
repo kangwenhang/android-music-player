@@ -251,19 +251,20 @@
                 android:paddingRight="4dp">
 
                 <!-- 播放模式(小圆) -->
-                <Button
+                <!-- 【2026-10-04 v5.7.366】文字"随/顺/单"升级为 Material 图标
+                     (Apache 2.0,google/material-design-icons):顺序=箭头、
+                     单曲循环=repeat_one、随机=shuffle;白色 PNG 放
+                     drawable-mdpi(1x)/drawable-xhdpi(2x),由
+                     MainActivity.updatePlayModeIcon 按模式 setImageResource。 -->
+                <ImageView
                     android:id="@+id/btn_mode"
                     android:layout_width="@dimen/btn_circle_size"
                     android:layout_height="@dimen/btn_circle_size"
-                    android:minWidth="0dp"
-                    android:minHeight="0dp"
-                    android:padding="0dp"
-                    android:gravity="center"
+                    android:padding="20dp"
+                    android:scaleType="fitCenter"
                     android:background="@drawable/bg_btn_circle"
-                    android:text=""
-                    android:textColor="@color/btn_text"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
+                    android:src="@drawable/ic_mode_seq"
+                    android:contentDescription="@string/mode_seq" />
 
                 <!-- 上一首(小圆) -->
                 <!-- 【2026-10-04 v5.7.363 光学居中补偿】◀ 字形几何 bbox 虽居中,但墨迹

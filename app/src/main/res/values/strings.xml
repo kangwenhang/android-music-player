@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">科帕奇音乐</string>
+    <string name="mode_seq">顺序播放</string>
+    <string name="mode_one">单曲循环</string>
+    <string name="mode_shuf">随机播放</string>
 </resources>
