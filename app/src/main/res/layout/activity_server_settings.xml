@@ -103,7 +103,8 @@
                 android:paddingLeft="@dimen/search_padding"
                 android:paddingRight="@dimen/search_padding"
                 android:singleLine="true"
-                android:inputType="textUri" />
+                android:inputType="textUri"
+            android:imeOptions="flagNoExtractUi|flagNoFullscreen" />
 
             <!-- 用户名 -->
             <TextView
@@ -126,7 +127,8 @@
                 android:textSize="@dimen/search_text_size"
                 android:paddingLeft="@dimen/search_padding"
                 android:paddingRight="@dimen/search_padding"
-                android:singleLine="true" />
+                android:singleLine="true"
+            android:imeOptions="flagNoExtractUi|flagNoFullscreen" />
 
             <!-- 密码 -->
             <TextView
@@ -150,7 +152,8 @@
                 android:paddingLeft="@dimen/search_padding"
                 android:paddingRight="@dimen/search_padding"
                 android:singleLine="true"
-                android:inputType="textPassword" />
+                android:inputType="textPassword"
+            android:imeOptions="flagNoExtractUi|flagNoFullscreen" />
 
             <!-- 测试结果 -->
             <TextView
@@ -187,7 +190,8 @@
                 android:gravity="center_vertical"
                 android:singleLine="true"
                 android:focusable="false"
-                android:clickable="true" />
+                android:clickable="true"
+            android:imeOptions="flagNoExtractUi|flagNoFullscreen" />
 
             <!-- 本地歌曲目录说明:固定派生为 根目录/本地歌曲(自动创建),与云端歌曲(根目录/服务器子目录)天然隔离,无需设置 -->
             <TextView
@@ -238,7 +242,8 @@
                 android:paddingRight="@dimen/search_padding"
                 android:gravity="center_vertical"
                 android:singleLine="true"
-                android:inputType="number" />
+                android:inputType="number"
+            android:imeOptions="flagNoExtractUi|flagNoFullscreen" />
 
             <!-- 诊断日志目录(测试版专属,正式版不显示) -->
             <LinearLayout
