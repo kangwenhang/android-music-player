@@ -401,8 +401,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      */
     private void requestFilter(final boolean favMode, final FavoriteManager fm) {
         final int gen = ++filterGeneration;
-        // 提交时快照"data 结构版本":dispatch 前若发现变了,说明期间有人补加载/追加过,
-        // 旧 Diff 的基线不再是当前 data,必须重算(见下方 dispatch)。
+        // 提交时快照"data 结构版本"。现在 Diff 一律在主线程按当前 data 现算(见 dispatch),
+        // 不再依赖这个快照决定是否重算;它只用于日志里标注"期间是否发生过补加载",
+        // 方便排查时一眼看出这次过渡有没有撞上滚动补批。
         final int dataVer = dataVersion;
         // 结果日志开关:只有 force 提交(模式切换)才记,取到局部变量后立即复位
         final boolean needLog = logNextFilter;
@@ -413,18 +414,15 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         filterExecutor.execute(new Runnable() {
             @Override
             public void run() {
-                // 1. 后台线程:遍历 fullData 计算过滤结果(避免主线程遍历上千首)
-                final List<MusicBean> oldData;
+                // 1. 后台线程:只做"遍历 fullData 算过滤结果"这件重活(避免主线程遍历上千首)。
+                //    Diff 不在后台算了 —— 见主线程里的说明:它必须基于 dispatch 那一刻
+                //    adapter 真正持有的 data 现算,后台按"提交时快照"算会留下错套窗口。
                 final FilterResult r;
                 synchronized (MusicAdapter.this) {
-                    oldData = new ArrayList<>(data);
                     r = computeFilteredUnsafe(favMode, fm, cloudStarredIds);
                 }
-                // 2. 后台线程:计算 Diff(数据量小,通常 <1ms)
-                final DiffUtil.DiffResult diff =
-                        DiffUtil.calculateDiff(new FilterDiffCallback(oldData, r.firstBatch), false);
                 final long tCompute = System.currentTimeMillis() - t0;
-                // 3. 主线程:提交增量更新
+                // 2. 主线程:现算 Diff + dispatch + swap(全在同一把锁内)
                 mainHandler.post(new Runnable() {
                     @Override
                     public void run() {
@@ -437,31 +435,23 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                             return;
                         }
                         long t1 = System.currentTimeMillis();
-                        DiffUtil.DiffResult diffToApply = diff;
-                        boolean reDiff = false;
-                        if (dataVer != dataVersion) {
-                            // 期间 data 被结构性地补加载过(滚动/高亮触发 ensureLoaded):
-                            // 过滤结果 r.filtered 仍然是对的,只是当初的 Diff 基线
-                            // (提交时的 data 快照)已经不是现在屏幕上这一份。
-                            // 用当前 data 重算一次 Diff 再套用 —— 以前这里是直接丢弃,
-                            // 于是"退出收藏夹"的恢复结果被吃掉,列表一直显示收藏。
-                            reDiff = true;
-                            List<MusicBean> curData;
-                            synchronized (MusicAdapter.this) {
-                                curData = new ArrayList<>(data);
-                            }
-                            // Diff 是 O(n·d),放到锁外算:别在主线程持锁期间做这种遍历,
-                            // 后台过滤线程正拿着同一把锁遍历 fullData,会互相阻塞。
-                            diffToApply = DiffUtil.calculateDiff(
-                                    new FilterDiffCallback(curData, r.firstBatch), false);
-                        }
+                        // 诊断用:提交时的 dataVersion 快照与此刻是否不一致(不一致说明期间有补加载)
+                        boolean reDiff = (dataVer != dataVersion);
                         synchronized (MusicAdapter.this) {
-                            // 关键:dispatch 必须在 swap 之前!
-                            // 此时 adapter.data 仍是「旧列表」,基于旧基线算出的增删位置才正确。
-                            // 若先 swap 再 dispatch,dispatch 时 adapter 已是新列表,
-                            // getItemId(基于新 data 算稳定 ID)会和旧→新过渡的 notify 位置错套,
-                            // 把本该留下的行挤掉 → 表现"第一首下面是第13首"。
-                            // 同一根因已修在 setData(先 dispatchUpdatesTo 再 clear/addAll)。
+                            // ★ 关键(两条必须同时满足,否则会出"第一首下面是第13首"):
+                            //  ① Diff 必须基于「此刻 adapter 真正持有的 data」现算 —— 不能在后台
+                            //     按"提交时的快照"算。从提交到 dispatch 之间,data 可能被
+                            //     loadMore(只往末尾追加、**不**推进 dataVersion)/ensureLoaded/
+                            //     appendData 改过;拿旧快照算出的增删位置会被错套到现在的 data,
+                            //     把本该留下的行整段挤掉(用户截图:序号 1 直接跳到 13)。
+                            //  ② dispatch 必须发生在 swap(data = 新列表)之前 —— 否则 notify 的位置
+                            //     语义针对旧列表,而 adapter 已持新列表(getItemId 也按新 data 算),
+                            //     同样错套。setData 里同一条规则(先 dispatchUpdatesTo 再 clear/addAll)。
+                            // 把「快照 → 算 Diff → dispatch → swap」全部放进同一把锁,
+                            // 彻底消除这个竞态窗口 —— 这是唯一能保证 Position 永远对得上的写法。
+                            List<MusicBean> curData = new ArrayList<>(data);
+                            DiffUtil.DiffResult diffToApply =
+                                    DiffUtil.calculateDiff(new FilterDiffCallback(curData, r.firstBatch), false);
                             diffToApply.dispatchUpdatesTo(MusicAdapter.this);
                             data.clear();
                             data.addAll(r.firstBatch);
@@ -487,11 +477,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                         }
                         long tSwap = System.currentTimeMillis() - t1;
                         long elapsed = System.currentTimeMillis() - t0;
-                        Log.i(TAG, "[applyFilter-async] 遍历+diff=" + tCompute + "ms swap=" + tSwap + "ms"
+                        Log.i(TAG, "[applyFilter-async] 后台遍历=" + tCompute + "ms 主线程diff+swap=" + tSwap + "ms"
                                 + " fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                                 + " loaded=" + r.loadCount + " 总=" + elapsed + "ms");
                         if (PerfLogger.isEnabled()) {
-                            PerfLogger.log("applyFilter", "遍历+diff=" + tCompute + "ms swap=" + tSwap + "ms"
+                            PerfLogger.log("applyFilter", "后台遍历=" + tCompute + "ms 主线程diff+swap=" + tSwap + "ms"
                                     + " fullData=" + fullData.size() + " filtered=" + r.filtered.size() + " " + elapsed + "ms");
                         }
                     }
@@ -585,6 +575,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         loadedCount = end;
         hasMore = loadedCount < filteredData.size();
         if (addedCount > 0) {
+            // 结构性追加:推进 dataVersion —— 与 setData/appendData/ensureLoaded 对齐。
+            // (本轮起 Diff 已在主线程按当前 data 现算,dataVersion 不再决定正确性,
+            //  这里只为让诊断日志里的"重算Diff="如实反映期间是否发生过补批。)
+            dataVersion++;
             notifyItemRangeInserted(start, addedCount);
         }
         isLoading = false;
