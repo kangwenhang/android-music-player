@@ -878,6 +878,16 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return true;
     }
 
+    /**
+     * 当前歌曲是否在服务器收藏集合里(底栏红心的"云端真相")。
+     * 收藏夹过滤用的就是这套 streamId 集合;null 集合 = 尚无云端数据(未拉取/本地模式),
+     * 此时调用方应只看本机 FavoriteManager。
+     */
+    public boolean isCloudStarred(String sid) {
+        Set<String> ids = cloudStarredIds;
+        return ids != null && sid != null && !sid.isEmpty() && ids.contains(sid);
+    }
+
     /** 收藏状态变化后刷新列表显示(增量 diff:仅收藏模式会增删行) */
     public void notifyFavoriteChanged() {
         requestFilter(favoritesMode, pendingFm);

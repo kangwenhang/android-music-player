@@ -1408,6 +1408,8 @@ public class MainActivity extends AppCompatActivity {
                         // 以前这里无条件 filterFavorites,于是把用户刚恢复的"全部歌曲"
                         // 又强行切回收藏夹 —— 表现就是"取消收藏后列表没切回全部歌曲"。
                         adapter.setCloudStarredIds(ids);
+                        // 云端收藏集合更新后,底栏红心可能随之点亮/熄灭(之前要等切歌才刷新)
+                        updateFavoriteButton(service != null ? service.getCurrentMusic() : null);
                         if (!favoritesOnly) {
                             DownloadDiag.log("云端收藏: 用户已退出收藏夹,只更新缓存不动列表");
                             return;
@@ -4568,7 +4570,16 @@ public class MainActivity extends AppCompatActivity {
             btnFav.setTextColor(colorFavInactive);
             return;
         }
+        // 收藏真相有两个来源,取并集(2026-10-03 用户反馈:云端收藏夹里的歌红心没亮):
+        // - 本机 FavoriteManager:在本机点过红心的歌(离线可用);
+        // - 服务器收藏 streamId 集合:云端收藏夹过滤用的那套 —— 以前底栏红心只看
+        //   本机集合,导致"在服务器上已收藏(云端收藏夹里能看到)但本机没点过"的
+        //   歌红心不亮。
         boolean isFav = favoriteManager.isFavorite(bean);
+        if (!isFav && adapter != null
+                && adapter.isCloudStarred(bean.getStreamId())) {
+            isFav = true;
+        }
         btnFav.setText(isFav ? "\u2665" : "\u2661");
         btnFav.setTextColor(isFav ? colorFavActive : colorFavInactive);
     }
