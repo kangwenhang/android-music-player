@@ -43,8 +43,12 @@ public class CacheDebugLog {
      * 目的是车机不接 adb 时也能靠文件排查问题。诊断期结束后正式发布即关闭:
      * 每次播放/切换都会往 U 盘目录写文件,在车机上属于无谓的 I/O 与噪音。
      * 需要重新排查时:把这里改回 true 重新构建即可,调用点无需改动(log 内部短路)。
+     *
+     * 【2026-10-03 晚 打开】诊断期:进度条"圆点与深蓝条速度不一致"排查,
+     * updateProgress 每 2 秒写一行 [进度条](pos/mediaDur/metaDur/locked/secondary/frac),
+     * 车机上装好后播一首歌,导 cache_debug.log(与 download_debug.log 同目录)即可定案。
      */
-    public static final boolean ENABLED = false;
+    public static final boolean ENABLED = true;
 
     private static final String FILE_NAME = "cache_debug.log";
     /** 单文件大小上限(超过即重建),避免长期运行把存储写满 */

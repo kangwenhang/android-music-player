@@ -4766,17 +4766,20 @@ public class MainActivity extends AppCompatActivity {
                 tvTotalTime.setText(MusicBean.formatDuration(sbProgress.getMax()));
                 // 诊断:确认"元数据时长/媒体实测时长/锁定值"三者在真机上是否一致。
                 // 若 locked != mediaDur 说明比例尺仍在被换,圆点会与深蓝条不同步。
-                // 直接走 logcat(CacheDebugLog 总开关是关的,不落盘);每 10 次抽样一次。
+                // 双写:logcat(模拟器/接 adb 时) + cache_debug.log(车机无 adb 时导文件),
+                // 每 10 次 tick(约 2 秒)抽样一次;诊断期结束后两处一起关。
                 if ((progressTick++ % 10) == 0) {
                     long metaDur = (cur != null) ? (long) cur.getDuration() : -1L;
-                    android.util.Log.i("SeekBarDiag", "pos=" + pos
+                    String line = "[进度条] pos=" + pos
                             + " mediaDur=" + dur
                             + " metaDur=" + metaDur
                             + " locked=" + sbProgress.getMax()
                             + " secondary=" + sbProgress.getSecondaryProgress()
                             + " frac=" + String.format("%.3f",
                                     sbProgress.getMax() > 0
-                                            ? (float) pos / sbProgress.getMax() : 0f));
+                                            ? (float) pos / sbProgress.getMax() : 0f);
+                    android.util.Log.i("SeekBarDiag", line);
+                    CacheDebugLog.log(line);
                 }
             }
         }
