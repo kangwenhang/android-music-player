@@ -125,12 +125,12 @@ public interface MusicSourceApi {
     }
 
     /**
-     * 带限速开关的下载:throttle=true 时按 ~100KB/s 限速,让缓存进度条肉眼可见地推进
-     * (测试版 BuildConfig.DEBUG 下由 autoCacheSong 开启;正式版传 false 原速)。
+     * 带限速档位的下载:throttleBps&gt;0 时按 字节/秒 限速(测试版:后台 100KB/s、
+     * 当前播放 400KB/s,见 MusicSyncManager.CACHE_BPS_*;正式版传 0 不限速)。
      * 默认实现不限速,直接委托给无进度版本;真实数据源各自覆写。
      */
     default long downloadFile(String songId, File destFile, DownloadProgressListener listener,
-                              boolean throttle) {
+                              long throttleBps) {
         return downloadFile(songId, destFile);
     }
 }

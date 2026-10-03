@@ -41,6 +41,32 @@ public class MusicSyncManager {
     /** 兜底路径:连续多少页为空才判定"已经取完"(防止单页抖动被误当成结束) */
     private static final int EMPTY_PAGE_TOLERANCE = 3;
 
+    // ==================== 缓存限速档位(仅测试版生效,正式版不限速) ====================
+    // 2026-10-03 用户需求"资源倾斜于当前播放":网速优先满足当前歌曲,预缓存限速。
+    // 后台档 100KB/s(预缓存,进度条可见);优先档 400KB/s(当前播放的歌,缓冲
+    // 建立速度约 25 倍实时播放速率,既优先又不至于让进度条瞬间满格)。
+
+    /** 后台缓存限速:预缓存/批量任务 100KB/s */
+    public static final long CACHE_BPS_BACKGROUND = 100 * 1024;
+
+    /** 当前播放歌曲限速:400KB/s */
+    public static final long CACHE_BPS_PRIORITY = 400 * 1024;
+
+    /** 当前播放歌曲的限速档(测试版 400KB/s;正式版 0 = 不限速) */
+    public static long currentSongThrottleBps() {
+        return BuildConfig.DEBUG ? CACHE_BPS_PRIORITY : 0L;
+    }
+
+    /** 后台预缓存的限速档(测试版 100KB/s;正式版 0 = 不限速) */
+    public static long backgroundThrottleBps() {
+        return BuildConfig.DEBUG ? CACHE_BPS_BACKGROUND : 0L;
+    }
+
+    /** 该歌曲是否正处于下载互斥中(任一队列/代理占用;双队列重试判断用) */
+    public static boolean isCacheInFlight(String sid) {
+        return sid != null && IN_FLIGHT.contains(sid);
+    }
+
     private final Context context;
     private final MusicSourceApi api;
     private final String syncPath;
@@ -195,6 +221,19 @@ public class MusicSyncManager {
     public static boolean autoCacheSong(Context context, MusicSourceApi api,
                                         MusicBean song, String syncPath, long maxBytes,
                                         MusicSourceApi.DownloadProgressListener progressListener) {
+        // 默认后台档(预缓存);当前播放的歌由调用方显式传 currentSongThrottleBps()
+        return autoCacheSong(context, api, song, syncPath, maxBytes, progressListener,
+                backgroundThrottleBps());
+    }
+
+    /**
+     * 带限速档位的自动缓存(当前播放优先架构的核心入口):
+     * throttleBps=0 不限速(正式版);>0 按字节限速(测试版分 后台100KB/优先400KB 两档)。
+     */
+    public static boolean autoCacheSong(Context context, MusicSourceApi api,
+                                        MusicBean song, String syncPath, long maxBytes,
+                                        MusicSourceApi.DownloadProgressListener progressListener,
+                                        long throttleBps) {
         if (context == null || api == null || song == null || syncPath == null
                 || syncPath.isEmpty() || song.getStreamId() == null
                 || song.getStreamId().isEmpty()) {
@@ -211,13 +250,15 @@ public class MusicSyncManager {
         // 并发保护:同一首歌只允许一个下载在跑。
         // 否则"播放时自动缓存"与"播放失败后下载重播"会同时写同一个目标文件,
         // 两个输入流交叉写盘 → 文件损坏,后续 file.exists() 判定为已缓存却播不了。
+        // (双队列后该互斥更关键:优先队列与后台队列可能同时想下同一首。)
         final String sid = song.getStreamId();
         if (!IN_FLIGHT.add(sid)) {
             DownloadDiag.log("autoCacheSong 跳过: 同一首正在下载中 " + song.getTitle());
             return false;
         }
         try {
-            return autoCacheSongLocked(context, api, song, syncPath, maxBytes, progressListener);
+            return autoCacheSongLocked(context, api, song, syncPath, maxBytes,
+                    progressListener, throttleBps);
         } finally {
             IN_FLIGHT.remove(sid);
         }
@@ -244,7 +285,8 @@ public class MusicSyncManager {
     /** 真正的下载实现(调用前已确保同一首不在下载中) */
     private static boolean autoCacheSongLocked(Context context, MusicSourceApi api,
                                                MusicBean song, String syncPath, long maxBytes,
-                                               MusicSourceApi.DownloadProgressListener progressListener) {
+                                               MusicSourceApi.DownloadProgressListener progressListener,
+                                               long throttleBps) {
         File target = buildLocalFile(song, syncPath);
         if (target.exists() && target.length() > 1024) {
             return true; // 已缓存,无需重复下载
@@ -256,12 +298,12 @@ public class MusicSyncManager {
             }
         }
         DownloadDiag.log("autoCacheSong 开始: " + song.getTitle()
-                + " -> " + target.getAbsolutePath());
-        // 缓存限速:仅测试版(BuildConfig.DEBUG,即 CI 的 -pre 包)启用 ~100KB/s,
-        // 让缓存进度条肉眼可见地推进;正式版(assembleRelease)throttle=false 原速下载。
+                + " -> " + target.getAbsolutePath()
+                + " 限速=" + (throttleBps > 0 ? throttleBps / 1024 + "KB/s" : "无"));
+        // 限速档位由调用方决定:当前播放的歌走优先档(400KB/s),预缓存走后台档(100KB/s);
+        // 正式版(BuildConfig.DEBUG=false)两档都是 0 = 不限速。
         // 手动全量同步走 2 参 downloadFile 重载,不受限速影响。
-        long bytes = api.downloadFile(song.getStreamId(), target, progressListener,
-                BuildConfig.DEBUG);
+        long bytes = api.downloadFile(song.getStreamId(), target, progressListener, throttleBps);
         if (bytes <= 0) {
             DownloadDiag.log("autoCacheSong 下载失败(返回 " + bytes + "): " + song.getTitle()
                     + " 详细原因见上方 download 记录");

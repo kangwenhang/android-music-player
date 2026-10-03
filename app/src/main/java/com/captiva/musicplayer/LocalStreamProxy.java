@@ -68,9 +68,6 @@ public final class LocalStreamProxy {
     private static final int PORT_TRIES = 20;
     private static final int MAX_REDIRECTS = 5;
 
-    /** 缓存限速(仅测试版 BuildConfig.DEBUG 生效):~100KB/s,让进度条肉眼可见地推进 */
-    static final long THROTTLE_BPS = 100 * 1024;
-
     private static final String TAG = "LocalStreamProxy";
 
     private volatile ServerSocket server;
@@ -348,10 +345,11 @@ public final class LocalStreamProxy {
                     out = new FileOutputStream(st.partFile, append);
                     byte[] buf = new byte[16 * 1024];
                     long pos = start;
-                    // 限速(仅测试版):~100KB/s 让缓存进度条肉眼可见;128kbps MP3 实时
-                    // 播放仅需 ~16KB/s,限速后仍有 6 倍余量,边下边播不会因限速卡顿;
-                    // seek 到未下载区间时的等待与不限速时一致(等下载推进)。
-                    final boolean throttle = BuildConfig.DEBUG;
+                    // 限速(仅测试版):代理服务的是**当前播放的歌**,走优先档 400KB/s
+                    // (资源倾斜于当前播放,2026-10-03 用户需求;预缓存才用 100KB/s 后台档)。
+                    // 播放实时仅需 ~16KB/s,400KB/s 约 25 倍余量, seek 追赶也快;
+                    // 进度条仍可见(4MB 歌约 10 秒走完缓冲段)。
+                    final long throttleBps = MusicSyncManager.currentSongThrottleBps();
                     final long throttleStart = System.currentTimeMillis();
                     long written = 0;
                     int n;
@@ -360,10 +358,10 @@ public final class LocalStreamProxy {
                         out.flush();   // flush 后才推进 cachedBytes,保证读线程永远读到已完整落盘的数据
                         pos += n;
                         written += n;
-                        if (throttle) {
+                        if (throttleBps > 0) {
                             // 按"本次已写字节 ÷ 速率"与实际耗时之差 sleep;单次最多睡 400ms,
                             // 保证中断仍有响应
-                            long want = written * 1000 / THROTTLE_BPS;
+                            long want = written * 1000 / throttleBps;
                             long elapsed = System.currentTimeMillis() - throttleStart;
                             if (want > elapsed) {
                                 try {

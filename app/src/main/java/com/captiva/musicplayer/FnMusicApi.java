@@ -913,21 +913,19 @@ public class FnMusicApi implements MusicSourceApi {
     @Override
     public long downloadFile(String songId, File destFile,
                              MusicSourceApi.DownloadProgressListener listener) {
-        return downloadFile(songId, destFile, listener, false);
+        return downloadFile(songId, destFile, listener, 0L);
     }
 
-    /** 缓存限速(仅调用方显式开启时生效):~100KB/s,让缓存进度条肉眼可见地推进 */
-    static final long THROTTLE_BPS = 100 * 1024;
-
     /**
-     * 带限速开关的下载(覆写 MusicSourceApi 的 default 4 参版本)。
-     * throttle=true 时按 THROTTLE_BPS 限速 —— 用于播放时缓存/预缓存(测试版)，
+     * 带限速档位的下载(覆写 MusicSourceApi 的 default 4 参版本)。
+     * throttleBps&gt;0 时按 字节/秒 限速 —— 当前播放的歌走优先档(400KB/s),
+     * 预缓存走后台档(100KB/s),正式版 0 = 不限速;
      * 手动全量同步走 2/3 参数重载,不受限速影响。
      */
     @Override
     public long downloadFile(String songId, File destFile,
                              MusicSourceApi.DownloadProgressListener listener,
-                             boolean throttle) {
+                             long throttleBps) {
         if (songId == null || songId.isEmpty() || destFile == null) return -1;
         if (ensureToken() == null) {
             DownloadDiag.log("飞牛下载失败: ensureToken() 为空(登录态失效,"
@@ -995,10 +993,10 @@ public class FnMusicApi implements MusicSourceApi {
             while ((len = is.read(buf)) != -1) {
                 fos.write(buf, 0, len);
                 total += len;
-                if (throttle) {
+                if (throttleBps > 0) {
                     // 限速:按"本次已写字节 ÷ 速率"与实际耗时之差 sleep;单次最多睡 400ms,
-                    // 保证取消/中断仍有响应。100KB/s 下每 8KB 一片,进度条平滑推进。
-                    long want = total * 1000 / THROTTLE_BPS;
+                    // 保证取消/中断仍有响应
+                    long want = total * 1000 / throttleBps;
                     long elapsed = System.currentTimeMillis() - throttleStart;
                     if (want > elapsed) {
                         try {

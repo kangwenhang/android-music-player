@@ -113,8 +113,15 @@ public class MusicService extends Service {
     /** 歌词加载线程池(单线程,可取消,避免Service销毁后线程泄漏) */
     private final ExecutorService lyricsExecutor = Executors.newSingleThreadExecutor();
 
-    /** 自动缓存下载线程池(单线程,串行避免并发打爆服务器与存储) */
+    /** 自动缓存下载线程池(单线程,串行避免并发打爆服务器与存储;预缓存等后台任务) */
     private final ExecutorService cacheExecutor = Executors.newSingleThreadExecutor();
+    /**
+     * 当前播放歌曲的下载线程池(优先队列):当前歌的 播放时缓存/失败重播 在这里
+     * **立即执行**,不排在预缓存任务后面 —— 资源倾斜于当前播放(2026-10-03 用户需求:
+     * 旧单队列下重播下载最坏要等 3 首 × 40 秒预缓存)。与后台队列可并行,同歌互斥
+     * 由 MusicSyncManager.IN_FLIGHT 保证;当前歌限速也用更高的优先档(400KB/s)。
+     */
+    private final ExecutorService priorityCacheExecutor = Executors.newSingleThreadExecutor();
     /** 配置(读取自动缓存开关/配额等) */
     private NavidromeConfig navidromeConfig;
 
@@ -1144,11 +1151,12 @@ public class MusicService extends Service {
             long tC = System.currentTimeMillis();
             maybeAutoCache(bean);
             long tAuto = System.currentTimeMillis() - tC;
-            // 预缓存后三首:非代理路径在当前歌的自动缓存任务之后入队(cacheExecutor 单线程,
-            // 队列顺序保证带宽先给当前歌);代理路径等 onCached 回调后再排队,同样先当前歌。
+            // 预缓存后三首:走后台队列 + 后台限速档(100KB/s),与当前歌的优先队列
+            // 分离,永远不会挡住当前歌的缓存/重播(资源倾斜于当前播放)。
+            // 代理路径等 onCached 回调后再排队,带宽完全让给正在播的歌。
             // 代理路径同时启动进度心跳:边下边播没有 autoCacheSong 的进度回调,
             // 由主线程 ~500ms 轮询代理进度并广播(ACTION_CACHE_PROGRESS),
-            // 界面上同时点亮播放栏缓存条与列表行进度条。
+            // 驱动播放进度条上的淡蓝缓冲段。
             if (viaProxy) {
                 startProxyProgressPoll(bean.getStreamId(), token);
             } else {
@@ -1210,7 +1218,8 @@ public class MusicService extends Service {
      * 同一首的并发下载由 MusicSyncManager.IN_FLIGHT 与"已缓存"检查挡住,不会抢写同一文件。
      */
     private void downloadThenPlay(final MusicBean bean, final int token) {
-        cacheExecutor.submit(new Runnable() {
+        // 当前播放的歌:走优先队列立即执行(资源倾斜于当前播放)
+        priorityCacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
                 try {
@@ -1222,11 +1231,21 @@ public class MusicService extends Service {
                         maxBytes = (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L;
                     }
                     boolean ok = MusicSyncManager.autoCacheSong(
-                            getApplicationContext(), api, bean, syncPath, maxBytes, null);
+                            getApplicationContext(), api, bean, syncPath, maxBytes, null,
+                            MusicSyncManager.currentSongThrottleBps());
                     DownloadDiag.log("下载后重播: autoCacheSong=" + ok + " " + bean.getTitle());
                     if (!ok) {
-                        DownloadDiag.log("下载后重播放弃: 下载未成功 " + bean.getTitle());
-                        postNextIfCurrent(token);
+                        // 双队列后,预缓存(后台队列)可能正巧在下载同一首:IN_FLIGHT 命中
+                        // 导致跳过。等它下完(2 秒后重试):它完成后要么文件已缓存直接
+                        // 重播,要么互斥释放后由本任务自己下载 —— 不再因抢跑而跳歌。
+                        if (MusicSyncManager.isCacheInFlight(bean.getStreamId())) {
+                            DownloadDiag.log("下载后重播: 另一队列正在下载,2 秒后重试 "
+                                    + bean.getTitle());
+                            retryDownloadThenPlay(bean, token);
+                        } else {
+                            DownloadDiag.log("下载后重播放弃: 下载未成功 " + bean.getTitle());
+                            postNextIfCurrent(token);
+                        }
                         return;
                     }
                     java.io.File f = MusicSyncManager.buildLocalFile(bean, syncPath);
@@ -1276,6 +1295,22 @@ public class MusicService extends Service {
         }, 300);
     }
 
+    /**
+     * 下载后重播的延迟重试:另一队列(预缓存)正在下载同一首时,不抢互斥、
+     * 不跳歌,2 秒后再走一次 downloadThenPlay(届时要么已缓存直接重播,
+     * 要么互斥已释放由本任务下载)。仍校验 token,切歌即作废。
+     */
+    private void retryDownloadThenPlay(final MusicBean bean, final int token) {
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (token == playToken) {
+                    downloadThenPlay(bean, token);
+                }
+            }
+        }, 2000);
+    }
+
     /** 在当前播放列表里按 streamId 找 bean(代理缓存回调的登记用) */
     private MusicBean findBeanByStreamId(String sid) {
         if (sid == null) {
@@ -1292,10 +1327,11 @@ public class MusicService extends Service {
     /**
      * 预缓存播放列表中当前歌曲之后的 count 首(只有网络歌占名额,本地歌直接跳过)。
      *
-     * 复用 cacheExecutor 单线程串行队列:autoCacheSong 内部有 已缓存/IN_FLIGHT 判重,
-     * 不会重复下载、不会双写同一文件。触发时机:
-     * - 非代理路径:prepareAndPlay 末尾触发 —— 当前歌的自动缓存任务先入队,
-     *   队列顺序保证带宽先给当前歌;
+     * 走 cacheExecutor 后台队列 + 后台限速档(100KB/s):autoCacheSong 内部有
+     * 已缓存/IN_FLIGHT 判重,不会重复下载、不会双写同一文件;与当前歌的
+     * 优先队列(priorityCacheExecutor)分离,永不挡住当前播放的需求。
+     * 触发时机:
+     * - 非代理路径:prepareAndPlay 末尾触发(当前歌的缓存任务已在优先队列立即执行);
      * - 代理路径:当前歌 onCached 回调触发 —— 边下边播占着带宽,播完才开始预缓存。
      */
     private void preCacheUpcoming(int count) {
@@ -1459,7 +1495,9 @@ public class MusicService extends Service {
         }
         final long maxBytes = navidromeConfig.getAutoCacheMaxMb() > 0
                 ? (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L : 0L;
-        cacheExecutor.submit(new Runnable() {
+        // 当前播放的歌:走优先队列 + 优先限速档(资源倾斜于当前播放);
+        // 预缓存走 cacheExecutor 后台队列 + 后台档,互不排队
+        priorityCacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
                 // 进度节流(三重),避免"每个百分点广播一次"把主线程刷爆:
@@ -1513,7 +1551,8 @@ public class MusicService extends Service {
                 };
                 try {
                     boolean ok = MusicSyncManager.autoCacheSong(
-                            getApplicationContext(), api, bean, syncPath, maxBytes, listener);
+                            getApplicationContext(), api, bean, syncPath, maxBytes, listener,
+                            MusicSyncManager.currentSongThrottleBps());
                     DownloadDiag.log("autoCacheSong result=" + ok + ": " + bean.getTitle());
                     if (ok) {
                         // 即时把当前播放条目标记为本地可用(与手动同步后行为一致)。
@@ -1787,6 +1826,9 @@ public class MusicService extends Service {
         // 取消未完成的自动缓存下载任务
         if (cacheExecutor != null) {
             cacheExecutor.shutdownNow();
+        }
+        if (priorityCacheExecutor != null) {
+            priorityCacheExecutor.shutdownNow();
         }
         // 反注册媒体按键接收器(补充修复:之前缺少此调用)
         try {
