@@ -9,7 +9,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -20,10 +19,8 @@ import androidx.recyclerview.widget.DiffUtil;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -73,8 +70,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     /** 是否显示来源状态点(本地模式下全部是本地歌曲,点无信息量 → 隐藏) */
     private boolean showSourceDot = true;
-    /** 正在按需缓存的歌曲进度表:key=streamId,value=百分比(0-100;-1=总长未知,不定进度) */
-    private final Map<String, Integer> cacheProgress = new HashMap<>();
 
     /** 当前已加载到第几条(分批加载,针对 filteredData) */
     private int loadedCount = 0;
@@ -649,46 +644,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     }
 
     /**
-     * 更新某首歌的按需缓存进度(主线程调用,由缓存进度广播驱动)。
-     * @param percent 0-100;-1=总长未知(不定进度);&lt;0 的其他值表示下载已结束,隐藏进度条
+     * 按 streamId 单独刷新一行(供"云端→本地"来源标识变化时调用)。
+     * (缓存进度已并入播放栏 SeekBar 的缓冲段,行内进度条已移除 —— 2026-10-03 用户决策)
      */
-    public void updateCacheProgress(String streamId, int percent) {
-        if (streamId == null || streamId.isEmpty()) return;
-        Integer old = cacheProgress.get(streamId);
-        if (percent < 0 && percent != -1) {
-            // 下载结束:移除进度并刷新对应行(恢复普通状态)
-            if (old != null) {
-                cacheProgress.remove(streamId);
-                notifyRowProgress(streamId);
-            }
-            return;
-        }
-        if (old != null && old.equals(percent)) return;
-        cacheProgress.put(streamId, percent);
-        notifyRowProgress(streamId);
-    }
-
-    /**
-     * 只刷新进度条那一格(局部刷新)。
-     * 注意与 {@link #refreshRowByStreamId} 的区别:后者是"来源标识 云端→本地"
-     * 这种整行状态变化(下载完成才一次),必须整行重绑。
-     */
-    private void notifyRowProgress(String streamId) {
-        int pos = findRowByStreamId(streamId);
-        if (pos >= 0) {
-            notifyItemChanged(pos, PAYLOAD_CACHE_PROGRESS);
-        }
-    }
-
-    /** 清除某首歌的缓存进度显示(下载完成转本地后调用) */
-    public void clearCacheProgress(String streamId) {
-        if (streamId == null || streamId.isEmpty()) return;
-        if (cacheProgress.remove(streamId) != null) {
-            notifyRowByStreamId(streamId);
-        }
-    }
-
-    /** 按 streamId 单独刷新一行(供"云端→本地"来源标识变化时调用) */
     public void refreshRowByStreamId(String streamId) {
         if (streamId == null || streamId.isEmpty()) {
             return;
@@ -940,9 +898,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private String lastRowSid = null;
     private int lastRowPos = -1;
 
-    /** 局部刷新的 payload 标记:只更新缓存进度条,不重绑整行 */
-    private static final Object PAYLOAD_CACHE_PROGRESS = new Object();
-
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
         long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
@@ -969,19 +924,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         holder.vSource.setBackgroundColor(bean.isNetwork() ? colorSourceNetwork : colorSourceLocal);
         holder.vSource.setVisibility(showSourceDot ? View.VISIBLE : View.GONE);
 
-        // 按需缓存进度条:仅正在下载缓存的歌曲显示
-        String sid = bean.getStreamId();
-        Integer prog = (sid != null && !sid.isEmpty()) ? cacheProgress.get(sid) : null;
-        if (prog != null && bean.isNetwork()) {
-            holder.pbCache.setVisibility(View.VISIBLE);
-            holder.pbCache.setIndeterminate(prog < 0);
-            if (prog >= 0) {
-                holder.pbCache.setProgress(prog);
-            }
-        } else {
-            holder.pbCache.setVisibility(View.GONE);
-        }
-
         // 使用缓存的封面尺寸
         CoverLoader.getInstance().load(bean, holder.ivCover, coverSizeList);
 
@@ -992,37 +934,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("onBind", System.currentTimeMillis() - t0);
-        }
-    }
-
-    /**
-     * 局部刷新:只更新缓存进度条,**不重绑整行**。
-     *
-     * 为什么必须分开:下载进度广播一首歌要连发几十次,走整行重绑就等于
-     * 每 1% 都重新 setText(标题/副标题/序号)+ 重新 setImageBitmap(封面)
-     * —— 封面位图设置是这里最贵的一步,而进度条其实才是唯一变化的控件。
-     * 车机 2 核上,这正是"下载时滚列表明显掉帧"的直接来源。
-     */
-    @Override
-    public void onBindViewHolder(@NonNull VH holder, int position, @NonNull List<Object> payloads) {
-        if (payloads.isEmpty()) {
-            onBindViewHolder(holder, position);
-            return;
-        }
-        if (position < 0 || position >= data.size()) {
-            return;
-        }
-        MusicBean bean = data.get(position);
-        String sid = bean.getStreamId();
-        Integer prog = (sid != null && !sid.isEmpty()) ? cacheProgress.get(sid) : null;
-        if (prog != null && bean.isNetwork()) {
-            holder.pbCache.setVisibility(View.VISIBLE);
-            holder.pbCache.setIndeterminate(prog < 0);
-            if (prog >= 0) {
-                holder.pbCache.setProgress(prog);
-            }
-        } else {
-            holder.pbCache.setVisibility(View.GONE);
         }
     }
 
@@ -1043,7 +954,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         TextView tvTitle;
         TextView tvArtist;
         View vSource;
-        ProgressBar pbCache;
         MusicAdapter adapter;
 
         VH(@NonNull View itemView, MusicAdapter adapter) {
@@ -1054,7 +964,6 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             tvTitle = itemView.findViewById(R.id.tv_title);
             tvArtist = itemView.findViewById(R.id.tv_artist);
             vSource = itemView.findViewById(R.id.v_source);
-            pbCache = itemView.findViewById(R.id.pb_cache);
 
             // 点击监听器只创建一次(避免每次 onBindViewHolder 创建新 lambda → GC)
             itemView.setOnClickListener(new View.OnClickListener() {
