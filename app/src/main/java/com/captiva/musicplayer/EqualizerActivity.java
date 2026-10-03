@@ -10,7 +10,8 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.Switch;
+import android.widget.CompoundButton;
+import android.widget.ToggleButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,7 +30,8 @@ import java.util.List;
  */
 public class EqualizerActivity extends AppCompatActivity {
 
-    private Switch swEnable;
+    // 【2026-10-04 v5.7.373】系统 Switch 在 API 17 渲染不可见,换 ToggleButton(胶囊两态)
+    private CompoundButton swEnable;
     private LinearLayout llPresets;
     private LinearLayout llBands;
     private TextView tvHint;

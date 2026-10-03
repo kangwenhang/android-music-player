@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- EQ 启用开关文字颜色选择器 v5.7.373 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="@color/eq_toggle_text_on" />
+    <item android:color="@color/eq_toggle_text_off" />
+</selector>

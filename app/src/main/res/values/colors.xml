@@ -63,4 +63,7 @@
     <color name="eq_freq_label">#9A9AA0</color>
     <color name="eq_value_label">#4FC3F7</color>
     <color name="eq_hint_text">#6A6A70</color>
+    <!-- EQ 启用开关文字色(开=白,关=中灰) v5.7.373 -->
+    <color name="eq_toggle_text_on">#FFFFFF</color>
+    <color name="eq_toggle_text_off">#9A9AA4</color>
 </resources>
