@@ -870,12 +870,39 @@ public class MusicService extends Service {
                     player.setDataSource(bean.getStreamUrl());
                 }
                 tSetDs = System.currentTimeMillis() - tB;
-            } else if (bean.getUri() != null && !bean.getUri().isEmpty()) {
+            } else if (bean.getUri() != null && bean.getUri().startsWith("content://")) {
+                // MediaStore 扫描出的本地歌:content uri 由应用侧打开 fd,车机可正常播放
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
-            } else if (bean.getData() != null && !bean.getData().isEmpty()) {
-                player.setDataSource(bean.getData());
             } else {
-                return;
+                // 本地文件:应用进程自己打开、把 fd 交给 MediaPlayer。
+                // ★ 不能用 setDataSource(路径) —— 路径方式由 mediaserver(native 服务进程)
+                //   打开文件,车机上 mediaserver 对 /storage/sdcard1(U盘/SD 二级存储)无读权限,
+                //   prepare 直接报 (1,-1011) —— 这就是"缓存成功但不自动重播、重启后才能播"
+                //   的根因(2026-10-03 日志实锤:缓存转换的 bean 播放全失败,重启后同批文件
+                //   经 MediaStore content uri 就能播)。
+                //   应用进程有读写权限(java.io 写入/读取都正常),fd 经 binder 传给
+                //   mediaserver 时由系统 dup,本侧 close 安全。
+                String localPath = (bean.getData() != null && !bean.getData().isEmpty())
+                        ? bean.getData()
+                        : bean.getUri();   // 兼容扫描器回退写入的"路径形式的 uri"
+                if (localPath != null && localPath.startsWith("file://")) {
+                    localPath = localPath.substring("file://".length());
+                }
+                if (localPath == null || localPath.isEmpty()) {
+                    return;
+                }
+                java.io.FileInputStream fis = null;
+                try {
+                    fis = new java.io.FileInputStream(localPath);
+                    player.setDataSource(fis.getFD());
+                } finally {
+                    if (fis != null) {
+                        try {
+                            fis.close();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
             }
             // API 21 之前用 setAudioStreamType
             player.setAudioStreamType(AudioManager.STREAM_MUSIC);
