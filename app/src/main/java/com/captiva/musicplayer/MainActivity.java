@@ -4741,17 +4741,21 @@ public class MainActivity extends AppCompatActivity {
     private int seekbarCalibratedWidth = 0;
 
     /**
-     * 标定进度条填充层行程,使"填充终点 ≡ 圆点中心"全程恒成立
-     * (2026-10-03 v5.7.352,修复"刚开始填充在圆点左侧、快结束跑到右侧")。
+     * 标定进度条三层(轨道/缓冲/主进度)行程,使"填充终点 ≡ 圆点中心"且
+     * "轨道两端 ≡ 圆点行程两端"全程恒成立
+     * (2026-10-03 v5.7.352,修复"刚开始填充在圆点左侧、快结束跑到右侧";
+     * 2026-10-04 v5.7.355,轨道 background 层一并纳入——否则结尾处圆点右侧
+     * 永远剩一段光轨:thumb 行程 9→845 而轨道仍是全宽 0→886)。
      *
      * 背景:thumb 行程由 AbsSeekBar 内部公式决定(实测 center = A + B*frac,
      * 两端 inset 不对称且随设备/密度变化),而填充层默认按 drawable bounds
      * 全宽缩放 —— 两个映射不一致,50% 处交叉,越往两端错得越多。
      *
      * 做法:布局完成后把 progress 置 max / 0 各读一次 thumb 实际圆心,
-     * 得到行程两端 s、e,再用 LayerDrawable.setLayerInset 把 progress 与
-     * secondaryProgress 层的左右 inset 精确设为 (s, W-e) —— 填充层从此与
-     * thumb 用同一线性映射,任何 frac 下填充终点都落在圆点中心。
+     * 得到行程两端 s、e,再用 LayerDrawable.setLayerInset 把 background/
+     * secondaryProgress/progress 三层的左右 inset 精确设为 (s, W-e) ——
+     * 三层从此与 thumb 用同一线性映射:任何 frac 下填充终点都落在圆点中心,
+     * 轨道起点/终点就是圆点起点/终点(圆点两端各露出半个自身宽度,对称)。
      * 拖动定位也随之更准(触摸目标即圆点本身)。
      *
      * 注意:setProgress(0) 可能触发 API 17 的 secondaryProgress 钳制,
@@ -4775,6 +4779,7 @@ public class MainActivity extends AppCompatActivity {
             // 注意:seekbar_progress.xml 里用的是框架 id(@android:id/progress 等),
             // 所以这里必须用 android.R.id 而不是项目 R.id(项目未定义这两个 id,
             // 引用 R.id 会导致编译错误 "cannot find symbol")。
+            int idxBg = indexOfLayerById(ld, android.R.id.background);
             int idxSec = indexOfLayerById(ld, android.R.id.secondaryProgress);
             int idxProg = indexOfLayerById(ld, android.R.id.progress);
             if (idxSec < 0 || idxProg < 0) {
@@ -4795,6 +4800,9 @@ public class MainActivity extends AppCompatActivity {
             if (s < 0 || e < 0 || e <= s + 10 || e > w || s < 0) {
                 return;   // 量出的行程异常,不动 drawable
             }
+            if (idxBg >= 0) {
+                ld.setLayerInset(idxBg, s, 0, w - e, 0);
+            }
             ld.setLayerInset(idxSec, s, 0, w - e, 0);
             ld.setLayerInset(idxProg, s, 0, w - e, 0);
             sbProgress.invalidate();
@@ -4802,7 +4810,8 @@ public class MainActivity extends AppCompatActivity {
             // 标定结果只进 logcat(接 adb 时可查,一次标定仅一行);诊断期已结束,不再落盘
             android.util.Log.i("SeekBarDiag", "[标定] w=" + w
                     + " 起点=" + s + " 终点=" + e
-                    + " 行程=" + (e - s) + " inset(左=" + s + ",右=" + (w - e) + ")");
+                    + " 行程=" + (e - s) + " inset(左=" + s + ",右=" + (w - e) + ")"
+                    + " 含轨道层=" + (idxBg >= 0));
         } catch (Throwable t) {
             // 标定失败不影响播放,维持 XML 默认 inset
         }

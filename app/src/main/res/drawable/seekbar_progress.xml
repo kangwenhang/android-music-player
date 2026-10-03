@@ -7,11 +7,16 @@
      XML 的 seekbar_thumb.xml 并未生效),其行程两端 inset 不对称,固定 XML
      inset 无法精确对齐 —— 现由 MainActivity.calibrateSeekbarFillInsets()
      在布局完成后实测标定(LayerDrawable.setLayerInset)。
-     这里的 9dp(= 18dp/2)只是标定生效前的首帧兜底值;
+
+     2026-10-04 v5.7.355:轨道(background)层一并纳入标定 —— 圆点行程两端
+     与控件边缘不对称,轨道若保持全宽,结尾处圆点右侧会剩一段光轨;
+     标定后三层(轨道/缓冲/主进度)都与圆点行程重合。
+     这里的 9dp(= 18dp/2)只是标定生效前的首帧兜底值,三层一致;
      若调整运行时 thumb 尺寸(18dp),此处需同步。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 背景轨道(保持全宽,作为完整滑轨) -->
-    <item android:id="@android:id/background">
+    <!-- 背景轨道:与圆点行程同宽(标定后),否则结尾处圆点外多出一段光轨 -->
+    <item android:id="@android:id/background"
+          android:left="9dp" android:right="9dp">
         <shape android:shape="rectangle">
             <solid android:color="#2A2A34" />
             <corners android:radius="4dp" />
