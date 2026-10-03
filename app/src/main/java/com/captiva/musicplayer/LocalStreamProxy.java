@@ -197,9 +197,59 @@ public final class LocalStreamProxy {
                 InputStream is = null;
                 HttpURLConnection conn = null;
                 try {
+                    // 缓存目录必须先建好:目标路径含 歌手/专辑 子目录,多半不存在,
+                    // 不建目录直接 open .part 必然 ENOENT(2026-10-03 车机日志实锤:
+                    // "伴虎.mp3.part: open failed: ENOENT" 级联到播放失败)。
+                    // autoCacheSongLocked / downloadFile 都有 mkdirs,唯独代理此前漏了。
+                    File parent = st.partFile.getParentFile();
+                    if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                        throw new IOException("缓存目录创建失败: " + parent.getAbsolutePath());
+                    }
                     long start = st.partFile.exists() ? st.partFile.length() : 0;
                     conn = openUpstream(st, start);
                     int code = conn.getResponseCode();
+                    if (code == 416 && start > 0) {
+                        // 416 = Range 起点越界:.part 是上次进程被杀/中断的残留,
+                        // 长度可能已达总长。若 416 的 Content-Range("bytes */N")
+                        // 标明总长且 start>=总长 → .part 其实已完整,直接落位;
+                        // 否则删掉残留重下(只重试一次,start 归 0)。
+                        String cr = conn.getHeaderField("Content-Range");
+                        long total416 = -1;
+                        if (cr != null) {
+                            int slash = cr.lastIndexOf('/');
+                            if (slash >= 0 && !"*".equals(cr.substring(slash + 1).trim())) {
+                                try {
+                                    total416 = Long.parseLong(cr.substring(slash + 1).trim());
+                                } catch (NumberFormatException ignored) {
+                                }
+                            }
+                        }
+                        conn.disconnect();
+                        conn = null;
+                        if (total416 > 0 && start >= total416) {
+                            File f = st.finalFile;
+                            if (f.exists()) {
+                                f.delete();
+                            }
+                            if (!st.partFile.renameTo(f)) {
+                                throw new IOException("缓存落位失败(rename): " + f.getAbsolutePath());
+                            }
+                            MusicSyncManager.endCache(st.sid);
+                            DownloadDiag.log("边下边播: .part 残留已完整,直接落位 "
+                                    + f.getName() + " " + f.length() + " bytes");
+                            try {
+                                st.cb.onCached(st.sid, f);
+                            } catch (Throwable ignored) {
+                            }
+                            return;
+                        }
+                        DownloadDiag.log("边下边播: .part 残留越界(416),删除重下 start="
+                                + start + " total=" + total416);
+                        st.partFile.delete();
+                        start = 0;
+                        conn = openUpstream(st, 0);
+                        code = conn.getResponseCode();
+                    }
                     if (code != 200 && code != 206) {
                         throw new IOException("上游 HTTP " + code);
                     }
