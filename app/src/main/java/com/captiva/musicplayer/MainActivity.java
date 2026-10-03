@@ -4818,27 +4818,26 @@ public class MainActivity extends AppCompatActivity {
 
         // 同步当前播放状态:从桌面返回时可能已自动切歌,需更新UI
         // onPause 期间 stateReceiver 被注销,自动切歌的广播被错过
+        // 首帧优先:返回前台的第一帧之前,系统一直显示 windowBackground(#16161C 近黑,
+        // 因为后台时窗口 Surface 被系统销毁,回来要先重建)—— onResume 同步段每多干
+        // 10ms 活,这段"黑屏"就多停留 10ms,弱机车机上可感知。所以这里只保留
+        // 毫秒级的轻活,把"歌词重设(LrcView 整体重布局)+ 播放状态刷新"与
+        // scrollToCurrentSong 一起推到首帧之后(晚一帧 ≈16ms,视觉无感)。
         if (service != null && bound) {
-            long t1 = System.currentTimeMillis();
-            int idx = service.getCurrentIndex();
-            updateNowPlaying(idx);
-            Log.i(TAG, "[onResume] updateNowPlaying=" + (System.currentTimeMillis() - t1) + "ms");
-            long t2 = System.currentTimeMillis();
-            updatePlayButton(service.isPlaying());
-            updatePlayModeIcon(service.getPlayMode());
-            Log.i(TAG, "[onResume] updatePlayButton+Mode=" + (System.currentTimeMillis() - t2) + "ms");
-            long t3 = System.currentTimeMillis();
-            lrcView.setLrcList(service.getCurrentLrc());
-            Log.i(TAG, "[onResume] setLrcList=" + (System.currentTimeMillis() - t3) + "ms");
-            // 延迟滚动和高亮到下一帧:scrollToCurrentSong 内部会做 findPositionByBean
-            // (O(n)遍历) + ensureLoaded(多批次加载) + scrollToPositionWithOffset,
-            // 同步执行会阻塞第一帧渲染导致黑屏。post 让第一帧先画出来
             rvList.post(new Runnable() {
                 @Override
                 public void run() {
-                    long t4 = System.currentTimeMillis();
+                    if (service == null || !bound) return;   // post 期间可能已解绑
+                    long t1 = System.currentTimeMillis();
+                    int idx = service.getCurrentIndex();
+                    updateNowPlaying(idx);
+                    updatePlayButton(service.isPlaying());
+                    updatePlayModeIcon(service.getPlayMode());
+                    lrcView.setLrcList(service.getCurrentLrc());
+                    long t2 = System.currentTimeMillis();
                     scrollToCurrentSong();
-                    Log.i(TAG, "[onResume] scrollToCurrentSong(post)=" + (System.currentTimeMillis() - t4) + "ms");
+                    Log.i(TAG, "[onResume] 首帧后刷新(post)=" + (System.currentTimeMillis() - t1) + "ms"
+                            + " 滚动定位=" + (System.currentTimeMillis() - t2) + "ms");
                 }
             });
         }
