@@ -123,4 +123,14 @@ public interface MusicSourceApi {
     default long downloadFile(String songId, File destFile, DownloadProgressListener listener) {
         return downloadFile(songId, destFile);
     }
+
+    /**
+     * 带限速开关的下载:throttle=true 时按 ~100KB/s 限速,让缓存进度条肉眼可见地推进
+     * (测试版 BuildConfig.DEBUG 下由 autoCacheSong 开启;正式版传 false 原速)。
+     * 默认实现不限速,直接委托给无进度版本;真实数据源各自覆写。
+     */
+    default long downloadFile(String songId, File destFile, DownloadProgressListener listener,
+                              boolean throttle) {
+        return downloadFile(songId, destFile);
+    }
 }

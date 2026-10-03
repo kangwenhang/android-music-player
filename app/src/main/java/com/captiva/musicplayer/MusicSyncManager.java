@@ -257,7 +257,11 @@ public class MusicSyncManager {
         }
         DownloadDiag.log("autoCacheSong 开始: " + song.getTitle()
                 + " -> " + target.getAbsolutePath());
-        long bytes = api.downloadFile(song.getStreamId(), target, progressListener);
+        // 缓存限速:仅测试版(BuildConfig.DEBUG,即 CI 的 -pre 包)启用 ~100KB/s,
+        // 让缓存进度条肉眼可见地推进;正式版(assembleRelease)throttle=false 原速下载。
+        // 手动全量同步走 2 参 downloadFile 重载,不受限速影响。
+        long bytes = api.downloadFile(song.getStreamId(), target, progressListener,
+                BuildConfig.DEBUG);
         if (bytes <= 0) {
             DownloadDiag.log("autoCacheSong 下载失败(返回 " + bytes + "): " + song.getTitle()
                     + " 详细原因见上方 download 记录");

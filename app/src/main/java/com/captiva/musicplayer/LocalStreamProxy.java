@@ -68,6 +68,9 @@ public final class LocalStreamProxy {
     private static final int PORT_TRIES = 20;
     private static final int MAX_REDIRECTS = 5;
 
+    /** 缓存限速(仅测试版 BuildConfig.DEBUG 生效):~100KB/s,让进度条肉眼可见地推进 */
+    static final long THROTTLE_BPS = 100 * 1024;
+
     private static final String TAG = "LocalStreamProxy";
 
     private volatile ServerSocket server;
@@ -226,11 +229,31 @@ public final class LocalStreamProxy {
                     out = new FileOutputStream(st.partFile, append);
                     byte[] buf = new byte[16 * 1024];
                     long pos = start;
+                    // 限速(仅测试版):~100KB/s 让缓存进度条肉眼可见;128kbps MP3 实时
+                    // 播放仅需 ~16KB/s,限速后仍有 6 倍余量,边下边播不会因限速卡顿;
+                    // seek 到未下载区间时的等待与不限速时一致(等下载推进)。
+                    final boolean throttle = BuildConfig.DEBUG;
+                    final long throttleStart = System.currentTimeMillis();
+                    long written = 0;
                     int n;
                     while ((n = is.read(buf)) != -1) {
                         out.write(buf, 0, n);
                         out.flush();   // flush 后才推进 cachedBytes,保证读线程永远读到已完整落盘的数据
                         pos += n;
+                        written += n;
+                        if (throttle) {
+                            // 按"本次已写字节 ÷ 速率"与实际耗时之差 sleep;单次最多睡 400ms,
+                            // 保证中断仍有响应
+                            long want = written * 1000 / THROTTLE_BPS;
+                            long elapsed = System.currentTimeMillis() - throttleStart;
+                            if (want > elapsed) {
+                                try {
+                                    Thread.sleep(Math.min(want - elapsed, 400));
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            }
+                        }
                         synchronized (st.lock) {
                             st.cachedBytes = pos;
                             st.lock.notifyAll();
