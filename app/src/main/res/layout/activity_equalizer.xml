@@ -23,15 +23,11 @@
             android:background="@drawable/bg_eq_header"
             android:layout_marginBottom="16dp">
 
-            <Button
-                android:id="@+id/btn_eq_back"
-                android:layout_width="wrap_content"
-                android:layout_height="52dp"
-                android:minWidth="80dp"
-                android:background="@drawable/bg_eq_btn_back"
-                android:text="返回"
-                android:textColor="@color/btn_text"
-                android:textSize="20sp" />
+            <!-- 【2026-10-04 v5.7.375】返回按钮移到右侧(用户要求),左侧 80dp 占位
+                 保持标题居中(与原左侧按钮配平逻辑镜像) -->
+            <View
+                android:layout_width="80dp"
+                android:layout_height="52dp" />
 
             <TextView
                 android:layout_width="0dp"
@@ -43,9 +39,15 @@
                 android:textSize="@dimen/title_text_size"
                 android:textStyle="bold" />
 
-            <View
-                android:layout_width="80dp"
-                android:layout_height="52dp" />
+            <Button
+                android:id="@+id/btn_eq_back"
+                android:layout_width="wrap_content"
+                android:layout_height="52dp"
+                android:minWidth="80dp"
+                android:background="@drawable/bg_eq_btn_back"
+                android:text="返回"
+                android:textColor="@color/btn_text"
+                android:textSize="20sp" />
         </LinearLayout>
 
         <!-- 开关卡片 -->
