@@ -1527,6 +1527,13 @@ public class MainActivity extends AppCompatActivity {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT);
             window.getDecorView().setPadding(0, 0, 0, 0);
+            // 常亮标志:对话框弹出后焦点窗口会切成 dialog 的 window,而 hold-screen
+            // 记账只认焦点窗口 —— 主 Activity 窗口上的 FLAG_KEEP_SCREEN_ON 随即失效,
+            // 空闲超时流程启动:屏幕先"变暗"再"熄屏"。ScreenOnKeeper 的 wake lock
+            // 只兜得住"不熄屏",拦不住"先变暗"这一步,表现为"设置界面开一会儿不点,
+            // 整个界面蒙上一层暗"(点一下才恢复)。给对话框窗口挂同一标志,行为与
+            // 主界面对齐:只要在前台,屏幕保持全亮。
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             // 清除默认 Dialog 背景Drawable(可能带圆角/padding)
             window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF16161C));
         }
