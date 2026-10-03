@@ -1031,6 +1031,12 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         return data.size();
     }
 
+    /** 诊断用:按位置取 bean(越界返回 null) */
+    public MusicBean getItem(int position) {
+        if (position < 0 || position >= data.size()) return null;
+        return data.get(position);
+    }
+
     static class VH extends RecyclerView.ViewHolder {
         TextView tvIndex;
         ImageView ivCover;

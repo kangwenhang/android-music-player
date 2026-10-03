@@ -207,6 +207,8 @@ public class MainActivity extends AppCompatActivity {
     private LyricOffsetManager lyricOffsetManager;
     /** 是否正在只显示收藏(收藏夹模式) */
     private boolean favoritesOnly = false;
+    /** 刚发生过"模式切换(收藏↔全部)":下一次过滤完成时强制清池 + 滚回顶部,纠正 LM 位置塌缩 */
+    private boolean modeSwitchPending = false;
     /**
      * 云端收藏拉取的代次。
      * 拉取是异步的(几十毫秒到几秒),这期间用户可能已经退出收藏夹甚至又进了一次;
@@ -653,6 +655,18 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onFilterComplete() {
                 updateCount();
+                if (modeSwitchPending) {
+                    modeSwitchPending = false;
+                    // 模式切换后强制清掉 RecyclerView 的废弃/缓存 ViewHolder 池,并把列表滚回顶部再触发重布局,
+                    // 避免 LinearLayoutManager 沿用切换前的陈旧布局状态(表现为"第一首下面是第13首"、
+                    // 下滑上滑才正常这类位置塌缩)。这是 320 的 notifyDataSetChanged 补不到的一层。
+                    rvList.getRecycledViewPool().clear();
+                    rvList.scrollToPosition(0);
+                    DownloadDiag.log("[列表] 模式切换: 清池 + 滚顶部");
+                }
+                rvList.postDelayed(new Runnable() {
+                    @Override public void run() { dumpVisibleRows("after-filter"); }
+                }, 300);
             }
         });
         adapter.setOnItemClickListener((position, bean) -> {
@@ -735,6 +749,7 @@ public class MainActivity extends AppCompatActivity {
                     // 立即补一次进度和歌词(补偿滑动期间跳过的更新)
                     updateProgress();
                     updateLrc();
+                    dumpVisibleRows("scroll-idle");
                     LinearLayoutManager lm = (LinearLayoutManager) rvList.getLayoutManager();
                     if (lm == null) return;
                     int firstVisible = lm.findFirstVisibleItemPosition();
@@ -976,6 +991,7 @@ public class MainActivity extends AppCompatActivity {
         btnFavorites.setOnClickListener(v -> {
             long t0 = System.currentTimeMillis();
             favoritesOnly = !favoritesOnly;
+            modeSwitchPending = true;
             if (favoritesOnly) {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn_play);
                 Log.i(TAG, "[FavToggle] 切到收藏模式 localOnlyMode=" + localOnlyMode);
@@ -2814,6 +2830,7 @@ public class MainActivity extends AppCompatActivity {
      * 注意:缓存加载和 MediaStore 扫描都在后台线程,避免阻塞主线程导致点击无响应
      */
     private void loadMusic() {
+        DownloadDiag.log("[BUILD] 321 diag-enabled (含可见行 dump + 模式切换清池滚顶)");
         final String syncPath = navidromeConfig.getCloudDir();
         // 本地模式扫描目录(可在设置中自定义;未设置时 = 根目录/本地文件夹)
         final String localDir = navidromeConfig.getLocalScanPath();
@@ -4443,6 +4460,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ==================== UI 更新 ====================
+
+    /** 诊断用:dump 当前可见行的 槽位→adapter位置→歌曲,定位"第一首下面是第13首"这类位置塌缩 */
+    private void dumpVisibleRows(String tag) {
+        if (rvList == null) return;
+        RecyclerView.LayoutManager lm = rvList.getLayoutManager();
+        if (!(lm instanceof LinearLayoutManager)) return;
+        LinearLayoutManager llm = (LinearLayoutManager) lm;
+        int fv = llm.findFirstVisibleItemPosition();
+        int lv = llm.findLastVisibleItemPosition();
+        StringBuilder sb = new StringBuilder();
+        sb.append("fv=").append(fv).append(" lv=").append(lv)
+          .append(" childCount=").append(rvList.getChildCount());
+        for (int i = 0; i < rvList.getChildCount(); i++) {
+            View v = rvList.getChildAt(i);
+            int ap = rvList.getChildAdapterPosition(v);
+            MusicBean b = (ap >= 0) ? adapter.getItem(ap) : null;
+            sb.append(" | slot").append(i).append(":ap=").append(ap)
+              .append("(").append(b == null ? "null" : b.getTitle()).append(")");
+        }
+        DownloadDiag.log("[VISIBLE] " + tag + " " + sb.toString());
+    }
 
     private void updateCount() {
         int totalCount = adapter.getTotalCount();
