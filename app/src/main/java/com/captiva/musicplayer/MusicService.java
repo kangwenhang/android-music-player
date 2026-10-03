@@ -149,21 +149,35 @@ public class MusicService extends Service {
             } catch (Throwable t) {
                 DownloadDiag.log("边下边播: 缓存登记异常 " + t);
             }
-            // ---- 主线程:UI 状态 + 预缓存 ----
+            // ---- 主线程:UI 状态 + 等待中的重播 + 预缓存 ----
             mainHandler.post(new Runnable() {
                 @Override
                 public void run() {
                     MusicBean cur = getCurrentMusic();
-                    if (cur != null && streamId.equals(cur.getStreamId())
-                            && cur.isNetwork()) {
-                        // 正在播的就是这首歌:原地转为本地歌(下次切回来直接走本地 fd)
-                        cur.setNetwork(false);
-                        cur.setData(finalFile.getAbsolutePath());
-                        cur.setUri(null);
-                        MusicDataHolder.getInstance().setCurrentPlayingMusic(cur);
-                        Intent i = new Intent(ACTION_CACHE_AVAILABILITY_CHANGED);
-                        i.putExtra("streamId", streamId);
-                        sendBroadcast(i);
+                    if (cur != null && streamId.equals(cur.getStreamId())) {
+                        if (cur.isNetwork()) {
+                            // 正在播的就是这首歌:原地转为本地歌(下次切回来直接走本地 fd)
+                            cur.setNetwork(false);
+                            cur.setData(finalFile.getAbsolutePath());
+                            cur.setUri(null);
+                            MusicDataHolder.getInstance().setCurrentPlayingMusic(cur);
+                            Intent i = new Intent(ACTION_CACHE_AVAILABILITY_CHANGED);
+                            i.putExtra("streamId", streamId);
+                            sendBroadcast(i);
+                        }
+                        // 播放失败时登记过"等代理缓存完重播":现在缓存完成,本地重播。
+                        // (典型场景:serve 竞态/瞬时错误导致播放失败,但代理仍在把
+                        // 这首歌拉完 —— 拉完直接重播,不跳歌。)
+                        if (streamId.equals(waitingProxyReplaySid)) {
+                            waitingProxyReplaySid = null;
+                            DownloadDiag.log("边下边播: 缓存完成,触发等待中的重播 "
+                                    + cur.getTitle());
+                            prepareAndPlay();
+                            return;   // 重播路径(!viaProxy)末尾会自己触发预缓存
+                        }
+                    } else if (streamId.equals(waitingProxyReplaySid)) {
+                        // 已经切到别的歌:作废重播意图
+                        waitingProxyReplaySid = null;
                     }
                     // 带宽先给正在播的歌:现在它缓存完了,才开始预缓存后面的歌
                     preCacheUpcoming(3);
@@ -172,15 +186,25 @@ public class MusicService extends Service {
         }
 
         @Override
-        public void onFailed(String streamId, String reason) {
+        public void onFailed(final String streamId, String reason) {
             // 失败只记日志:当前歌由 MediaPlayer 报错走 downloadThenPlay 兜底,
             // 预缓存由下一次播放成功路径触发,这里不抢带宽。
             DownloadDiag.log("边下边播: 缓存失败 sid=" + streamId + " 原因=" + reason);
-            // 广播 percent=-1 清掉界面上的缓存进度条(列表行 + 播放栏),语义同下载失败心跳
+            // 广播 percent=-1 清掉界面上的缓存进度(播放条缓冲段),语义同下载失败心跳
             Intent pi = new Intent(ACTION_CACHE_PROGRESS);
             pi.putExtra("streamId", streamId);
             pi.putExtra("percent", -1);
             sendBroadcast(pi);
+            if (streamId != null && streamId.equals(waitingProxyReplaySid)) {
+                // 等待重播中的歌代理也失败了:作废意图,走跳下一首兜底
+                waitingProxyReplaySid = null;
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        postNextIfCurrent(playToken);
+                    }
+                });
+            }
         }
     };
 
@@ -189,6 +213,11 @@ public class MusicService extends Service {
 
     /** 防止快速切歌导致卡死:记录当前播放请求的唯一标识 */
     private volatile int playToken = 0;
+    /**
+     * 播放失败但该歌的代理仍在缓存时的重播意图(streamId):
+     * onCached 回调里检测到它就自动本地重播;切歌/代理失败时作废。
+     */
+    private volatile String waitingProxyReplaySid;
     /** 待跳转的播放位置(ms),prepareAndPlay完成后seekTo */
     private int pendingSeekPosition = 0;
     /** 切歌防抖:最小间隔(ms),避免连续快速切歌 */
@@ -1011,6 +1040,8 @@ public class MusicService extends Service {
                     }
                     try {
                         isPrepared = true;
+                        // 能正常起播就不再需要"等代理缓存完重播"的意图了
+                        waitingProxyReplaySid = null;
                         // 初始化均衡器(绑定当前 audioSession,必须在 start() 之前)
                         // 这样均衡器才能从第一帧开始生效
                         try {
@@ -1079,6 +1110,16 @@ public class MusicService extends Service {
                     if (token == playToken
                             && currentBean.isNetwork()
                             && currentBean.getStreamUrl() != null) {
+                        // 代理正在缓存这首歌:别再排队 downloadThenPlay(会因 IN_FLIGHT
+                        // 立刻"放弃"并跳歌 —— 2026-10-03 日志实锤的跳歌刷屏来源),
+                        // 改为登记重播意图,等代理缓存完成后由 onCached 自动本地重播。
+                        if (currentBean.getStreamId() != null && LocalStreamProxy.get()
+                                .isDownloading(currentBean.getStreamId())) {
+                            waitingProxyReplaySid = currentBean.getStreamId();
+                            DownloadDiag.log("播放失败: 代理正在缓存 "
+                                    + currentBean.getTitle() + ",等待缓存完成后重播");
+                            return true;
+                        }
                         downloadThenPlay(currentBean, token);
                         return true;
                     }
@@ -1131,6 +1172,14 @@ public class MusicService extends Service {
                     + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
                     + " network=" + bean.isNetwork(), e);
             if (bean.isNetwork() && bean.getStreamUrl() != null) {
+                // 与 onError 路径一致:代理正在缓存就等它完成重播,别排队互踩
+                if (bean.getStreamId() != null
+                        && LocalStreamProxy.get().isDownloading(bean.getStreamId())) {
+                    waitingProxyReplaySid = bean.getStreamId();
+                    DownloadDiag.log("prepareAndPlay 异常: 代理正在缓存 "
+                            + bean.getTitle() + ",等待缓存完成后重播");
+                    return;
+                }
                 // 与 onError 路径一致:下载期间静默等待,不再自动跳下一首
                 downloadThenPlay(bean, token);
                 return;

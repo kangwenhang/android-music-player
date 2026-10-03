@@ -815,6 +815,12 @@ public class NavidromeApi implements MusicSourceApi {
                 }
             }
             fos.flush();
+            // ★ 必须先关写句柄再 rename:FUSE 分区(/storage/emulated)上 rename 一个
+            // 仍打开写的文件会失败 —— 实测 2026-10-03:代理先 close 再 rename 全成功,
+            // downloadFile 未关就 rename 全失败(红颜如霜/红叶狩/红装 三连"缓存落位
+            // 失败",每次白下 40 秒)。finally 里的 close 对 null 安全。
+            fos.close();
+            fos = null;
             // 原子落位:.part → 最终文件(rename 失败按下载失败处理)
             if (destFile.exists()) destFile.delete();
             if (!partFile.renameTo(destFile)) {

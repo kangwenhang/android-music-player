@@ -186,6 +186,15 @@ public final class LocalStreamProxy {
         return true;
     }
 
+    /**
+     * 该 sid 是否有正在进行的下载(供播放失败时判断"代理已在缓存,等它完成即可",
+     * 避免再去排队 downloadThenPlay 被 IN_FLIGHT 秒判放弃、错误跳歌)。
+     */
+    public boolean isDownloading(String sid) {
+        StreamJob st = (sid == null) ? null : jobs.get(sid);
+        return st != null && st.downloading && !st.failed;
+    }
+
     // ==================== 下载线程 ====================
 
     private Runnable download(final StreamJob st) {
@@ -514,8 +523,24 @@ public final class LocalStreamProxy {
         out.write(h.toString().getBytes("ASCII"));
         out.flush();
 
+        // 等待下载线程创建 .part:MediaPlayer 连 127.0.0.1 几乎瞬时,而下载线程要先
+        // mkdirs + 上游 TLS 握手(中继 1~3 秒)才落第一个字节 —— 不等的话 serve 在这里
+        // ENOENT 静默退出、连接关闭,MediaPlayer 同秒报错,表现为"点歌秒失败还跳歌"
+        // (2026-10-03 日志实锤:浪漫曲/回音 注册与播放失败同一秒)。
+        synchronized (st.lock) {
+            long deadline = System.currentTimeMillis() + 15000;
+            while (!st.partFile.exists() && !st.finalFile.exists()
+                    && st.downloading && !st.failed
+                    && System.currentTimeMillis() < deadline) {
+                try {
+                    st.lock.wait(1000);
+                } catch (InterruptedException ignored) {
+                }
+            }
+        }
         // part 文件可能在流式中途被 rename 为最终文件(Linux/Android 下 rename 后旧 fd 仍有效);
-        // 新连接则直接打开存在的那个
+        // 新连接则直接打开存在的那个。两者都不存在(失败/超时)→ RandomAccessFile 抛异常,
+        // 上层 catch 关闭连接 → MediaPlayer 报错走兜底。
         File readFrom = st.partFile.exists() ? st.partFile : st.finalFile;
         RandomAccessFile raf = new RandomAccessFile(readFrom, "r");
         try {
