@@ -112,6 +112,7 @@ public final class LocalStreamProxy {
                 port = BASE_PORT + i;
                 Thread t = new Thread(acceptLoop, "local-stream-proxy");
                 t.setDaemon(true);
+                t.setPriority(Thread.MIN_PRIORITY);   // accept 线程极轻,让出 CPU(2026-10-04)
                 t.start();
                 return true;
             } catch (Throwable ignored) {
@@ -261,6 +262,14 @@ public final class LocalStreamProxy {
         return new Runnable() {
             @Override
             public void run() {
+                // 边下边播下载线程降为次低优先级(2026-10-04):TLS 中继+写盘的
+                // CPU 开销在 2 核车机上会饿死主线程(卡顿 10~18s 的元凶),但
+                // 播放本身是网络/IO 受限,降级对起播速度影响很小
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                } catch (Throwable ignored) {
+                }
                 st.downloading = true;
                 FileOutputStream out = null;
                 InputStream is = null;
@@ -517,6 +526,12 @@ public final class LocalStreamProxy {
 
     /** 解析请求行/Range 头,定位任务后把"正在增长的本地文件"流给 MediaPlayer */
     private void serve(Socket socket) {
+        // 连接服务线程降为次低优先级(2026-10-04),理由同 download()
+        try {
+            android.os.Process.setThreadPriority(
+                    android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+        } catch (Throwable ignored) {
+        }
         try {
             socket.setSoTimeout(30000);   // 仅读请求头用
             java.io.BufferedReader reader = new java.io.BufferedReader(

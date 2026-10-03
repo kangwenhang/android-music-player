@@ -675,6 +675,12 @@ public class MusicService extends Service {
         lyricsExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                // 歌词加载是纯后台任务,降为后台优先级(2026-10-04)
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 List<LrcEntry> lyrics = null;
 
                 // 1. 优先从音乐文件内嵌标签提取歌词
@@ -829,6 +835,12 @@ public class MusicService extends Service {
         lyricsExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                // 歌词加载是纯后台任务,降为后台优先级(2026-10-04)
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 List<LrcEntry> lyrics = null;
 
                 // 0. 先查歌词缓存(断网时可用)
@@ -1222,6 +1234,13 @@ public class MusicService extends Service {
         priorityCacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
+                // 降为次低优先级(2026-10-04):车机 2 核,下载线程满载时主线程
+                // inflate 被饿 10~18s(见 download_debug.log 卡顿堆栈)。
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                } catch (Throwable ignored) {
+                }
                 try {
                     MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
                     String syncPath = navidromeConfig != null
@@ -1360,6 +1379,13 @@ public class MusicService extends Service {
             cacheExecutor.submit(new Runnable() {
                 @Override
                 public void run() {
+                    // 降为后台优先级(2026-10-04):批量预缓存纯后台任务,
+                    // 网络受限速 100KB/s,CPU/IO 不该与主线程抢占
+                    try {
+                        android.os.Process.setThreadPriority(
+                                android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                    } catch (Throwable ignored) {
+                    }
                     try {
                         boolean ok = MusicSyncManager.autoCacheSong(
                                 MusicService.this, api, b, syncPath, maxBytes, null);
@@ -1500,6 +1526,12 @@ public class MusicService extends Service {
         priorityCacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
+                // 降为次低优先级(2026-10-04):不与主线程抢 CPU,理由同上
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                } catch (Throwable ignored) {
+                }
                 // 进度节流(三重),避免"每个百分点广播一次"把主线程刷爆:
                 // 整首下载原本会发上百次广播,每次都要写一行诊断日志 + 重绑一行列表,
                 // 在车机上表现为播放过程中持续卡顿。

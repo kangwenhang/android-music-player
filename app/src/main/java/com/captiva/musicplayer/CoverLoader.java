@@ -245,6 +245,13 @@ public class CoverLoader {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 封面预提取纯后台任务,降为后台优先级(2026-10-04):
+                // U 盘 IO + 解码在 2 核车机上不能与主线程抢 CPU
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 int total = snapshot.size();
                 int cached = 0;
                 int noCover = 0;
@@ -347,6 +354,12 @@ public class CoverLoader {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 同上:内存预加载降为后台优先级(2026-10-04)
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 int total = snapshot.size();
                 int loaded = 0;
                 int alreadyInMem = 0;
@@ -455,6 +468,12 @@ public class CoverLoader {
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                // 封面加载线程降为后台优先级(2026-10-04),不与主线程抢 CPU
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 // 先查磁盘缓存
                 long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
                 Bitmap diskCached = loadFromDiskCache(key, size, false);
@@ -518,6 +537,12 @@ public class CoverLoader {
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                // 降为后台优先级(2026-10-04)
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 // 先查磁盘缓存
                 Bitmap diskCached = loadFromDiskCache(key, size, false);
                 if (diskCached != null) {
@@ -570,6 +595,12 @@ public class CoverLoader {
         executor.execute(new Runnable() {
             @Override
             public void run() {
+                // 降为后台优先级(2026-10-04)
+                try {
+                    android.os.Process.setThreadPriority(
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                } catch (Throwable ignored) {
+                }
                 final Bitmap bmp = loadBitmap(bean, key, size, fullRes);
                 if (bmp != null) {
                     cache.put(key, bmp);
