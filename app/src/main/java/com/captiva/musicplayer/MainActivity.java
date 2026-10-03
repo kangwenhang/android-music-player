@@ -2777,7 +2777,8 @@ public class MainActivity extends AppCompatActivity {
                 if (isPreset) {
                     tvIcon.setText("♪");
                 } else if (item.startsWith("进入均衡器")) {
-                    tvIcon.setText("⚙");
+                    // ⚙(U+2699)实测缺字形,用箭头 →(普通字体必有)
+                    tvIcon.setText("→");
                 } else if (item.startsWith("取消当前歌曲")) {
                     tvIcon.setText("♥");
                 } else {
