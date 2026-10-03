@@ -127,6 +127,28 @@ public final class LocalStreamProxy {
     }
 
     /**
+     * 查询某 sid 的缓存进度百分比:下载中返回 0~99;已完成返回 100;
+     * 总长未知返回 -1(调用方按心跳语义处理);无任务或已失败返回 -100(停止轮询)。
+     * 供 MusicService 以 ~500ms 心跳把边下边播进度广播给界面
+     * (播放栏缓存进度条 + 列表行进度条)。
+     */
+    public int progress(String sid) {
+        StreamJob st = (sid == null) ? null : jobs.get(sid);
+        if (st == null || st.failed) {
+            return -100;
+        }
+        synchronized (st.lock) {
+            if (!st.downloading) {
+                return 100;   // 下载线程已结束且未失败 = 缓存完成(rename 落位)
+            }
+            if (st.total > 0) {
+                return (int) (st.cachedBytes * 100 / st.total);
+            }
+            return -1;
+        }
+    }
+
+    /**
      * 注册一个边下边播任务。
      * - 同一 sid 已在下载中 → 直接复用(返回 true,不重复下载);
      * - 同一 sid 曾失败 → 重新起一个任务;

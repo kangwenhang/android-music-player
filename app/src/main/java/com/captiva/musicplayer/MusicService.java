@@ -176,6 +176,11 @@ public class MusicService extends Service {
             // 失败只记日志:当前歌由 MediaPlayer 报错走 downloadThenPlay 兜底,
             // 预缓存由下一次播放成功路径触发,这里不抢带宽。
             DownloadDiag.log("边下边播: 缓存失败 sid=" + streamId + " 原因=" + reason);
+            // 广播 percent=-1 清掉界面上的缓存进度条(列表行 + 播放栏),语义同下载失败心跳
+            Intent pi = new Intent(ACTION_CACHE_PROGRESS);
+            pi.putExtra("streamId", streamId);
+            pi.putExtra("percent", -1);
+            sendBroadcast(pi);
         }
     };
 
@@ -1100,7 +1105,12 @@ public class MusicService extends Service {
             long tAuto = System.currentTimeMillis() - tC;
             // 预缓存后三首:非代理路径在当前歌的自动缓存任务之后入队(cacheExecutor 单线程,
             // 队列顺序保证带宽先给当前歌);代理路径等 onCached 回调后再排队,同样先当前歌。
-            if (!viaProxy) {
+            // 代理路径同时启动进度心跳:边下边播没有 autoCacheSong 的进度回调,
+            // 由主线程 ~500ms 轮询代理进度并广播(ACTION_CACHE_PROGRESS),
+            // 界面上同时点亮播放栏缓存条与列表行进度条。
+            if (viaProxy) {
+                startProxyProgressPoll(bean.getStreamId(), token);
+            } else {
                 preCacheUpcoming(3);
             }
             // 主线程点击路径耗时汇总:定位"点击未下载歌曲卡一下"这类问题的直接证据
@@ -1280,6 +1290,37 @@ public class MusicService extends Service {
             DownloadDiag.log("预缓存: 已排队 " + queued + " 首(当前位置 "
                     + currentIndex + ",列表 " + playList.size() + " 首)");
         }
+    }
+
+    /**
+     * 代理边下边播期间的进度心跳(主线程 ~500ms 轮询):查询 LocalStreamProxy 的
+     * 缓存进度并发 ACTION_CACHE_PROGRESS 广播,驱动播放栏缓存条与列表行进度条。
+     * 退出条件:切歌(token 变化)、任务结束(完成=100 / 失败或无任务=-100)。
+     * total 未知时 progress 返回 -1,与 autoCacheSong 的心跳语义一致(界面隐藏)。
+     */
+    private void startProxyProgressPoll(final String sid, final int token) {
+        final Runnable[] holder = new Runnable[1];
+        holder[0] = new Runnable() {
+            @Override
+            public void run() {
+                if (token != playToken) {
+                    return;   // 已切歌:过期轮询自动作废
+                }
+                int pct = LocalStreamProxy.get().progress(sid);
+                if (pct == -100) {
+                    return;   // 任务失败或已被清理:停止(失败路径由 onFailed 广播收尾)
+                }
+                Intent pi = new Intent(ACTION_CACHE_PROGRESS);
+                pi.putExtra("streamId", sid);
+                pi.putExtra("percent", pct);
+                sendBroadcast(pi);
+                if (pct < 100) {
+                    mainHandler.postDelayed(this, 500);
+                }
+                // pct>=100:发一次完成进度后停止,后续由 onCached 的可用性广播收尾
+            }
+        };
+        mainHandler.postDelayed(holder[0], 400);
     }
 
     /**

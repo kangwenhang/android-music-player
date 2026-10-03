@@ -169,6 +169,8 @@ public class MainActivity extends AppCompatActivity {
     // UI - 控制区
     private TextView tvNowTitle, tvNowArtist, tvCurrentTime, tvTotalTime;
     private SeekBar sbProgress;
+    /** 播放栏缓存进度条(播放进度条下方,淡色):当前歌曲的边下边播/按需缓存进度 */
+    private android.widget.ProgressBar pbCache;
     private Button btnPrev, btnPlay, btnNext, btnMode, btnFav;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
@@ -363,15 +365,20 @@ public class MainActivity extends AppCompatActivity {
                     adapter.clearCacheProgress(sid);
                     adapter.refreshRowByStreamId(sid);
                 }
+                // 缓存完成:隐藏播放栏缓存条
+                updatePlayerCacheBar(sid, 100);
                 updatePlayingHighlight();
             } else if (MusicService.ACTION_CACHE_PROGRESS.equals(action)) {
                 // 未缓存歌曲正在按需下载:更新对应行的进度条
                 int percent = intent.getIntExtra("percent", -2);
-                CacheDebugLog.log("UI 收到进度广播 streamId=" + intent.getStringExtra("streamId")
+                String sid = intent.getStringExtra("streamId");
+                CacheDebugLog.log("UI 收到进度广播 streamId=" + sid
                         + " percent=" + percent + " adapter=" + (adapter != null));
                 if (adapter != null) {
-                    adapter.updateCacheProgress(intent.getStringExtra("streamId"), percent);
+                    adapter.updateCacheProgress(sid, percent);
                 }
+                // 播放栏缓存条:只有当前正在播的歌才点亮(预缓存别的歌不影响播放栏)
+                updatePlayerCacheBar(sid, percent);
             }
         }
     };
@@ -608,6 +615,7 @@ public class MainActivity extends AppCompatActivity {
         tvCurrentTime = findViewById(R.id.tv_current_time);
         tvTotalTime = findViewById(R.id.tv_total_time);
         sbProgress = findViewById(R.id.sb_progress);
+        pbCache = (android.widget.ProgressBar) findViewById(R.id.pb_cache);
 
         // 修复安卓4.x进度条圆圈黑块(三重修复):
         // 1. 用Bitmap绘制圆圈thumb,保证ARGB_8888正确透明(无ShapeDrawable黑块)
@@ -4521,6 +4529,10 @@ public class MainActivity extends AppCompatActivity {
             tvNowArtist.setText("");
             sbProgress.setMax(0);
             sbProgress.setProgress(0);
+            if (pbCache != null) {
+                pbCache.setProgress(0);
+                pbCache.setVisibility(android.view.View.GONE);
+            }
             tvCurrentTime.setText("00:00");
             tvTotalTime.setText("00:00");
             // 清除歌词区封面
@@ -4534,6 +4546,11 @@ public class MainActivity extends AppCompatActivity {
         tvNowArtist.setText(bean.getArtist());
         sbProgress.setMax((int) bean.getDuration());
         tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
+        // 切歌:先隐藏缓存条(若新歌正在边下边播/按需下载,~500ms 内的进度广播会重新点亮)
+        if (pbCache != null) {
+            pbCache.setProgress(0);
+            pbCache.setVisibility(android.view.View.GONE);
+        }
 
         // 更新底栏收藏按钮状态
         updateFavoriteButton(bean);
@@ -4671,6 +4688,27 @@ public class MainActivity extends AppCompatActivity {
                 tvCurrentTime.setText(MusicBean.formatDuration(pos));
                 tvTotalTime.setText(MusicBean.formatDuration(dur));
             }
+        }
+    }
+
+    /**
+     * 播放栏缓存进度条(播放进度条下方,淡色):仅当进度广播属于当前正在播的歌时更新。
+     * percent 0~99 显示;>=100(完成)或 <0(失败/未知总长)隐藏。
+     * 预缓存其他歌的进度广播不会误点亮播放栏。
+     */
+    private void updatePlayerCacheBar(String sid, int percent) {
+        if (pbCache == null) {
+            return;
+        }
+        MusicBean cur = (service != null) ? service.getCurrentMusic() : null;
+        if (cur == null || sid == null || !sid.equals(cur.getStreamId())) {
+            return;
+        }
+        if (percent >= 0 && percent < 100) {
+            pbCache.setProgress(percent);
+            pbCache.setVisibility(android.view.View.VISIBLE);
+        } else {
+            pbCache.setVisibility(android.view.View.GONE);
         }
     }
 
