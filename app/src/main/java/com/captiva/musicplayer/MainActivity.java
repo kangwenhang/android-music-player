@@ -4683,12 +4683,19 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 播放进度条的"缓存背景"(secondaryProgress,淡蓝)初始化:
-     * - 本地歌(含已缓存完成转本地的)→ 整条铺满淡蓝(2026-10-03 用户要求:
-     *   "已经缓存完成的,就用蓝色的进度条背景,不用恢复灰色");
-     * - 未缓存的云端歌 → 清零,由进度广播(边下边播心跳/按需下载)逐段点亮;
+     * - 本地模式 → 保持灰色背景(本机歌没有"缓存"概念,灰色用于与云端缓存区分,
+     *   2026-10-03 用户要求);
+     * - 云端模式 + 本地歌(含缓存完成转本地的)→ 整条铺满淡蓝;
+     * - 云端模式 + 未缓存的云端歌 → 清零,由进度广播(边下边播心跳/按需下载)逐段点亮;
      * - 同一首歌的暂停/恢复等状态刷新不清零(保留已点亮的缓冲段)。
      */
     private void updateCacheBarBackground(MusicBean bean) {
+        if (localOnlyMode) {
+            // 本地模式:全灰,无缓存语义
+            lastCacheBarSid = null;
+            sbProgress.setSecondaryProgress(0);
+            return;
+        }
         String sid = (bean != null) ? bean.getStreamId() : null;
         if (sid != null && sid.equals(lastCacheBarSid)
                 && sbProgress.getSecondaryProgress() > 0) {
@@ -4710,6 +4717,9 @@ public class MainActivity extends AppCompatActivity {
      * percent>=100 拉满(缓存完成);0~99 按比例;<0(总长未知/失败)清零。
      */
     private void updateCacheSecondary(String sid, int percent) {
+        if (localOnlyMode) {
+            return;   // 本地模式:无缓存语义,进度广播不点亮缓冲段
+        }
         MusicBean cur = (service != null) ? service.getCurrentMusic() : null;
         if (cur == null || sid == null || !sid.equals(cur.getStreamId())) {
             return;
