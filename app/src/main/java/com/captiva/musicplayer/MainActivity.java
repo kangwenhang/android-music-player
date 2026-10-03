@@ -4763,6 +4763,9 @@ public class MainActivity extends AppCompatActivity {
      * 另一坑(2026-10-04 v5.7.356):API 17 setLayerInset 不自动触发子层
      * bounds 重算,必须手动 setBounds 变更一次(见方法体内注释),
      * 否则运行时 inset 全程无效 —— 352~355 即栽在这里。
+     * 第三坑(v5.7.357):右 inset 要按 drawable bounds 宽算(bounds.right - e),
+     * 不能用视图宽 w - e —— ProgressBar 给 drawable 的 bounds 已扣除视图
+     * padding,两者相差 32px,导致三层提前 32px 结束(像素分析定位)。
      */
     private void calibrateSeekbarFillInsets() {
         try {
@@ -4803,11 +4806,21 @@ public class MainActivity extends AppCompatActivity {
             if (s < 0 || e < 0 || e <= s + 10 || e > w || s < 0) {
                 return;   // 量出的行程异常,不动 drawable
             }
+            // 【第二个坑】子层边界是按 drawable 的 bounds(而非视图宽度)缩放的:
+            // ProgressBar.updateDrawableBounds 会把 bounds 设为视图宽减去视图
+            // padding(模拟器实测 bounds 宽 854 = 886 - paddingRight≈32),
+            // 而 thumb 行程公式用的是视图宽 886。右 inset 必须用
+            // bounds.right - e(=854-845=9,与左侧对称),若误用 w - e(=41)
+            // 会让三层全部提前 32px 结束(v5.7.352~356 即栽在这里,像素分析定位)。
+            android.graphics.Rect db = ld.getBounds();
+            int bl = db.left, br = db.right;
+            int insL = s - bl;
+            int insR = br - e;
             if (idxBg >= 0) {
-                ld.setLayerInset(idxBg, s, 0, w - e, 0);
+                ld.setLayerInset(idxBg, insL, 0, insR, 0);
             }
-            ld.setLayerInset(idxSec, s, 0, w - e, 0);
-            ld.setLayerInset(idxProg, s, 0, w - e, 0);
+            ld.setLayerInset(idxSec, insL, 0, insR, 0);
+            ld.setLayerInset(idxProg, insL, 0, insR, 0);
             // 【关键坑】API 17 的 setLayerInset 只更新内部字段,子层边界要等
             // drawable 的 bounds 变化触发 onBoundsChange 才会重算。播放过程中
             // SeekBar 的 drawable bounds 永远不变 → 上面三行 inset 永不生效
@@ -4834,7 +4847,8 @@ public class MainActivity extends AppCompatActivity {
             // 标定结果只进 logcat(接 adb 时可查,一次标定仅一行);诊断期已结束,不再落盘
             android.util.Log.i("SeekBarDiag", "[标定] w=" + w
                     + " 起点=" + s + " 终点=" + e
-                    + " 行程=" + (e - s) + " inset(左=" + s + ",右=" + (w - e) + ")"
+                    + " 行程=" + (e - s) + " bounds右=" + br
+                    + " inset(左=" + insL + ",右=" + insR + ")"
                     + " 含轨道层=" + (idxBg >= 0)
                     + " 复测=" + s2 + ".." + e2);
         } catch (Throwable t) {

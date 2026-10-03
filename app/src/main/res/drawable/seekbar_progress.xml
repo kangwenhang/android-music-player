@@ -8,11 +8,11 @@
      inset 无法精确对齐 —— 现由 MainActivity.calibrateSeekbarFillInsets()
      在布局完成后实测标定(LayerDrawable.setLayerInset)。
 
-     2026-10-04 v5.7.355:轨道(background)层一并纳入标定 —— 圆点行程两端
+     2026-10-04 v5.7.357:轨道(background)层一并纳入标定 —— 圆点行程两端
      与控件边缘不对称,轨道若保持全宽,结尾处圆点右侧会剩一段光轨;
-     标定后三层(轨道/缓冲/主进度)都与圆点行程重合。
-     这里的 9dp(= 18dp/2)只是标定生效前的首帧兜底值,三层一致;
-     若调整运行时 thumb 尺寸(18dp),此处需同步。 -->
+     标定后三层(轨道/缓冲/主进度)都与圆点行程重合。右 inset 以 drawable
+     bounds(已扣视图 padding)为基准,模拟器实测结果 = 左右各 9dp,
+     与这里的兜底值一致。若调整运行时 thumb 尺寸(18dp),此处需同步。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 背景轨道:与圆点行程同宽(标定后),否则结尾处圆点外多出一段光轨 -->
     <item android:id="@android:id/background"
