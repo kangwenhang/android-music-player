@@ -31,6 +31,7 @@ import java.util.List;
 public class EqualizerActivity extends AppCompatActivity {
 
     // 【2026-10-04 v5.7.373】系统 Switch 在 API 17 渲染不可见,换 ToggleButton(胶囊两态)
+    // v5.7.374-pre: 373 的 tag 被占,ToggleButton 修复顺延至本版发布
     private CompoundButton swEnable;
     private LinearLayout llPresets;
     private LinearLayout llBands;
