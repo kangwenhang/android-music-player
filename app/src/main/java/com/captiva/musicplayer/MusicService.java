@@ -1151,7 +1151,7 @@ public class MusicService extends Service {
                 + " streamId=" + bean.getStreamId()
                 + " streamUrl=" + (bean.getStreamUrl() != null ? "有" : "无"));
         if (!bean.isNetwork() || bean.getStreamUrl() == null) {
-            CacheDebugLog.log("跳过缓存: 已是本地歌或流地址为空 network=" + bean.isNetwork()
+            DownloadDiag.log("跳过缓存: 已是本地歌或流地址为空 network=" + bean.isNetwork()
                     + " streamUrl=" + (bean.getStreamUrl() != null));
             return;
         }
@@ -1160,21 +1160,21 @@ public class MusicService extends Service {
             navidromeConfig = new NavidromeConfig(this);
         }
         if (!navidromeConfig.isAutoCacheOnPlay()) {
-            CacheDebugLog.log("跳过缓存: 设置里「播放时自动缓存」为关(请在设置中勾选)");
+            DownloadDiag.log("跳过缓存: 设置里「播放时自动缓存」为关(请在设置中勾选)");
             return;
         }
         final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
         if (api == null) {
-            CacheDebugLog.log("跳过缓存: 数据源 api 为空");
+            DownloadDiag.log("跳过缓存: 数据源 api 为空");
             return;
         }
         if (bean.getStreamId() == null || bean.getStreamId().isEmpty()) {
-            CacheDebugLog.log("跳过缓存: streamId 为空");
+            DownloadDiag.log("跳过缓存: streamId 为空");
             return;
         }
         final String syncPath = navidromeConfig.getCloudDir();
         if (syncPath == null || syncPath.isEmpty()) {
-            CacheDebugLog.log("跳过缓存: 云端目录为空");
+            DownloadDiag.log("跳过缓存: 云端目录为空");
             return;
         }
         final long maxBytes = navidromeConfig.getAutoCacheMaxMb() > 0
@@ -1234,7 +1234,7 @@ public class MusicService extends Service {
                 try {
                     boolean ok = MusicSyncManager.autoCacheSong(
                             getApplicationContext(), api, bean, syncPath, maxBytes, listener);
-                    CacheDebugLog.log("autoCacheSong result=" + ok + ": " + bean.getTitle());
+                    DownloadDiag.log("autoCacheSong result=" + ok + ": " + bean.getTitle());
                     if (ok) {
                         // 即时把当前播放条目标记为本地可用(与手动同步后行为一致)。
                         // bean 是 service.playList 与界面列表共享的同一对象,原地修改即生效。
