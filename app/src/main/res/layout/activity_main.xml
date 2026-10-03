@@ -324,7 +324,7 @@
                     android:padding="0dp"
                     android:gravity="center"
                     android:background="@drawable/bg_btn_circle"
-                    android:text="\u2661"
+                    android:text="\u2665"
                     android:textColor="@color/favorite_inactive"
                     android:textSize="24sp"
                     android:textStyle="bold" />

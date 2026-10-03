@@ -4570,7 +4570,7 @@ public class MainActivity extends AppCompatActivity {
             // 清除歌词区封面
             lrcView.setCoverBitmap(null);
             // 重置收藏按钮
-            btnFav.setText("\u2661");
+            btnFav.setText("\u2665");
             btnFav.setTextColor(colorFavInactive);
             return;
         }
@@ -4603,10 +4603,14 @@ public class MainActivity extends AppCompatActivity {
                 });
     }
 
-    /** 更新底栏收藏按钮图标(根据当前歌曲收藏状态) */
+    /** 更新底栏收藏按钮图标(根据当前歌曲收藏状态)
+     *  2026-10-04 v5.7.361:红心统一用实心字形 ♥(U+2665),状态只靠颜色区分
+     *  (未收藏=灰 favorite_inactive,已收藏=红 favorite_active)。
+     *  原先未收藏用空心字形 ♡(U+2661),车机字体渲染又扁又瘦,用户要求换成
+     *  顶部"收藏"按钮那种圆润的实心红心。 */
     private void updateFavoriteButton(MusicBean bean) {
         if (bean == null || favoriteManager == null) {
-            btnFav.setText("\u2661");
+            btnFav.setText("\u2665");
             btnFav.setTextColor(colorFavInactive);
             return;
         }
@@ -4620,7 +4624,7 @@ public class MainActivity extends AppCompatActivity {
                 && adapter.isCloudStarred(bean.getStreamId())) {
             isFav = true;
         }
-        btnFav.setText(isFav ? "\u2665" : "\u2661");
+        btnFav.setText("\u2665");
         btnFav.setTextColor(isFav ? colorFavActive : colorFavInactive);
     }
 
