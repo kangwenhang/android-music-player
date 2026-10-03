@@ -19,6 +19,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -234,17 +235,24 @@ public class CoverLoader {
         }
         preloading = true;
 
+        // 【2026-10-04 v5.7.359 修复崩溃】传入的是 MainActivity 的活列表引用,
+        // 后台线程遍历期间主线程可能原地改列表(同步/刷新/去重),列表一缩短,
+        // get(i) 就越界 —— 车机实测:IndexOutOfBoundsException: Invalid index
+        // 807, size is 807 (crash_log.txt)。入口先做快照,后台只遍历快照;
+        // 预提取本就是缓存优化,快照略旧无影响(下次同步会再次触发)。
+        final List<MusicBean> snapshot = new ArrayList<>(songs);
+
         new Thread(new Runnable() {
             @Override
             public void run() {
-                int total = songs.size();
+                int total = snapshot.size();
                 int cached = 0;
                 int noCover = 0;
                 int alreadyCached = 0;
                 long startTime = System.currentTimeMillis();
 
                 for (int i = 0; i < total; i++) {
-                    MusicBean bean = songs.get(i);
+                    MusicBean bean = snapshot.get(i);
                     String key = getCacheKey(bean);
                     if (key == null) continue;
 
@@ -306,7 +314,7 @@ public class CoverLoader {
                 preloading = false;
 
                 // 磁盘预提取完成后,启动内存预加载(把磁盘缓存载入内存)
-                preloadAllToMemory(songs);
+                preloadAllToMemory(snapshot);
             }
         }, "CoverPreload").start();
     }
@@ -333,10 +341,13 @@ public class CoverLoader {
         }
         memoryPreloading = true;
 
+        // 同 preloadAllCovers:入口快照,避免活列表被主线程改动导致越界
+        final List<MusicBean> snapshot = new ArrayList<>(songs);
+
         new Thread(new Runnable() {
             @Override
             public void run() {
-                int total = songs.size();
+                int total = snapshot.size();
                 int loaded = 0;
                 int alreadyInMem = 0;
                 int notOnDisk = 0;
@@ -350,7 +361,7 @@ public class CoverLoader {
                         break;
                     }
 
-                    MusicBean bean = songs.get(i);
+                    MusicBean bean = snapshot.get(i);
                     String key = getCacheKey(bean);
                     if (key == null) continue;
 
