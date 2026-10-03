@@ -1200,7 +1200,7 @@ public class MainActivity extends AppCompatActivity {
 
         final long[] offset = {lyricOffsetManager.getOffset(current)};
 
-        SubDialog sd = createSubDialog("🎵", "歌词偏移调整");
+        SubDialog sd = createSubDialog("♪", "歌词偏移调整");
 
         // 歌曲名
         TextView tvSong = new TextView(this);
@@ -1606,7 +1606,9 @@ public class MainActivity extends AppCompatActivity {
             "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"),
             "时长过滤设置", "刷新歌曲列表", "屏幕分辨率与DPI", "清除列表缓存", "关于"
         };
-        final String[] itemIcons = {"♪", "📡", "▶", "⏱", "🔄", "📐", "🗑", "ℹ"};
+        // 图标只用 BMP 老字符(Unicode 1.1 时代):车机 4.2.2 的字体没有 SMP emoji
+        // 区块(1F3xx+),📡⏱🔄📐🗑 这类全显示空白;☁⌛↻▭✕ⓘ 为旧字体必有字形
+        final String[] itemIcons = {"♪", "☁", "▶", "⌛", "↻", "▭", "✕", "ⓘ"};
 
         // 自定义 Adapter:图标 + 文字 + 箭头
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
@@ -1741,7 +1743,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 清除歌曲列表缓存确认对话框(全屏美化) */
     private void showClearCacheDialog() {
-        final SubDialog sd = createSubDialog("🗑", "清除歌曲列表缓存");
+        final SubDialog sd = createSubDialog("✕", "清除歌曲列表缓存");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
@@ -1795,7 +1797,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 屏幕分辨率与DPI信息对话框(全屏美化) */
     private void showScreenInfoDialog() {
-        final SubDialog sd = createSubDialog("📐", "屏幕分辨率与DPI");
+        final SubDialog sd = createSubDialog("▭", "屏幕分辨率与DPI");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
@@ -1873,7 +1875,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 时长过滤设置对话框(全屏美化):自定义输入秒数 */
     private void showDurationFilterDialog() {
-        final SubDialog sd = createSubDialog("⏱", "最小时长过滤(秒)");
+        final SubDialog sd = createSubDialog("⌛", "最小时长过滤(秒)");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
         final int currentMin = navidromeConfig.getMinDuration();
@@ -1942,7 +1944,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 关于对话框(全屏美化) */
     private void showAboutDialog() {
-        final SubDialog sd = createSubDialog("ℹ", "关于");
+        final SubDialog sd = createSubDialog("ⓘ", "关于");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
@@ -2250,7 +2252,7 @@ public class MainActivity extends AppCompatActivity {
     private void showUpdateDialog(final String tag, String name, String body,
                                   final String releaseUrl, final String apkUrl,
                                   String currentVer) {
-        final SubDialog sd = createSubDialog("⬆", "发现新版本");
+        final SubDialog sd = createSubDialog("↑", "发现新版本");
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
@@ -2344,7 +2346,7 @@ public class MainActivity extends AppCompatActivity {
         downloadCancelled = false;
 
         // 创建下载进度对话框
-        SubDialog sd = createSubDialog("⬇", "正在下载更新");
+        SubDialog sd = createSubDialog("↓", "正在下载更新");
 
         // 进度信息卡片
         LinearLayout progressLayout = new LinearLayout(this);
@@ -4704,6 +4706,9 @@ public class MainActivity extends AppCompatActivity {
      * - 本地模式 → 保持灰色背景(本机歌没有"缓存"概念,灰色用于与云端缓存区分,
      *   2026-10-03 用户要求);
      * - 云端模式 + 本地歌(含缓存完成转本地的)→ 整条铺满淡蓝;
+     * - 云端模式 + 已缓存的云端歌 → 整条铺满淡蓝(兜底:走代理播放的歌 currentMusic
+     *   可能仍是 network bean,缓存完成广播拉满淡蓝后,一旦 lastCacheBarSid 守卫
+     *   失效(如界面重建/重进),靠磁盘 stat 恢复状态,否则"后台回来缓冲条变灰";
      * - 云端模式 + 未缓存的云端歌 → 清零,由进度广播(边下边播心跳/按需下载)逐段点亮;
      * - 同一首歌的暂停/恢复等状态刷新不清零(保留已点亮的缓冲段)。
      */
@@ -4721,10 +4726,40 @@ public class MainActivity extends AppCompatActivity {
         }
         lastCacheBarSid = sid;
         int max = sbProgress.getMax();
-        if (bean != null && !bean.isNetwork() && max > 0) {
-            sbProgress.setSecondaryProgress(max);
-        } else {
-            sbProgress.setSecondaryProgress(0);
+        boolean full = false;
+        if (bean != null && max > 0) {
+            if (!bean.isNetwork()) {
+                full = true;   // 本地歌(含缓存完成转本地的)
+            } else if (isCachedOnDisk(bean)) {
+                full = true;   // 云端歌但缓存文件已在(后台回来/界面重建后兜底)
+            }
+        }
+        sbProgress.setSecondaryProgress(full ? max : 0);
+    }
+
+    /**
+     * 云端歌的缓存文件是否已在本地(固定路径 stat,只读、不改 bean)。
+     * 判定与 MusicService.promoteToLocalIfCached 同款(exists && >1KB),
+     * 用于"currentMusic 还是 network bean、但缓存已完成"的场合恢复淡蓝背景。
+     * 调用频率低(仅 lastCacheBarSid 守卫未命中时),一次 FUSE stat 可接受。
+     */
+    private boolean isCachedOnDisk(MusicBean bean) {
+        try {
+            if (bean == null || bean.getStreamId() == null
+                    || bean.getStreamId().isEmpty()) {
+                return false;
+            }
+            if (navidromeConfig == null) {
+                navidromeConfig = new NavidromeConfig(this);
+            }
+            String cloudDir = navidromeConfig.getCloudDir();
+            if (cloudDir == null || cloudDir.isEmpty()) {
+                return false;
+            }
+            java.io.File f = MusicSyncManager.buildLocalFile(bean, cloudDir);
+            return f.exists() && f.length() > 1024;
+        } catch (Throwable t) {
+            return false;
         }
     }
 
