@@ -66,6 +66,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private OnFilterCompleteListener filterCompleteListener;
     private FavoriteManager favoriteManager;
     private int playingIndex = -1;
+    /**
+     * 权威播放 bean:playingIndex 指向的那首歌本身。
+     * 过滤是异步的,"收藏↔全部"切换时入口处的 updatePlayingHighlight() 常跑在
+     * dispatch 之前,它按【旧列表】算出的 index 在换血后会指向另一首歌
+     * (表现为:播白山茶,收藏夹里高亮第32行琵琶曲、全部列表里高亮第5行爱的期限)。
+     * 记住 bean 本身,dispatch 换血后按它重新定位 —— 见 rederivePlayingIndexLocked()。
+     */
+    private MusicBean playingBean;
     private String filterKeyword = "";
 
     /** 是否显示来源状态点(本地模式下全部是本地歌曲,点无信息量 → 隐藏) */
@@ -447,6 +455,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                                 filteredData.addAll(r.filtered);
                                 loadedCount = r.loadCount;
                                 hasMore = loadedCount < filteredData.size();
+                                // 换血后先按权威 bean 重定位,再整表重绑(顺序不能反,
+                                // 否则重绑用的还是 stale index)
+                                rederivePlayingIndexLocked();
                                 notifyDataSetChanged();
                             } else {
                                 // 同列表内过滤(搜索/收藏增删):用增量 Diff。
@@ -462,6 +473,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                                 filteredData.addAll(r.filtered);
                                 loadedCount = r.loadCount;
                                 hasMore = loadedCount < filteredData.size();
+                                // 增量分支同理:换血完成后按权威 bean 重定位高亮
+                                rederivePlayingIndexLocked();
                             }
                         }
                         // 诊断:过滤后确认 data 前 20 个身份键是否连续(1,2,3...),揪出"第一首下面是第13首"
@@ -613,6 +626,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     public void setPlayingIndex(int index) {
         int old = playingIndex;
         playingIndex = index;
+        // 同步权威 bean(后续过滤 dispatch 换血时要按它重新定位):
+        // 所有调用方传进来的 index 都在 filteredData 范围内
+        //(点击位置 ⊆ data ⊆ filteredData 前缀;updatePlayingHighlight 用 findPositionByBean),
+        // 直接按序号取 bean 是安全的。
+        playingBean = (index >= 0 && index < filteredData.size()) ? filteredData.get(index) : null;
         if (old != index) {
             // 确保新位置已加载到 data(搜索/过滤后当前歌曲可能在分批加载范围外)
             if (index >= 0 && index < filteredData.size() && index >= data.size()) {
@@ -621,6 +639,29 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             if (old >= 0 && old < data.size()) notifyItemChanged(old);
             if (index >= 0 && index < data.size()) notifyItemChanged(index);
         }
+    }
+
+    /**
+     * 过滤 dispatch 换血后,按权威播放 bean 重算 playingIndex(须主线程,持有实例锁调用)。
+     *
+     * 修复"收藏↔全部切换后高亮定位错乱":切换入口的 updatePlayingHighlight() 是异步过滤
+     * 提交后 post 出去的,常跑在本次 dispatch **之前** —— 它按旧列表算出 index 并 set 进来,
+     * 换血后这个 index 就指向新列表里同一序号的另一首歌。
+     * 这里在数据换血完成后重新定位,并重绑受影响的两行。
+     * 全表重绑分支(fullSwitch)须在 notifyDataSetChanged **之前**调用,让重绑直接用对 index。
+     */
+    private void rederivePlayingIndexLocked() {
+        if (playingBean == null) {
+            return;
+        }
+        int newIdx = findPositionByBean(playingBean);
+        if (newIdx == playingIndex) {
+            return;
+        }
+        int oldIdx = playingIndex;
+        playingIndex = newIdx;
+        if (oldIdx >= 0 && oldIdx < data.size()) notifyItemChanged(oldIdx);
+        if (newIdx >= 0 && newIdx < data.size()) notifyItemChanged(newIdx);
     }
 
     /** 设置是否显示来源状态点(本地模式=false 隐藏;须主线程调用) */
