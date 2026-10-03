@@ -69,7 +69,7 @@ public final class DownloadDiag {
         }
         try {
             appCtx = ctx.getApplicationContext();
-            String root = new NavidromeConfig(ctx.getApplicationContext()).getSyncPath();
+            String root = resolveLogDir(ctx);
             File dir = new File(root);
             if (!dir.exists()) {
                 dir.mkdirs();
@@ -79,9 +79,51 @@ public final class DownloadDiag {
             if (!headerLogged) {
                 headerLogged = true;
                 log("==== download_debug.log 开始记录 ====");
+                log("日志路径: " + file.getAbsolutePath());
             }
         } catch (Throwable t) {
             Log.w(TAG, "初始化失败(诊断日志不可用)", t);
+        }
+    }
+
+    /**
+     * 解析日志目录:优先用设置里的自定义目录(测试版设置页可填),
+     * 父级不可写或为空时回退到音乐根目录(getSyncPath,默认行为)。
+     */
+    public static String resolveLogDir(Context ctx) {
+        try {
+            NavidromeConfig cfg = new NavidromeConfig(ctx.getApplicationContext());
+            String custom = cfg.getLogDir();
+            if (custom != null && !custom.trim().isEmpty()) {
+                File d = new File(custom.trim());
+                File parent = d.getParentFile();
+                if (parent != null && (parent.canWrite()
+                        || (!parent.exists() && parent.mkdirs()))) {
+                    return custom.trim();
+                }
+                Log.w(TAG, "自定义日志目录不可用,回退音乐根目录: " + custom);
+            }
+        } catch (Throwable ignored) {
+            // 取配置失败就回落默认
+        }
+        return new NavidromeConfig(ctx.getApplicationContext()).getSyncPath();
+    }
+
+    /** 当前日志文件绝对路径(设置页预览/确认落盘位置用;未初始化时返回 null) */
+    public static String getLogFilePath() {
+        return (file != null) ? file.getAbsolutePath() : null;
+    }
+
+    /** 重新初始化:设置页改了目录后即时生效,无需重启(旧日志文件保留在原位) */
+    public static synchronized void reinit(Context ctx) {
+        if (!ENABLED) {
+            return;
+        }
+        inited = false;
+        file = null;
+        init(ctx);
+        if (file != null) {
+            log("日志目录已切换: " + file.getAbsolutePath());
         }
     }
 

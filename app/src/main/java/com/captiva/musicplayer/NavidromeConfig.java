@@ -19,6 +19,7 @@ public class NavidromeConfig {
     private static final String KEY_MIN_DURATION = "min_duration"; // 最小时长(秒)
     private static final String KEY_SCAN_PATH = "scan_path"; // 自定义扫描目录
     private static final String KEY_SYNC_PATH = "sync_path"; // 网络音乐同步下载目录(即音乐根目录)
+    private static final String KEY_LOG_DIR = "diag_log_dir"; // 诊断日志(download_debug.log)自定义存储目录;空=音乐根目录(测试版设置页可填)
     private static final String KEY_AUTO_PLAY = "auto_play"; // 打开软件自动播放
     private static final String KEY_LAST_INDEX = "last_play_index"; // 上次播放索引
     private static final String KEY_LAST_POSITION = "last_play_position"; // 上次播放进度(ms)
@@ -166,6 +167,15 @@ public class NavidromeConfig {
      */
     public String getCloudDir() {
         return new File(getSyncPath(), getCloudSubfolder()).getAbsolutePath();
+    }
+
+    /** 诊断日志目录(自定义则优先,空串表示回落到音乐根目录) */
+    public String getLogDir() {
+        return prefs.getString(KEY_LOG_DIR, "");
+    }
+
+    public void setLogDir(String dir) {
+        prefs.edit().putString(KEY_LOG_DIR, dir == null ? "" : dir).apply();
     }
 
     /** 根据服务器类型派生云端子目录名(文件系统安全、同一服务器稳定) */

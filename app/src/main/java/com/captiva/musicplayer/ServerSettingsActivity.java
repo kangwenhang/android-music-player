@@ -41,6 +41,10 @@ public class ServerSettingsActivity extends AppCompatActivity {
     private RadioGroup rgServerType;
     private RadioButton rbTypeNavidrome, rbTypeFnMusic;
     private NavidromeConfig config;
+    // 诊断日志目录(仅测试版 DEBUG 显示)
+    private View vgLogDir;
+    private EditText etLogDir;
+    private TextView tvLogPath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,6 +71,30 @@ public class ServerSettingsActivity extends AppCompatActivity {
         rbTypeFnMusic = findViewById(R.id.rb_type_fnmusic);
         cbAutoCache = findViewById(R.id.cb_auto_cache);
         etAutoCacheMax = findViewById(R.id.et_auto_cache_max);
+
+        // 诊断日志目录(测试版专属 UI,正式版隐藏)
+        vgLogDir = findViewById(R.id.vg_log_dir);
+        etLogDir = findViewById(R.id.et_log_dir);
+        tvLogPath = findViewById(R.id.tv_log_path);
+        if (BuildConfig.DEBUG) {
+            vgLogDir.setVisibility(View.VISIBLE);
+            etLogDir.setText(config.getLogDir());
+            etLogDir.addTextChangedListener(new android.text.TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    updateLogPathPreview();
+                }
+
+                @Override
+                public void afterTextChanged(android.text.Editable s) {
+                }
+            });
+            updateLogPathPreview();
+        }
 
         // 回填服务器类型
         if (MusicSourceFactory.TYPE_FNMUSIC.equals(config.getServerType())) {
@@ -363,6 +391,25 @@ public class ServerSettingsActivity extends AppCompatActivity {
         setSyncPath(path);
     }
 
+    /** 实时预览 download_debug.log 实际落盘的绝对路径(测试版诊断日志目录设置用) */
+    private void updateLogPathPreview() {
+        if (tvLogPath == null) {
+            return;
+        }
+        String typed = etLogDir.getText().toString().trim();
+        if (!typed.isEmpty() && !typed.startsWith("/")) {
+            tvLogPath.setText("路径必须以 / 开头(留空则使用音乐根目录)");
+            return;
+        }
+        try {
+            String dir = DownloadDiag.resolveLogDir(ServerSettingsActivity.this);
+            File f = new File(dir, "download_debug.log");
+            tvLogPath.setText("实际日志路径: " + f.getAbsolutePath() + "\n(修改后返回主界面即生效)");
+        } catch (Throwable t) {
+            tvLogPath.setText("实际日志路径: 计算失败");
+        }
+    }
+
     // ==================== 测试连接 ====================
 
     /** 测试连接(异步) */
@@ -570,6 +617,12 @@ public class ServerSettingsActivity extends AppCompatActivity {
             maxMb = 0;
         }
         config.setAutoCacheMaxMb(maxMb);
+        // 诊断日志目录(测试版设置项,仅 DEBUG 下 UI 可见;正式版字符串为空=音乐根目录)
+        if (BuildConfig.DEBUG && etLogDir != null) {
+            config.setLogDir(etLogDir.getText().toString().trim());
+            DownloadDiag.reinit(this);
+            updateLogPathPreview();
+        }
         config.setEnabled(true);
 
         // 确保目录存在
