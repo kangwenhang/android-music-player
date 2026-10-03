@@ -4533,7 +4533,7 @@ public class MainActivity extends AppCompatActivity {
         if (bean == null) {
             tvNowTitle.setText("未在播放");
             tvNowArtist.setText("");
-            sbProgress.setMax(0);
+            setProgressMaxSafe(0);
             sbProgress.setProgress(0);
             updateCacheBarBackground(null);
             tvCurrentTime.setText("00:00");
@@ -4547,7 +4547,7 @@ public class MainActivity extends AppCompatActivity {
         }
         tvNowTitle.setText(bean.getTitle());
         tvNowArtist.setText(bean.getArtist());
-        sbProgress.setMax((int) bean.getDuration());
+        setProgressMaxSafe((int) bean.getDuration());
         // 缓存背景:本地歌(含已缓存完成的)整条淡蓝;未缓存的云端歌清零,
         // 由边下边播/按需下载的进度广播逐段点亮(2026-10-03 用户要求)
         updateCacheBarBackground(bean);
@@ -4685,6 +4685,30 @@ public class MainActivity extends AppCompatActivity {
         btnMode.setCompoundDrawables(null, null, null, null);
     }
 
+    /**
+     * 安全地更新进度条 max(2026-10-03 v5.7.346 修复"小圆点与缓冲条速度不一样")。
+     * max 有两个写入来源:元数据 bean.getDuration()(updateNowPlaying)与
+     * 媒体实测 service.getDuration()(updateProgress),同一首歌两者约有 7% 偏差;
+     * 来回 setMax 时 secondaryProgress(淡蓝缓冲段)的绝对值不随 max 迁移,
+     * 已拉满的缓冲段视觉比例会回缩(如 100%→93%),看起来像缓冲条与圆点不同步。
+     * 这里在 max 实际变化时按比例迁移 secondaryProgress,拉满场景自动保持满条。
+     */
+    private void setProgressMaxSafe(int newMax) {
+        if (newMax < 0) {
+            newMax = 0;
+        }
+        int oldMax = sbProgress.getMax();
+        if (oldMax == newMax) {
+            return;   // max 未变:不重写,避免无谓的缓冲段重算
+        }
+        int oldSec = sbProgress.getSecondaryProgress();
+        sbProgress.setMax(newMax);
+        if (oldMax > 0 && oldSec > 0) {
+            int newSec = (int) ((long) oldSec * newMax / oldMax);
+            sbProgress.setSecondaryProgress(newSec);
+        }
+    }
+
     private void updateProgress() {
         if (service == null || !bound) {
             return;
@@ -4693,7 +4717,7 @@ public class MainActivity extends AppCompatActivity {
             int pos = service.getCurrentPosition();
             int dur = service.getDuration();
             if (dur > 0) {
-                sbProgress.setMax(dur);
+                setProgressMaxSafe(dur);
                 sbProgress.setProgress(pos);
                 tvCurrentTime.setText(MusicBean.formatDuration(pos));
                 tvTotalTime.setText(MusicBean.formatDuration(dur));
