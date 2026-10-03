@@ -229,19 +229,17 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         loadedCount = 0;
         FilterResult r = computeFilteredUnsafe(favoritesMode, pendingFm, cloudStarredIds);
-        // 先以「当前(旧)data」为基线算 Diff,在 adapter 仍是旧状态时 dispatch,
-        // 再替换 backing data。若先 swap 再 dispatch,会把按旧列表算出的增删位置错套到
-        // 新列表上,挤掉本该留下的行(表现:"第一首下面是第13首")。
-        List<MusicBean> oldData = new ArrayList<>(data);
+        // 整表替换(扫描/同步/重扫完成):两份数据通常完全不同,与模式切换同理,
+        // 用增量 DiffUtil + 稳定 ID 会复用旧 ViewHolder 导致可见行渲染错位(数据正确但没重绑)。
+        // 直接整表重绑,强制重绑所有可见行(亚毫秒级),杜绝错位;t0 仍用于耗时统计。
         long t0 = System.currentTimeMillis();
-        DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new FilterDiffCallback(oldData, r.firstBatch), false);
-        diff.dispatchUpdatesTo(this);
         data.clear();
         data.addAll(r.firstBatch);
         filteredData.clear();
         filteredData.addAll(r.filtered);
         loadedCount = r.loadCount;
         hasMore = loadedCount < filteredData.size();
+        notifyDataSetChanged();
         long elapsed = System.currentTimeMillis() - t0;
         Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                 + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
@@ -408,6 +406,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 结果日志开关:只有 force 提交(模式切换)才记,取到局部变量后立即复位
         final boolean needLog = logNextFilter;
         logNextFilter = false;
+        // 是否发生了"模式切换"(收藏↔全部):两份列表内容完全不同,切换时必须整表重绑,
+        // 否则稳定 ID + 增量 Diff 会复用旧 ViewHolder 导致"切完第一行下面是第13行"的渲染错位。
+        final boolean fullSwitch = (favMode != favoritesMode);
         favoritesMode = favMode;
         if (fm != null) pendingFm = fm;
         final long t0 = System.currentTimeMillis();
@@ -438,27 +439,35 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                         // 诊断用:提交时的 dataVersion 快照与此刻是否不一致(不一致说明期间有补加载)
                         boolean reDiff = (dataVer != dataVersion);
                         synchronized (MusicAdapter.this) {
-                            // ★ 关键(两条必须同时满足,否则会出"第一首下面是第13首"):
-                            //  ① Diff 必须基于「此刻 adapter 真正持有的 data」现算 —— 不能在后台
-                            //     按"提交时的快照"算。从提交到 dispatch 之间,data 可能被
-                            //     loadMore(只往末尾追加、**不**推进 dataVersion)/ensureLoaded/
-                            //     appendData 改过;拿旧快照算出的增删位置会被错套到现在的 data,
-                            //     把本该留下的行整段挤掉(用户截图:序号 1 直接跳到 13)。
-                            //  ② dispatch 必须发生在 swap(data = 新列表)之前 —— 否则 notify 的位置
-                            //     语义针对旧列表,而 adapter 已持新列表(getItemId 也按新 data 算),
-                            //     同样错套。setData 里同一条规则(先 dispatchUpdatesTo 再 clear/addAll)。
-                            // 把「快照 → 算 Diff → dispatch → swap」全部放进同一把锁,
-                            // 彻底消除这个竞态窗口 —— 这是唯一能保证 Position 永远对得上的写法。
-                            List<MusicBean> curData = new ArrayList<>(data);
-                            DiffUtil.DiffResult diffToApply =
-                                    DiffUtil.calculateDiff(new FilterDiffCallback(curData, r.firstBatch), false);
-                            diffToApply.dispatchUpdatesTo(MusicAdapter.this);
-                            data.clear();
-                            data.addAll(r.firstBatch);
-                            filteredData.clear();
-                            filteredData.addAll(r.filtered);
-                            loadedCount = r.loadCount;
-                            hasMore = loadedCount < filteredData.size();
+                            if (fullSwitch) {
+                                // 模式切换(收藏↔全部):两份列表内容完全不同。若仍走增量 DiffUtil + 稳定 ID,
+                                // RV 会复用旧列表的 ViewHolder 而不重绑可见行,导致"切完第一行下面是第13行"、
+                                // "下滑上滑才正常"这类渲染错位(数据正确,只是没重绑)。
+                                // 直接整表重绑:notifyDataSetChanged 强制 requestLayout + 重绑所有可见行,
+                                // 代价只是重绑十几个可见 item(亚毫秒级),彻底消除错位。
+                                // 滚动补批 / 进度增量更新仍走下面的 DiffUtil 分支。
+                                data.clear();
+                                data.addAll(r.firstBatch);
+                                filteredData.clear();
+                                filteredData.addAll(r.filtered);
+                                loadedCount = r.loadCount;
+                                hasMore = loadedCount < filteredData.size();
+                                notifyDataSetChanged();
+                            } else {
+                                // 同列表内过滤(搜索/收藏增删):用增量 Diff。
+                                // Diff 基于「此刻 adapter 真正持有的 data」现算,且 dispatch 在 swap 之前,
+                                // 同锁内完成,消除旧快照错套窗口(见 319 的根因修复)。
+                                List<MusicBean> curData = new ArrayList<>(data);
+                                DiffUtil.DiffResult diffToApply =
+                                        DiffUtil.calculateDiff(new FilterDiffCallback(curData, r.firstBatch), false);
+                                diffToApply.dispatchUpdatesTo(MusicAdapter.this);
+                                data.clear();
+                                data.addAll(r.firstBatch);
+                                filteredData.clear();
+                                filteredData.addAll(r.filtered);
+                                loadedCount = r.loadCount;
+                                hasMore = loadedCount < filteredData.size();
+                            }
                         }
                         // 诊断:过滤后确认 data 前 20 个身份键是否连续(1,2,3...),揪出"第一首下面是第13首"
                         DownloadDiag.log("[列表诊断] 过滤后: favMode=" + favMode
