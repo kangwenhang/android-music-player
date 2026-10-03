@@ -172,11 +172,19 @@ public class MainActivity extends AppCompatActivity {
     /** 缓存背景去重:同一首歌的暂停/恢复等状态刷新不重置缓冲段(2026-10-03 用户要求) */
     private String lastCacheBarSid;
     /**
-     * 缓冲段是否跟随播放位置(2026-10-03 v5.7.347 用户决策)。
-     * true = 当前这首歌已完整缓存,缓冲段被亮蓝主进度完全覆盖,整条只剩一个速度;
-     * false = 还在边下边播,缓冲段按下载进度领先于圆点(真正有意义的"已下载"提示)。
+     * 进度条 max 的权威时长(毫秒),2026-10-03 v5.7.348。
+     * 背景:max 原有两个写入来源 —— 元数据 bean.getDuration()(updateNowPlaying)
+     * 与媒体实测 service.getDuration()(updateProgress),同一首歌两者有约 7% 偏差,
+     * 交替写入时"圆点/进度条"的比例尺会来回换,表现为圆点与深蓝条速度对不上
+     * (实测 13% 时偏差 +0.3%,92% 时偏差 -3.35%,误差随时长放大)。
+     * 现在:一首歌只认第一次拿到的有效时长并锁定,此后 max 与"总时长"文本
+     * 用同一个值,比例尺恒定;切歌时清空重新锁定。
      */
-    private boolean cacheBarFollowsProgress = false;
+    private int lockedDurationMs = 0;
+    /** lockedDurationMs 对应的歌(sid),用于切歌时失效重锁 */
+    private String lockedDurationSid = null;
+    /** updateProgress 抽样诊断日志的计数器 */
+    private int progressTick = 0;
     private Button btnPrev, btnPlay, btnNext, btnMode, btnFav;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
@@ -370,19 +378,7 @@ public class MainActivity extends AppCompatActivity {
                     // 而实际只有一个格子的状态点(云端→本地)变了。
                     adapter.refreshRowByStreamId(sid);
                 }
-                // 缓存完成:若正是当前在播的歌,切到"缓冲段跟随圆点"模式
-                // (歌已完整在本地,下载进度不再领先于播放位置,2026-10-03 v5.7.347)
-                MusicBean curBean = (service != null) ? service.getCurrentMusic() : null;
-                if (curBean != null && sid != null && sid.equals(curBean.getStreamId())
-                        && !cacheBarFollowsProgress) {
-                    cacheBarFollowsProgress = true;
-                    int maxNow = sbProgress.getMax();
-                    int posNow = (service != null && bound) ? service.getCurrentPosition() : 0;
-                    if (maxNow > 0) {
-                        sbProgress.setSecondaryProgress(
-                                posNow > 0 ? Math.min(posNow, maxNow) : maxNow);
-                    }
-                }
+                // 缓存完成:播放进度条的缓冲段拉满
                 updateCacheSecondary(sid, 100);
                 updatePlayingHighlight();
             } else if (MusicService.ACTION_CACHE_PROGRESS.equals(action)) {
@@ -1128,10 +1124,6 @@ public class MainActivity extends AppCompatActivity {
                 if (fromUser && service != null) {
                     service.seekTo(progress);
                     tvCurrentTime.setText(MusicBean.formatDuration(progress));
-                    if (cacheBarFollowsProgress) {
-                        // 跟随模式下拖动进度条,缓冲段一起走,避免拖动过程中露出淡蓝(2026-10-03 v5.7.347)
-                        seekBar.setSecondaryProgress(progress);
-                    }
                 }
             }
 
@@ -4560,6 +4552,9 @@ public class MainActivity extends AppCompatActivity {
             updateCacheBarBackground(null);
             tvCurrentTime.setText("00:00");
             tvTotalTime.setText("00:00");
+            // 无歌:清掉时长锁定,下一首要重新锁(否则会沿用上一首的尺)
+            lockedDurationMs = 0;
+            lockedDurationSid = null;
             // 清除歌词区封面
             lrcView.setCoverBitmap(null);
             // 重置收藏按钮
@@ -4569,11 +4564,13 @@ public class MainActivity extends AppCompatActivity {
         }
         tvNowTitle.setText(bean.getTitle());
         tvNowArtist.setText(bean.getArtist());
-        setProgressMaxSafe((int) bean.getDuration());
+        // max 与"总时长"文本统一走锁定值(2026-10-03 v5.7.348):
+        // 元数据时长与媒体实测时长有约 7% 偏差,各写各的会让圆点比例尺来回换
+        applyLockedDuration(bean.getStreamId(), (int) bean.getDuration());
         // 缓存背景:本地歌(含已缓存完成的)整条淡蓝;未缓存的云端歌清零,
         // 由边下边播/按需下载的进度广播逐段点亮(2026-10-03 用户要求)
         updateCacheBarBackground(bean);
-        tvTotalTime.setText(MusicBean.formatDuration(bean.getDuration()));
+        tvTotalTime.setText(MusicBean.formatDuration(sbProgress.getMax()));
 
         // 更新底栏收藏按钮状态
         updateFavoriteButton(bean);
@@ -4731,6 +4728,28 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * 锁定并应用进度条 max(2026-10-03 v5.7.348)。
+     * 一首歌只认第一次拿到的有效时长:此后无论 updateNowPlaying(元数据)还是
+     * updateProgress(媒体实测)再来多少不同的时长,都沿用同一个值,
+     * 避免"比例尺"来回换导致圆点与深蓝条速度不一致。
+     * 切歌(sid 变化)时重新锁定;服务未就绪/时长为 0 时不锁,等下一次。
+     */
+    private void applyLockedDuration(String sid, int candidateMs) {
+        if (candidateMs <= 0) {
+            return;   // 时长未知:不锁,等下一次有效值
+        }
+        if (sid == null || !sid.equals(lockedDurationSid)) {
+            // 换歌了:先看看服务端的实测时长,没有再用元数据兜底
+            int mediaMs = (service != null && bound) ? service.getDuration() : 0;
+            lockedDurationMs = (mediaMs > 0) ? mediaMs : candidateMs;
+            lockedDurationSid = sid;
+        } else if (lockedDurationMs <= 0) {
+            lockedDurationMs = candidateMs;
+        }
+        setProgressMaxSafe(lockedDurationMs);
+    }
+
     private void updateProgress() {
         if (service == null || !bound) {
             return;
@@ -4739,33 +4758,42 @@ public class MainActivity extends AppCompatActivity {
             int pos = service.getCurrentPosition();
             int dur = service.getDuration();
             if (dur > 0) {
-                setProgressMaxSafe(dur);
+                MusicBean cur = service.getCurrentMusic();
+                applyLockedDuration((cur != null) ? cur.getStreamId() : null, dur);
                 sbProgress.setProgress(pos);
-                if (cacheBarFollowsProgress) {
-                    // 已缓存:缓冲段跟随圆点,两者完全重叠 → 视觉上只有一个速度
-                    sbProgress.setSecondaryProgress(pos);
-                }
                 tvCurrentTime.setText(MusicBean.formatDuration(pos));
-                tvTotalTime.setText(MusicBean.formatDuration(dur));
+                // 总时长与 max 同源(锁定值),保证"数字"和"圆点"用的是同一把尺
+                tvTotalTime.setText(MusicBean.formatDuration(sbProgress.getMax()));
+                // 诊断:确认"元数据时长/媒体实测时长/锁定值"三者在真机上是否一致。
+                // 若 locked != mediaDur 说明比例尺仍在被换,圆点会与深蓝条不同步。
+                // 抽样打印(约每 40 次一次),避免日志爆炸。
+                if ((progressTick++ % 40) == 0) {
+                    long metaDur = (cur != null) ? (long) cur.getDuration() : -1L;
+                    CacheDebugLog.log("[进度条] pos=" + pos
+                            + " mediaDur=" + dur
+                            + " metaDur=" + metaDur
+                            + " locked=" + sbProgress.getMax()
+                            + " secondary=" + sbProgress.getSecondaryProgress());
+                }
             }
         }
     }
 
     /**
-     * 播放进度条的"缓存背景"(secondaryProgress,淡蓝)策略
-     * (2026-10-03 v5.7.347 用户决策:缓冲段跟随圆点,消除"两个速度"):
-     * - 本地模式 → 灰色背景(本机歌没有"缓存"概念);
-     * - 云端模式 + 本地歌/已缓存的云端歌 → 缓冲段跟随播放位置(见 cacheBarFollowsProgress),
-     *   缓冲段被亮蓝主进度完全覆盖,视觉上整条只剩一个速度,圆点走到哪亮蓝就到哪;
-     * - 云端模式 + 未缓存的云端歌 → 清零,由进度广播(边下边播心跳/按需下载)逐段点亮,
-     *   此时缓冲段领先于圆点,是真正有意义的"已下载"提示;
+     * 播放进度条的"缓存背景"(secondaryProgress,淡蓝)初始化:
+     * - 本地模式 → 保持灰色背景(本机歌没有"缓存"概念,灰色用于与云端缓存区分,
+     *   2026-10-03 用户要求);
+     * - 云端模式 + 本地歌(含缓存完成转本地的)→ 整条铺满淡蓝;
+     * - 云端模式 + 已缓存的云端歌 → 整条铺满淡蓝(兜底:走代理播放的歌 currentMusic
+     *   可能仍是 network bean,缓存完成广播拉满淡蓝后,一旦 lastCacheBarSid 守卫
+     *   失效(如界面重建/重进),靠磁盘 stat 恢复状态,否则"后台回来缓冲条变灰");
+     * - 云端模式 + 未缓存的云端歌 → 清零,由进度广播(边下边播心跳/按需下载)逐段点亮;
      * - 同一首歌的暂停/恢复等状态刷新不清零(保留已点亮的缓冲段)。
      */
     private void updateCacheBarBackground(MusicBean bean) {
         if (localOnlyMode) {
             // 本地模式:全灰,无缓存语义
             lastCacheBarSid = null;
-            cacheBarFollowsProgress = false;
             sbProgress.setSecondaryProgress(0);
             return;
         }
@@ -4776,27 +4804,15 @@ public class MainActivity extends AppCompatActivity {
         }
         lastCacheBarSid = sid;
         int max = sbProgress.getMax();
-        boolean cached = false;
+        boolean full = false;
         if (bean != null && max > 0) {
             if (!bean.isNetwork()) {
-                cached = true;   // 本地歌(含缓存完成转本地的)
+                full = true;   // 本地歌(含缓存完成转本地的)
             } else if (isCachedOnDisk(bean)) {
-                // 云端歌但缓存文件已在(后台回来/界面重建后兜底)
-                cached = true;
+                full = true;   // 云端歌但缓存文件已在(后台回来/界面重建后兜底)
             }
         }
-        cacheBarFollowsProgress = cached;
-        if (!cached) {
-            sbProgress.setSecondaryProgress(0);
-            return;
-        }
-        // 已缓存:缓冲段直接对齐当前播放位置(dur 未知时先给满,max 拿到真实值后
-        // updateProgress 会立即按位置重写,视觉上无闪烁)
-        int pos = 0;
-        if (service != null && bound) {
-            pos = service.getCurrentPosition();
-        }
-        sbProgress.setSecondaryProgress(pos > 0 ? Math.min(pos, max) : max);
+        sbProgress.setSecondaryProgress(full ? max : 0);
     }
 
     /**
@@ -4837,11 +4853,6 @@ public class MainActivity extends AppCompatActivity {
         }
         MusicBean cur = (service != null) ? service.getCurrentMusic() : null;
         if (cur == null || sid == null || !sid.equals(cur.getStreamId())) {
-            return;
-        }
-        if (cacheBarFollowsProgress) {
-            // 已缓存的歌:缓冲段由 updateProgress 跟随圆点,下载心跳不再插手,
-            // 否则 percent>=100 会把缓冲段钉回满格,又变成"两个速度"(2026-10-03 v5.7.347)
             return;
         }
         int max = sbProgress.getMax();
