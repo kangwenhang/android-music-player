@@ -4760,6 +4760,9 @@ public class MainActivity extends AppCompatActivity {
      *
      * 注意:setProgress(0) 可能触发 API 17 的 secondaryProgress 钳制,
      * 标定完恢复原值;标定在首帧绘制前(post)执行,无可见闪烁。
+     * 另一坑(2026-10-04 v5.7.356):API 17 setLayerInset 不自动触发子层
+     * bounds 重算,必须手动 setBounds 变更一次(见方法体内注释),
+     * 否则运行时 inset 全程无效 —— 352~355 即栽在这里。
      */
     private void calibrateSeekbarFillInsets() {
         try {
@@ -4805,13 +4808,35 @@ public class MainActivity extends AppCompatActivity {
             }
             ld.setLayerInset(idxSec, s, 0, w - e, 0);
             ld.setLayerInset(idxProg, s, 0, w - e, 0);
+            // 【关键坑】API 17 的 setLayerInset 只更新内部字段,子层边界要等
+            // drawable 的 bounds 变化触发 onBoundsChange 才会重算。播放过程中
+            // SeekBar 的 drawable bounds 永远不变 → 上面三行 inset 永不生效
+            // (352~355 的"运行时标定"因此全程无效,填充层一直用 XML 兜底 inset)。
+            // 手动触发一次重算:先临时把 bounds 改大 1px 再还原(同步执行,
+            // 两次 onBoundsChange 都会用新 inset 重算子层,且不产生中间帧)。
+            // 注意 getBounds() 返回的是内部 Rect 引用,必须先取值再调用。
+            android.graphics.Rect cb = ld.getBounds();
+            int cl = cb.left, ct = cb.top, cr = cb.right, cbm = cb.bottom;
+            ld.setBounds(cl - 1, ct, cr + 1, cbm);
+            ld.setBounds(cl, ct, cr, cbm);
             sbProgress.invalidate();
             seekbarCalibratedWidth = w;
+            // 复测行程:确认应用 inset 后圆点行程未回移(若回移说明 drawable
+            // padding 参与了行程计算,需迭代;正常应与 s/e 完全一致)
+            sbProgress.setProgress(max);
+            int e2 = thumbCenterX();
+            sbProgress.setProgress(0);
+            int s2 = thumbCenterX();
+            sbProgress.setProgress(posRestore);
+            if (sbProgress.getSecondaryProgress() != secRestore) {
+                sbProgress.setSecondaryProgress(secRestore);
+            }
             // 标定结果只进 logcat(接 adb 时可查,一次标定仅一行);诊断期已结束,不再落盘
             android.util.Log.i("SeekBarDiag", "[标定] w=" + w
                     + " 起点=" + s + " 终点=" + e
                     + " 行程=" + (e - s) + " inset(左=" + s + ",右=" + (w - e) + ")"
-                    + " 含轨道层=" + (idxBg >= 0));
+                    + " 含轨道层=" + (idxBg >= 0)
+                    + " 复测=" + s2 + ".." + e2);
         } catch (Throwable t) {
             // 标定失败不影响播放,维持 XML 默认 inset
         }
