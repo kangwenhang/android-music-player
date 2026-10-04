@@ -5068,6 +5068,11 @@ public class MainActivity extends AppCompatActivity {
             int pos = service.getCurrentPosition();
             int dur = service.getDuration();
             if (dur > 0) {
+                if (pos > dur) {
+                    // 位置越过总长(vendor 栈 seek 失效期间的计数漂移):
+                    // 钳制,不显示 05:47/04:43 这类错乱时间(2026-10-04 车机实测)
+                    pos = dur;
+                }
                 MusicBean cur = service.getCurrentMusic();
                 applyLockedDuration((cur != null) ? cur.getStreamId() : null, dur);
                 sbProgress.setProgress(pos);

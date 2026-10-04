@@ -78,6 +78,14 @@ public class MusicService extends Service {
     private final List<MusicBean> playList = new ArrayList<>();
     private int currentIndex = -1;
     private boolean isPrepared = false;
+    /**
+     * 播放器当前数据源是否本地 fd(true=本地文件/content uri,false=HTTP 流)。
+     * 决定 seekTo 策略:本地 fd 直接 seekTo(任何播放栈都可靠);HTTP 流在车机
+     * vendor 栈上 seek 静默失效(384/385 日志实锤),必须走挂起重播/本地重启。
+     * 注意不能拿 bean.isNetwork() 判断 —— onCached 会把 bean 原地转本地,
+     * 但活跃播放器仍挂在代理 HTTP 源上,直到下次 prepareAndPlay。
+     */
+    private boolean playerSourceIsLocal = false;
 
     /** 混合位置追踪:用系统时钟校正 VBR MP3 位置偏差(安卓4.x老设备常见问题) */
     private long posTrackRealtime = 0;   // 播放开始时的 SystemClock.elapsedRealtime()
@@ -487,7 +495,8 @@ public class MusicService extends Service {
     }
 
     public void seekTo(int msec) {
-        if (player != null && isPrepared) {
+        if (player != null && isPrepared && playerSourceIsLocal) {
+            // 本地 fd(本地歌/缓存完成后重启的歌):直接 seek,任何播放栈都可靠
             try {
                 player.seekTo(msec);
                 // 拖动进度条后重置位置追踪起点
@@ -496,19 +505,54 @@ public class MusicService extends Service {
                     posTrackStartPos = msec;
                     lastSyncRealtime = posTrackRealtime;
                 }
-                DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (已prepared)");
+                DownloadDiag.log("seek: 本地跳转到 " + (msec / 1000) + "s");
+            } catch (Exception e) {
+                Log.w(TAG, "seekTo failed", e);
+            }
+            return;
+        }
+        if (player != null && isPrepared) {
+            // HTTP 源:车机 vendor 栈对网络流 seekTo 静默失效(384/385 日志实锤:
+            // seekTo 成功返回但不发任何新请求,重启 HTTP 源后 onPrepared 的 seekTo
+            // 同样被吞,还会把位置追踪起点错设到目标点 → 时间显示 05:47/04:43)。
+            MusicBean cur = getCurrentMusic();
+            String sid = (cur != null) ? cur.getStreamId() : null;
+            if (sid != null && !sid.isEmpty() && currentViaProxy) {
+                // 下载进行中:不停下载链路,挂起目标点;缓存完成后 onCached
+                // 自动本地重播(bean 已转本地 fd,seek 可靠),从目标点继续。
+                pendingSeekPosition = msec;
+                waitingProxyReplaySid = sid;
+                DownloadDiag.log("seek: 网络流下载中 → 挂起目标点 "
+                        + (msec / 1000) + "s,缓存完成后本地重播");
+                return;
+            }
+            if (sid != null && !sid.isEmpty()) {
+                // 缓存已完成(onCached 已把 bean 转本地):本地 fd 重启,秒级跳转
+                pendingSeekPosition = msec;
+                DownloadDiag.log("seek: 网络流缓存已完成 → 本地重启跳转到 "
+                        + (msec / 1000) + "s");
+                prepareAndPlay();
+                return;
+            }
+            // 无 streamId(纯直连,无缓存链路):尽力直接 seek + 看门狗兜底
+            try {
+                player.seekTo(msec);
+                if (posTrackingActive) {
+                    posTrackRealtime = android.os.SystemClock.elapsedRealtime();
+                    posTrackStartPos = msec;
+                    lastSyncRealtime = posTrackRealtime;
+                }
+                DownloadDiag.log("seek: 直连流尝试跳转 " + (msec / 1000) + "s (无缓存兜底)");
                 scheduleSeekVerify(msec);
             } catch (Exception e) {
                 Log.w(TAG, "seekTo failed", e);
             }
-        } else {
-            // 缓冲未完成(prepare 中 / 下载兜底重播中):seek 不能静默丢弃 ——
-            // 否则用户拖了进度条、歌却从原位置播(2026-10-04 车机实测:
-            // "进度条在动,歌曲没跟着跳")。挂起到 onPrepared 起播时生效
-            // (onPrepared 已有 pendingSeekPosition>0 的应用逻辑)。
-            pendingSeekPosition = msec;
-            DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (未prepared,挂起待起播生效)");
+            return;
         }
+        // 未 prepared:挂起,onPrepared 应用(本地 fd 直接生效;HTTP 源由
+        // onPrepared 的看门狗校验,未生效转"缓存完成后本地重播"兜底)
+        pendingSeekPosition = msec;
+        DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (未prepared,挂起待起播生效)");
     }
 
     // ==== seek 生效看门狗 ====
@@ -538,11 +582,35 @@ public class MusicService extends Service {
             } catch (Throwable ignored) {
             }
             if (cur < 0 || Math.abs(cur - target) > 8000) {
-                DownloadDiag.log("seek: 未生效(实际 "
-                        + (Math.max(cur, 0) / 1000) + "s ≠ 目标 " + (target / 1000)
-                        + "s)→ 重启播放跳转");
-                pendingSeekPosition = target;
-                prepareAndPlay();
+                MusicBean b = getCurrentMusic();
+                String sid = (b != null) ? b.getStreamId() : null;
+                if (b != null && b.isNetwork() && sid != null && !sid.isEmpty()
+                        && currentViaProxy) {
+                    // HTTP 流:重启 HTTP 源没有意义(vendor 栈连 onPrepared 的
+                    // seekTo 都吞)→ 停播挂起,缓存完成后 onCached 本地重播
+                    DownloadDiag.log("seek: 未生效(实际 " + (Math.max(cur, 0) / 1000)
+                            + "s ≠ 目标 " + (target / 1000) + "s)→ 停播挂起,缓存完成后本地重播");
+                    pendingSeekPosition = target;
+                    waitingProxyReplaySid = sid;
+                    try {
+                        player.stop();
+                        player.release();
+                    } catch (Throwable ignored) {
+                    }
+                    player = null;
+                    isPrepared = false;
+                    stopPosTracking();
+                    notifyState();
+                } else if (b != null && !b.isNetwork()) {
+                    // 本地 fd seek 失败(罕见):重启本地播放跳转
+                    DownloadDiag.log("seek: 未生效(实际 " + (Math.max(cur, 0) / 1000)
+                            + "s ≠ 目标 " + (target / 1000) + "s)→ 重启本地播放跳转");
+                    pendingSeekPosition = target;
+                    prepareAndPlay();
+                } else {
+                    DownloadDiag.log("seek: 未生效(实际 " + (Math.max(cur, 0) / 1000)
+                            + "s ≠ 目标 " + (target / 1000) + "s),无缓存链路可兜底,放弃");
+                }
             }
         }
     };
@@ -1022,6 +1090,7 @@ public class MusicService extends Service {
             // 网络歌曲:用 Navidrome stream URL
             // 本地歌曲:优先用 content uri,失败回退文件路径
             if (bean.isNetwork() && bean.getStreamUrl() != null) {
+                playerSourceIsLocal = false;   // HTTP 源(代理或直连)
                 long tA = System.currentTimeMillis();
                 // 部分数据源(如飞牛)的流地址不含凭据,必须走请求头
                 java.util.Map<String, String> headers = null;
@@ -1078,9 +1147,11 @@ public class MusicService extends Service {
                 tSetDs = System.currentTimeMillis() - tB;
             } else if (bean.getUri() != null && bean.getUri().startsWith("content://")) {
                 // MediaStore 扫描出的本地歌:content uri 由应用侧打开 fd,车机可正常播放
+                playerSourceIsLocal = true;
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
             } else {
                 // 本地文件:应用进程自己打开、把 fd 交给 MediaPlayer。
+                playerSourceIsLocal = true;
                 // ★ 不能用 setDataSource(路径) —— 路径方式由 mediaserver(native 服务进程)
                 //   打开文件,车机上 mediaserver 对 /storage/sdcard1(U盘/SD 二级存储)无读权限,
                 //   prepare 直接报 (1,-1011) —— 这就是"缓存成功但不自动重播、重启后才能播"
@@ -1149,6 +1220,12 @@ public class MusicService extends Service {
                             }
                             // 位置追踪从恢复的进度开始(VBR 校正)
                             startPosTracking(pendingSeekPosition);
+                            if (currentBean.isNetwork()) {
+                                // HTTP 源:车机 vendor 栈对起播时的首次 seekTo 同样
+                                // 静默失效(表现为时间显示错乱,如 05:47/04:43)。
+                                // 校验实际位置,未生效转"缓存完成后本地重播"兜底。
+                                scheduleSeekVerify(pendingSeekPosition);
+                            }
                             pendingSeekPosition = 0;
                         } else {
                             // 从头播放,位置追踪从 0 开始
