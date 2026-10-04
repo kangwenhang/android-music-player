@@ -1172,6 +1172,17 @@ public class MainActivity extends AppCompatActivity {
             public void onStopTrackingTouch(SeekBar seekBar) {
                 scrubbing = false;
                 if (service != null) {
+                    if (service.isSeekBlockedForBuffering()) {
+                        // 缓存中禁止拖动:不发起 seek,进度条/时间弹回真实播放位置。
+                        // vendor 栈对 HTTP 源 seek 静默失效,挂起等待的体验不如直接禁止
+                        // (2026-10-04 用户要求:缓存中的歌不允许拖动,拖了也会变回去)。
+                        int pos = service.getCurrentPosition();
+                        seekBar.setProgress(pos);
+                        tvCurrentTime.setText(MusicBean.formatDuration(pos));
+                        Toast.makeText(MainActivity.this,
+                                "歌曲缓存中,暂不支持拖动", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
                     service.seekTo(seekBar.getProgress());
                     tvCurrentTime.setText(MusicBean.formatDuration(seekBar.getProgress()));
                 }

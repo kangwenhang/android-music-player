@@ -494,6 +494,18 @@ public class MusicService extends Service {
         return 0;
     }
 
+    /**
+     * 当前歌是否处于"网络流下载中"(缓存中)。
+     * 车机 vendor 栈对 HTTP 源 seekTo 静默失效,下载中 seek 只能挂起等缓存完成。
+     * MainActivity 用它禁止拖动:缓存中松手不 seek,进度条弹回当前位置
+     * (2026-10-04 用户要求:缓存中的歌不允许拖动,即便拖动了也会变回去)。
+     */
+    public boolean isSeekBlockedForBuffering() {
+        MusicBean cur = getCurrentMusic();
+        String sid = (cur != null) ? cur.getStreamId() : null;
+        return sid != null && !sid.isEmpty() && currentViaProxy;
+    }
+
     public void seekTo(int msec) {
         if (player != null && isPrepared && playerSourceIsLocal) {
             // 本地 fd(本地歌/缓存完成后重启的歌):直接 seek,任何播放栈都可靠
