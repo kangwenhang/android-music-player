@@ -177,8 +177,9 @@ public final class MainThreadWatchdog {
                 return -1L;
             }
             String[] f = s.substring(close + 2).split(" ");
-            long utime = Long.parseLong(f[11]);
-            long stime = Long.parseLong(f[12]);
+            // 去掉 comm 后:0=state,10=utime,11=stime,15=nice(1-based 字段 3/14/15/20)
+            long utime = Long.parseLong(f[10]);
+            long stime = Long.parseLong(f[11]);
             long hz = 100L;   // Android USER_HZ 固定 100
             return (utime + stime) * 1000L / hz;
         } catch (Throwable ignored) {
@@ -196,7 +197,11 @@ public final class MainThreadWatchdog {
      * 元凶直接点名(TLS 握手线程/GC/主线程文本排版一目了然),取前 8 名。
      */
     private static void dumpPerThreadCpuDelta(java.util.Map<Long, Long> atStuck) {
-        if (atStuck == null || atStuck.isEmpty()) {
+        if (atStuck == null) {
+            return;
+        }
+        if (atStuck.isEmpty()) {
+            DownloadDiag.log("[主线程] 线程 CPU 基线为空(/proc/self/task 枚举失败)");
             return;
         }
         try {
@@ -233,7 +238,9 @@ public final class MainThreadWatchdog {
                 }
                 DownloadDiag.log("    " + name + " = " + ms + "ms | " + top);
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // 排行失败要留痕,否则又变成"静默没输出"排查半天
+            DownloadDiag.log("[主线程] 线程 CPU 排行失败: " + t);
         }
     }
 
@@ -245,6 +252,33 @@ public final class MainThreadWatchdog {
             }
         }
         return null;
+    }
+
+    /** 读线程的 OS nice 值(验 BACKGROUND 降级是否真生效);失败返回 -99 */
+    private static long readThreadNice(long tid) {
+        try {
+            byte[] buf = new byte[512];
+            int n;
+            java.io.FileInputStream fis = new java.io.FileInputStream(
+                    "/proc/self/task/" + tid + "/stat");
+            try {
+                n = fis.read(buf);
+            } finally {
+                fis.close();
+            }
+            if (n <= 0) {
+                return -99L;
+            }
+            String s = new String(buf, 0, n);
+            int close = s.lastIndexOf(')');
+            if (close < 0 || close + 2 >= s.length()) {
+                return -99L;
+            }
+            String[] f = s.substring(close + 2).split(" ");
+            return Long.parseLong(f[15]);   // nice = 去掉 comm 后第 15 字段
+        } catch (Throwable t) {
+            return -99L;
+        }
     }
 
     /** 进程退出/测试时停止采样 */
@@ -290,6 +324,7 @@ public final class MainThreadWatchdog {
                 if (logged < 20) {
                     DownloadDiag.log("    [" + t.getName()
                             + " pri=" + t.getPriority()
+                            + " nice=" + readThreadNice(t.getId())
                             + " " + t.getState() + "] " + top);
                     logged++;
                 } else {
