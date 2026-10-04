@@ -143,7 +143,7 @@ public final class MainThreadWatchdog {
             if (tids == null) {
                 return map;
             }
-            for (File f : tids) {
+            for (java.io.File f : tids) {
                 try {
                     long cpu = readStatCpuMs(f.getAbsolutePath());
                     if (cpu >= 0) {
