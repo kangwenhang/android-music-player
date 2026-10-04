@@ -59,6 +59,26 @@ jobs:
             echo "artifact_suffix=debug" >> "$GITHUB_OUTPUT"
           fi
 
+      # ========== 构建前注入版本名(仅 local-test) ==========
+      # 预发布 tag 是构建后才创建的,构建时 git describe 只能拿到上一个 tag,
+      # 且旧解析代码遇到带连字符的 tag 会异常退化成 "dev"。
+      # tag 公式 v<主>.<次>.<commit数>-pre 在构建前即可确定(基于 commit 数),
+      # 这里提前算好注入 APP_VERSION_NAME,保证 APK 内嵌版本名与 release 标签
+      # 及 update-debug.json 的 versionName 三者完全一致。
+      - name: Compute APP_VERSION_NAME (local-test, 与预发布 tag 同源)
+        if: github.ref == 'refs/heads/local-test'
+        run: |
+          LATEST_STABLE=$(git tag --list | grep -E '^v[0-9]+(\.[0-9]+)+$' | sort -V | tail -1)
+          if [ -z "$LATEST_STABLE" ]; then
+            BASE_VER="1.0"
+            echo "警告: 未找到正式版 tag,基础版本回退为 1.0"
+          else
+            BASE_VER=$(echo "$LATEST_STABLE" | sed 's/^v//' | cut -d. -f1-2)
+          fi
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          echo "APP_VERSION_NAME=${BASE_VER}.${COMMIT_COUNT}-pre" >> "$GITHUB_ENV"
+          echo "注入版本名: ${BASE_VER}.${COMMIT_COUNT}-pre"
+
       - name: Build APK
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
