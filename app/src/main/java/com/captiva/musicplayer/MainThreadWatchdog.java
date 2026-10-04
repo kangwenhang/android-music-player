@@ -23,10 +23,12 @@ import java.util.concurrent.TimeUnit;
  */
 public final class MainThreadWatchdog {
 
-    /** 采样间隔:5 秒一次,对主线程的额外负担可以忽略 */
-    private static final long INTERVAL_MS = 5000L;
-    /** 超过这个耗时才算卡顿并落盘(2 核车机上偶发 1s 内的抖动是正常的) */
-    private static final long WARN_MS = 1500L;
+    /** 采样间隔:诊断期加密到 1s(388 后用户仍报"下一首"卡顿,但阈值内抓不到现场;
+     *  每秒 post 一个空任务对主线程负担可忽略)。定位完成后应改回 5000 */
+    private static final long INTERVAL_MS = 1000L;
+    /** 超过这个耗时才算卡顿并落盘。诊断期 300ms:车机正常抖动 <100ms,
+     *  300ms 以上的主线程占用都值得抓堆栈看(2026-10-04 用户要求调低) */
+    private static final long WARN_MS = 300L;
     /** 同一次连续卡顿只记一行,避免把日志刷爆 */
     private static final long DEDUP_MS = 3000L;
 
