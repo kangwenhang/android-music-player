@@ -379,14 +379,9 @@ public final class UpdateChecker {
                     .setPositiveButton("下载安装", new DialogInterface.OnClickListener() {
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
-                            final Context app = ctx.getApplicationContext();
-                            new Thread(new Runnable() {
-                                @Override
-                                public void run() {
-                                    downloadAndInstall(app, info, apkEntry, base, token,
-                                            listener, null);
-                                }
-                            }, "update-download").start();
+                            // downloadAndInstall 自包后台线程(见其 javadoc),这里直接调
+                            downloadAndInstall(ctx.getApplicationContext(), info, apkEntry,
+                                    base, token, listener, null);
                         }
                     })
                     .setNegativeButton("取消", null)
@@ -397,21 +392,41 @@ public final class UpdateChecker {
     }
 
     /**
-     * 后台:下载 APK → sha256 校验 → 自动调起安装器(公开给更新页面复用)。
+     * 下载 APK → sha256 校验 → 自动调起安装器(公开给更新页面复用)。
      *
-     * <p>【2026-10-05 修复"下载失败: 解析分享链接失败"】车机实测(截图):检查更新
-     * 阶段 resolve 成功、用户点"下载安装"后 downloadAndInstall 里第二次 resolve
-     * 连续失败 → 下载被拦。根因是车机到 share.fnnas.net 的链路时好时坏,而旧实现
-     * 明明检查阶段已建立 base+token 却弃之不用,下载前硬要重新 resolve 一遍,
-     * 平白多一次踩雷机会。现在:传入的 base/token 直接复用(常规路径零 resolve);
-     * 仅当下载报错(token 过期/会话失效/网络抖动)时,才重建会话重试一次。</p>
+     * <p>【2026-10-05 修复 NetworkOnMainThreadException】本方法自己开后台线程执行,
+     * 调用方无需(也不应)再包线程 —— 更新页面 UpdateActivity.startDownload 此前在
+     * 主线程直接调用:旧实现第一步 resolve 的主线程网络请求抛 NetworkOnMainThreadException
+     * 被 catch 吞掉,误报为"解析分享链接失败";411 起会话复用跳过 resolve,异常点后移
+     * 到下载步骤,才以真面目暴露。现在网络全程在后台线程,彻底根治。</p>
+     *
+     * <p>【2026-10-05 修复"下载失败: 解析分享链接失败"】车机到 share.fnnas.net 链路
+     * 时好时坏,旧实现下载前硬要重新 resolve 一遍。现在传入的 base/token 直接复用
+     * (常规路径零 resolve);仅当下载报错(token 过期/会话失效/网络抖动)时,
+     * 才重建会话重试一次。</p>
      *
      * @param base    检查阶段已验证的 NAS 地址(可 null,null 则先 resolve)
      * @param token   检查阶段已验证的分享会话 token(可 null,null 则先取)
      */
-    public static void downloadAndInstall(Context ctx, UpdateInfo info,
-                                          JSONObject apkEntry, String base, String token,
-                                          StatusListener listener, ProgressListener progress) {
+    public static void downloadAndInstall(final Context ctx, final UpdateInfo info,
+                                          final JSONObject apkEntry, final String base,
+                                          final String token, final StatusListener listener,
+                                          final ProgressListener progress) {
+        // 网络全程必须在后台线程(Android 主线程网络请求一律抛
+        // NetworkOnMainThreadException);status/fail 内部已 MAIN.post 回主线程,
+        // ProgressListener 由 UI 侧自行 post,线程切换对回调透明。
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                downloadAndInstallBg(ctx, info, apkEntry, base, token, listener, progress);
+            }
+        }, "update-download").start();
+    }
+
+    /** downloadAndInstall 的同步实现,仅在后台线程调用 */
+    private static void downloadAndInstallBg(Context ctx, UpdateInfo info,
+                                             JSONObject apkEntry, String base, String token,
+                                             StatusListener listener, ProgressListener progress) {
         try {
             String shareId = extractShareId(SHARE_PAGE_URL);
             status(listener, "正在下载 " + info.fileName + " …");
