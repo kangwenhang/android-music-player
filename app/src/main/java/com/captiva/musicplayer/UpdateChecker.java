@@ -141,10 +141,12 @@ public final class UpdateChecker {
     /**
      * 发现新版本回调(独立更新页面用):检查到新版本时不弹系统对话框,
      * 而是把信息交给页面自己渲染;传 null 保持旧的弹窗行为。
+     * base/token 是检查阶段已验证可用的会话(下载时直接复用,
+     * 不必再走一遍不稳定的 resolve → fetchShareToken 链路,可为 null)。
      * 回调在主线程。
      */
     public interface UpdateCallback {
-        void onUpdateFound(UpdateInfo info, JSONObject apkEntry);
+        void onUpdateFound(UpdateInfo info, JSONObject apkEntry, String base, String token);
     }
 
     /** 下载进度回调(done/total 字节;total 可能为 -1 表示服务器未给长度)。主线程外,UI 侧自行 post */
@@ -296,15 +298,20 @@ public final class UpdateChecker {
             status(listener, "发现新版本 " + info.versionName);
 
             // 7) 回主线程交付结果:更新页面走 callback,旧路径弹系统对话框(inner class 引用需 final)
+            //    base/token 一并交付:下载阶段直接复用检查时已验证的会话,
+            //    不再重新 resolve(车机到 share.fnnas.net 链路时好时坏,能少走一次是一次)
             final JSONObject apkEntryFinal = apkEntry;
             final UpdateInfo infoFinal = info;
+            final String baseFinal = base;
+            final String tokenFinal = token;
             MAIN.post(new Runnable() {
                 @Override
                 public void run() {
                     if (callback != null) {
-                        callback.onUpdateFound(infoFinal, apkEntryFinal);
+                        callback.onUpdateFound(infoFinal, apkEntryFinal, baseFinal, tokenFinal);
                     } else {
-                        promptUpdate(ctx, infoFinal, apkEntryFinal, listener);
+                        promptUpdate(ctx, infoFinal, apkEntryFinal, baseFinal, tokenFinal,
+                                listener);
                     }
                 }
             });
@@ -350,7 +357,8 @@ public final class UpdateChecker {
     // ------------------------------------------------------------------
 
     private static void promptUpdate(final Context ctx, final UpdateInfo info,
-                                     final JSONObject apkEntry, final StatusListener listener) {
+                                     final JSONObject apkEntry, final String base,
+                                     final String token, final StatusListener listener) {
         try {
             Context uiCtx = activityOrApp(ctx);
             if (!(uiCtx instanceof android.app.Activity)) {
@@ -375,7 +383,8 @@ public final class UpdateChecker {
                             new Thread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    downloadAndInstall(app, info, apkEntry, listener, null);
+                                    downloadAndInstall(app, info, apkEntry, base, token,
+                                            listener, null);
                                 }
                             }, "update-download").start();
                         }
@@ -387,40 +396,56 @@ public final class UpdateChecker {
         }
     }
 
-    /** 后台:下载 APK → sha256 校验 → 自动调起安装器(公开给更新页面复用) */
+    /**
+     * 后台:下载 APK → sha256 校验 → 自动调起安装器(公开给更新页面复用)。
+     *
+     * <p>【2026-10-05 修复"下载失败: 解析分享链接失败"】车机实测(截图):检查更新
+     * 阶段 resolve 成功、用户点"下载安装"后 downloadAndInstall 里第二次 resolve
+     * 连续失败 → 下载被拦。根因是车机到 share.fnnas.net 的链路时好时坏,而旧实现
+     * 明明检查阶段已建立 base+token 却弃之不用,下载前硬要重新 resolve 一遍,
+     * 平白多一次踩雷机会。现在:传入的 base/token 直接复用(常规路径零 resolve);
+     * 仅当下载报错(token 过期/会话失效/网络抖动)时,才重建会话重试一次。</p>
+     *
+     * @param base    检查阶段已验证的 NAS 地址(可 null,null 则先 resolve)
+     * @param token   检查阶段已验证的分享会话 token(可 null,null 则先取)
+     */
     public static void downloadAndInstall(Context ctx, UpdateInfo info,
-                                          JSONObject apkEntry, StatusListener listener,
-                                          ProgressListener progress) {
+                                          JSONObject apkEntry, String base, String token,
+                                          StatusListener listener, ProgressListener progress) {
         try {
             String shareId = extractShareId(SHARE_PAGE_URL);
             status(listener, "正在下载 " + info.fileName + " …");
 
-            // 安装器要读文件,下载前重新建立会话(与检查阶段同样的链路)
-            String[] bases = resolveBases(shareId);
-            if (bases == null || bases.length == 0) {
-                fail(ctx, listener, "下载失败: 解析分享链接失败(已重试)\n原因: "
-                        + (lastResolveError.isEmpty() ? "未知" : lastResolveError));
-                return;
-            }
-            String base = null;
-            String token = null;
-            for (int i = 0; i < bases.length && token == null; i++) {
-                try {
-                    token = fetchShareToken(bases[i], shareId);
-                    if (token != null) {
-                        base = bases[i];
-                    }
-                } catch (Throwable ignored) {
+            // 复用检查阶段的会话;没有(直接调/旧调用方)就现建一个
+            if (base == null || base.trim().isEmpty() || token == null
+                    || token.trim().isEmpty()) {
+                String[] sess = establishSession(shareId);
+                if (sess == null) {
+                    fail(ctx, listener, "下载失败: 解析分享链接失败(已重试)\n原因: "
+                            + (lastResolveError.isEmpty() ? "未知" : lastResolveError));
+                    return;
                 }
-            }
-            if (base == null) {
-                fail(ctx, listener, "下载失败: NAS 分享页不可达");
-                return;
+                base = sess[0];
+                token = sess[1];
             }
 
             File dest = prepareApkFile(ctx);
             String err = downloadEntryToFile(base, shareId, token, apkEntry, dest,
                     MAX_APK_BYTES, progress);
+            if (err != null) {
+                // 兜底:传入会话可能已过期(用户在弹窗停留过久)或网络抖动,
+                // 重建会话后整包重试一次;再失败才报错
+                DownloadDiag.log("[自更新] 首次下载失败(" + err + "),重建会话重试");
+                status(listener, "下载中断,正在重试…");
+                String[] sess = establishSession(shareId);
+                if (sess != null) {
+                    base = sess[0];
+                    token = sess[1];
+                    dest = prepareApkFile(ctx);
+                    err = downloadEntryToFile(base, shareId, token, apkEntry, dest,
+                            MAX_APK_BYTES, progress);
+                }
+            }
             if (err != null) {
                 fail(ctx, listener, "APK 下载失败: " + err);
                 return;
@@ -442,6 +467,24 @@ public final class UpdateChecker {
             DownloadDiag.logError("[自更新] 下载安装失败", t);
             fail(ctx, listener, "下载安装失败: " + t.getMessage());
         }
+    }
+
+    /** resolve → 逐 base 取 token;成功返回 {base, token},失败返回 null(原因在 lastResolveError) */
+    private static String[] establishSession(String shareId) {
+        String[] bases = resolveBases(shareId);
+        if (bases == null || bases.length == 0) {
+            return null;
+        }
+        for (int i = 0; i < bases.length; i++) {
+            try {
+                String token = fetchShareToken(bases[i], shareId);
+                if (token != null) {
+                    return new String[]{bases[i], token};
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        return null;
     }
 
     static void installApk(Context ctx, File apk) {
@@ -537,16 +580,18 @@ public final class UpdateChecker {
                 String body = "{\"shareId\":\"" + shareId + "\"}";
                 String resp = postJson(CONNECT_BASE + PATH_FN_SHARE, body, KEY_CONNECT, null);
                 JSONObject root = new JSONObject(resp);
+                // 【2026-10-05】code!=0 / 缺 data 也纳入重试(此前直接 return null,
+                // 只有网络异常才重试,"已重试"名不副实;服务端偶发拒绝重试往往就过了)
                 if (root.optInt("code", -1) != 0) {
                     Log.w(TAG, "fn/share code=" + root.optInt("code") + " " + root.optString("msg"));
                     lastResolveError = "服务端返回 code=" + root.optInt("code")
                             + " " + root.optString("msg");
-                    return null;
+                    throw new IllegalStateException(lastResolveError);
                 }
                 JSONObject data = root.optJSONObject("data");
                 if (data == null) {
                     lastResolveError = "服务端应答缺少 data";
-                    return null;
+                    throw new IllegalStateException(lastResolveError);
                 }
                 java.util.List<String> out = new java.util.ArrayList<String>();
                 String ip = firstOf(data.optJSONArray("ipv4"));

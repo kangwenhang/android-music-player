@@ -44,6 +44,9 @@ public class UpdateActivity extends AppCompatActivity {
     /** 检查到的待安装信息(非空时「下载安装」可用) */
     private UpdateChecker.UpdateInfo pendingInfo;
     private JSONObject pendingApkEntry;
+    /** 检查阶段已验证的会话(下载时直接复用,避免重新走不稳定的 resolve 链路) */
+    private String pendingBase;
+    private String pendingToken;
     private boolean busy;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -121,6 +124,8 @@ public class UpdateActivity extends AppCompatActivity {
         busy = true;
         pendingInfo = null;
         pendingApkEntry = null;
+        pendingBase = null;
+        pendingToken = null;
         btnCheck.setEnabled(false);
         btnInstall.setEnabled(false);
         setInstallEnabled(false);
@@ -149,11 +154,14 @@ public class UpdateActivity extends AppCompatActivity {
             }
         }, new UpdateChecker.UpdateCallback() {
             @Override
-            public void onUpdateFound(UpdateChecker.UpdateInfo info, JSONObject apkEntry) {
+            public void onUpdateFound(UpdateChecker.UpdateInfo info, JSONObject apkEntry,
+                                      String base, String token) {
                 busy = false;
                 btnCheck.setEnabled(true);
                 pendingInfo = info;
                 pendingApkEntry = apkEntry;
+                pendingBase = base;
+                pendingToken = token;
                 tvLatest.setText(info.versionName);
                 tvLatest.setTextColor(getResources().getColor(R.color.accent));
                 setStatus("发现新版本,点「下载安装」开始升级");
@@ -185,6 +193,7 @@ public class UpdateActivity extends AppCompatActivity {
         setStatus("正在下载 " + pendingInfo.fileName + " …");
 
         UpdateChecker.downloadAndInstall(this, pendingInfo, pendingApkEntry,
+                pendingBase, pendingToken,
                 new UpdateChecker.StatusListener() {
                     @Override
                     public void onStatus(String msg) {
