@@ -87,6 +87,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 是否正在加载更多(防止重复触发) */
     private boolean isLoading = false;
 
+    /** 创建风暴探测:5 秒窗口内的 onCreateViewHolder 计数(见 onCreateViewHolder 注释) */
+    private int createCount = 0;
+    private long createWindowStart = 0;
+
     // ===== 异步过滤 / DiffUtil 增量刷新相关字段 =====
     // 过滤遍历 + Diff 计算放到后台单线程,避免主线程遍历几百上千首导致掉帧
     private final ExecutorService filterExecutor = Executors.newSingleThreadExecutor();
@@ -974,6 +978,20 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     @NonNull
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        // 【2026-10-04 创建风暴探测】正常使用 onCreateViewHolder 极少触发(回收池命中)。
+        // 车机日志(download_debug(17))记录到切歌后连续 30+ 秒的ViewHolder
+        // 连续创建(12.8s/17.1s 卡顿,栈都钉在 fill→onCreateViewHolder)。
+        // 5 秒窗口内创建 ≥20 个即视为回收失效,落一条诊断日志用于定位触发源。
+        createCount++;
+        long now = System.currentTimeMillis();
+        if (createWindowStart == 0 || now - createWindowStart > 5000) {
+            if (createCount >= 20) {
+                DownloadDiag.listDiag("[列表] ViewHolder 创建风暴: "
+                        + createCount + " 个/5s(回收失效或整表重建,排查触发源)");
+            }
+            createWindowStart = now;
+            createCount = 0;
+        }
         // 方案 A:纯代码构造 item 视图,不走 LayoutInflater/XML/AppCompat tint 解析。
         // 车机日志(2026-10-04 download_debug(10))10 次主线程卡顿(最长 14.7s)有 9 次
         // 现场堆栈停在 onCreateViewHolder→inflate 的 AppCompat 视图构造里(applyStyle/

@@ -194,7 +194,8 @@ public final class UpdateChecker {
             // 1) 解析分享 → NAS 地址(局域网优先,中继兜底)
             String[] bases = resolveBases(shareId);
             if (bases == null || bases.length == 0) {
-                fail(ctx, listener, "解析分享链接失败(share.fnnas.net 不可达?)");
+                fail(ctx, listener, "解析分享链接失败(已自动重试 3 次)\n原因: "
+                        + (lastResolveError.isEmpty() ? "未知" : lastResolveError));
                 return;
             }
 
@@ -397,7 +398,8 @@ public final class UpdateChecker {
             // 安装器要读文件,下载前重新建立会话(与检查阶段同样的链路)
             String[] bases = resolveBases(shareId);
             if (bases == null || bases.length == 0) {
-                fail(ctx, listener, "下载失败: 解析分享链接失败");
+                fail(ctx, listener, "下载失败: 解析分享链接失败(已重试)\n原因: "
+                        + (lastResolveError.isEmpty() ? "未知" : lastResolveError));
                 return;
             }
             String base = null;
@@ -520,37 +522,61 @@ public final class UpdateChecker {
     // 第 1 步:解析分享 → 候选 base 列表
     // ------------------------------------------------------------------
 
-    /** 返回候选 base(http://ip:5666 优先,https://中继域名 兜底),失败返回 null */
+    /** 最近一次 resolve 失败的真实原因(给失败对话框看,替代干巴巴的"不可达?") */
+    private static volatile String lastResolveError = "";
+
+    /**
+     * 返回候选 base(http://ip:5666 优先,https://中继域名 兜底),失败返回 null。
+     * 【2026-10-04 自动重试】车机实测(23:46)share.fnnas.net 的 resolve 链路
+     * 时好时坏:第一次 EOFException 秒失败,40 秒后重试即成功。这里失败自动
+     * 重试 2 次(间隔 2s),避免用户手动多点几次"检查更新"。
+     */
     private static String[] resolveBases(String shareId) {
-        try {
-            String body = "{\"shareId\":\"" + shareId + "\"}";
-            String resp = postJson(CONNECT_BASE + PATH_FN_SHARE, body, KEY_CONNECT, null);
-            JSONObject root = new JSONObject(resp);
-            if (root.optInt("code", -1) != 0) {
-                Log.w(TAG, "fn/share code=" + root.optInt("code") + " " + root.optString("msg"));
-                return null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                String body = "{\"shareId\":\"" + shareId + "\"}";
+                String resp = postJson(CONNECT_BASE + PATH_FN_SHARE, body, KEY_CONNECT, null);
+                JSONObject root = new JSONObject(resp);
+                if (root.optInt("code", -1) != 0) {
+                    Log.w(TAG, "fn/share code=" + root.optInt("code") + " " + root.optString("msg"));
+                    lastResolveError = "服务端返回 code=" + root.optInt("code")
+                            + " " + root.optString("msg");
+                    return null;
+                }
+                JSONObject data = root.optJSONObject("data");
+                if (data == null) {
+                    lastResolveError = "服务端应答缺少 data";
+                    return null;
+                }
+                java.util.List<String> out = new java.util.ArrayList<String>();
+                String ip = firstOf(data.optJSONArray("ipv4"));
+                String fn = firstOf(data.optJSONArray("fn"));
+                int httpPort = data.optJSONObject("port") != null
+                        ? data.optJSONObject("port").optInt("httpPort", 5666) : 5666;
+                if (ip != null && !ip.isEmpty()) {
+                    out.add("http://" + ip + ":" + httpPort);
+                }
+                if (fn != null && !fn.isEmpty()) {
+                    out.add("https://" + fn);
+                }
+                DownloadDiag.log("[自更新] 候选地址: " + out);
+                return out.toArray(new String[0]);
+            } catch (Throwable t) {
+                lastResolveError = t.getClass().getSimpleName()
+                        + (t.getMessage() != null ? ": " + t.getMessage() : "");
+                Log.w(TAG, "resolveBases 第" + attempt + "次失败: " + lastResolveError, t);
+                DownloadDiag.log("[自更新] resolve 第" + attempt + "次失败: " + lastResolveError);
+                if (attempt < 3) {
+                    try {
+                        Thread.sleep(2000);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
             }
-            JSONObject data = root.optJSONObject("data");
-            if (data == null) {
-                return null;
-            }
-            java.util.List<String> out = new java.util.ArrayList<String>();
-            String ip = firstOf(data.optJSONArray("ipv4"));
-            String fn = firstOf(data.optJSONArray("fn"));
-            int httpPort = data.optJSONObject("port") != null
-                    ? data.optJSONObject("port").optInt("httpPort", 5666) : 5666;
-            if (ip != null && !ip.isEmpty()) {
-                out.add("http://" + ip + ":" + httpPort);
-            }
-            if (fn != null && !fn.isEmpty()) {
-                out.add("https://" + fn);
-            }
-            DownloadDiag.log("[自更新] 候选地址: " + out);
-            return out.toArray(new String[0]);
-        } catch (Throwable t) {
-            Log.w(TAG, "resolveBases 失败", t);
-            return null;
         }
+        return null;
     }
 
     // ------------------------------------------------------------------
