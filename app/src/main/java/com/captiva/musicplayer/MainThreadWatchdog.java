@@ -134,7 +134,7 @@ public final class MainThreadWatchdog {
         }
     }
 
-    /** 读 /proc/self/task/*/stat,返回 tid→(utime+stime)毫秒 映射(单线程 CPU 记账) */
+    /** 读 /proc/self/task 下每个 tid 的 stat,返回 tid 到 (utime+stime) 毫秒的映射 */
     private static java.util.Map<Long, Long> readThreadCpuMap() {
         java.util.Map<Long, Long> map = new java.util.HashMap<Long, Long>();
         try {
