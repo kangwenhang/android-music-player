@@ -497,6 +497,7 @@ public class MusicService extends Service {
                     lastSyncRealtime = posTrackRealtime;
                 }
                 DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (已prepared)");
+                scheduleSeekVerify(msec);
             } catch (Exception e) {
                 Log.w(TAG, "seekTo failed", e);
             }
@@ -508,6 +509,49 @@ public class MusicService extends Service {
             pendingSeekPosition = msec;
             DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (未prepared,挂起待起播生效)");
         }
+    }
+
+    // ==== seek 生效看门狗 ====
+    // 部分车机定制播放栈(mediaserver 原生进程)对 HTTP 流源的 seekTo 不响应也不报错:
+    // seekTo 返回成功,但 getCurrentPosition() 纹丝不动,也无任何新 Range 请求发到
+    // 代理(2026-10-04 车机日志实锤:42 次 seek 全部"已prepared",越界 seek 却连一条
+    // 代理跳跃日志都没有;同版本 APK 在 AOSP 模拟器上完全正常)。对策:seek 后 2.5s
+    // 校验实际位置,偏差 >8s 判定未生效 → 重启当前曲目到目标点(prepareAndPlay 会
+    // 先 promoteToLocalIfCached 转本地 fd,onPrepared 应用 pendingSeekPosition,
+    // 本地 seek 不依赖 vendor 栈的 HTTP seek 实现)。
+    private int seekVerifyTarget = -1;
+    private int seekVerifyToken = -1;
+    private final Runnable seekVerifyRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (seekVerifyTarget < 0 || player == null || !isPrepared) {
+                return;
+            }
+            if (seekVerifyToken != playToken) {
+                return;   // 校验期间已切歌,作废
+            }
+            int target = seekVerifyTarget;
+            seekVerifyTarget = -1;
+            int cur = -1;
+            try {
+                cur = player.getCurrentPosition();
+            } catch (Throwable ignored) {
+            }
+            if (cur < 0 || Math.abs(cur - target) > 8000) {
+                DownloadDiag.log("seek: 未生效(实际 "
+                        + (Math.max(cur, 0) / 1000) + "s ≠ 目标 " + (target / 1000)
+                        + "s)→ 重启播放跳转");
+                pendingSeekPosition = target;
+                prepareAndPlay();
+            }
+        }
+    };
+
+    private void scheduleSeekVerify(int targetMsec) {
+        seekVerifyTarget = targetMsec;
+        seekVerifyToken = playToken;
+        mainHandler.removeCallbacks(seekVerifyRunnable);
+        mainHandler.postDelayed(seekVerifyRunnable, 2500);
     }
 
     /** 开始位置追踪(播放开始/恢复时调用) */
