@@ -425,7 +425,9 @@ public class MainActivity extends AppCompatActivity {
                 String eqPreset = intent.getStringExtra("eqPreset");
                 updateEqButtonText(eqPreset);
                 // 滚动列表到当前播放歌曲(含高亮+确保数据加载)
-                scrollToCurrentSong();
+                // 连点防抖(2026-10-04):快速切歌时列表滚动+高亮合并为一次,
+                // 播放本体不防抖(每次点击都切),只合并 UI 侧刷新
+                scheduleListRefresh();
             }
         }
     };
@@ -4760,6 +4762,38 @@ public class MainActivity extends AppCompatActivity {
         }
         btnFav.setText("\u2665");
         btnFav.setTextColor(isFav ? colorFavActive : colorFavInactive);
+    }
+
+    // ===== 连点防抖:快速切歌时合并列表刷新(2026-10-04) =====
+    /** 冷却窗:此窗口内的连续切歌只触发一次列表滚动+高亮 */
+    private static final long LIST_REFRESH_COOLDOWN_MS = 400L;
+    private boolean listRefreshScheduled = false;
+    private long lastListRefreshAt = 0L;
+    private final Runnable pendingListRefresh = new Runnable() {
+        @Override
+        public void run() {
+            listRefreshScheduled = false;
+            lastListRefreshAt = android.os.SystemClock.elapsedRealtime();
+            scrollToCurrentSong();
+        }
+    };
+
+    /**
+     * 列表刷新入口(带连点防抖):
+     * - 冷却窗外且无挂起任务 → 立即刷新(单次点击零延迟);
+     * - 冷却窗内(连点) → 移除旧任务重排 trailing,停手 400ms 后只刷新一次。
+     * 播放本体不受影响,只合并滚动+高亮这类列表 UI 开销。
+     */
+    private void scheduleListRefresh() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        boolean inCooldown = (now - lastListRefreshAt) < LIST_REFRESH_COOLDOWN_MS;
+        if (!inCooldown && !listRefreshScheduled) {
+            pendingListRefresh.run();
+            return;
+        }
+        handler.removeCallbacks(pendingListRefresh);
+        listRefreshScheduled = true;
+        handler.postDelayed(pendingListRefresh, LIST_REFRESH_COOLDOWN_MS);
     }
 
     /**
