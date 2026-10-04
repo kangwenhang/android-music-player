@@ -439,6 +439,27 @@ public final class UpdateChecker {
         } catch (Throwable t) {
             Log.w(TAG, "调起安装器失败", t);
             DownloadDiag.logError("[自更新] 调起安装器失败", t);
+            // 【不再静默】车机 ROM 可能没有/锁了系统安装器(ActivityNotFoundException),
+            // 必须告诉用户 APK 在哪、可手动安装,否则表现为"点了没反应"
+            showMainThreadToast(ctx, "无法调起系统安装器(" + t.getClass().getSimpleName()
+                    + ")\nAPK 已下载到:\n" + apk.getAbsolutePath()
+                    + "\n可用文件管理器手动安装");
+        }
+    }
+
+    /** 主线程 Toast(安装链路跑在后台线程,直接 Toast 会因无 Looper 崩溃) */
+    private static void showMainThreadToast(final Context ctx, final String msg) {
+        try {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show();
+                    } catch (Throwable ignored) {
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
         }
     }
 
