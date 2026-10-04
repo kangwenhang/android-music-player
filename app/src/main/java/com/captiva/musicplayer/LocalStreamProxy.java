@@ -67,6 +67,8 @@ public final class LocalStreamProxy {
     private static final int BASE_PORT = 18765;
     private static final int PORT_TRIES = 20;
     private static final int MAX_REDIRECTS = 5;
+    /** seek 跳跃阈值:请求点超出已下载前沿不足此值时不重启下载,等一拍即可 */
+    private static final long JUMP_THRESHOLD = 96 * 1024;
 
     private static final String TAG = "LocalStreamProxy";
 
@@ -83,10 +85,15 @@ public final class LocalStreamProxy {
         final File finalFile;
         final CacheCallback cb;
         final Object lock = new Object();
-        long cachedBytes;          // 已落盘字节数(lock 保护)
+        long cachedBytes;          // 当前有效数据区的末端绝对偏移(lock 保护)
+        long dataFrom;             // 当前有效数据区的起始绝对偏移(lock 保护;0=从文件头连续)
+        int gen;                   // 跳跃代次(lock 保护):每跳跃一次 +1,serve 连接据此识别自己是否已"过时"
         long total = -1;           // 上游声明的总长,未知 = -1(lock 保护)
+        int maxProgress;           // 进度高水位(lock 保护):跳跃后 cachedBytes 回退,进度条不倒退
         volatile boolean downloading;
         volatile boolean failed;
+        volatile long jumpTarget = -1;          // serve 线程请求的跳跃目标(-1=无)
+        volatile HttpURLConnection currentConn; // 当前上游连接,serve 线程断开它以中断阻塞读
 
         StreamJob(String sid, String url, Map<String, String> headers,
                   File partFile, File finalFile, CacheCallback cb) {
@@ -143,7 +150,13 @@ public final class LocalStreamProxy {
                 return 100;   // 下载线程已结束且未失败 = 缓存完成(rename 落位)
             }
             if (st.total > 0) {
-                return (int) (st.cachedBytes * 100 / st.total);
+                // 跳跃下载后 cachedBytes 会回退到跳跃点(旧前缀不再算有效数据),
+                // 进度条用高水位钳制,避免可见的倒退跳动
+                int p = (int) (st.cachedBytes * 100 / st.total);
+                if (p > st.maxProgress) {
+                    st.maxProgress = p;
+                }
+                return st.maxProgress;
             }
             return -1;
         }
@@ -271,7 +284,7 @@ public final class LocalStreamProxy {
                 } catch (Throwable ignored) {
                 }
                 st.downloading = true;
-                FileOutputStream out = null;
+                RandomAccessFile out = null;
                 InputStream is = null;
                 HttpURLConnection conn = null;
                 try {
@@ -283,124 +296,271 @@ public final class LocalStreamProxy {
                     if (parent != null && !parent.exists() && !parent.mkdirs()) {
                         throw new IOException("缓存目录创建失败: " + parent.getAbsolutePath());
                     }
-                    long start = st.partFile.exists() ? st.partFile.length() : 0;
-                    conn = openUpstream(st, start);
-                    int code = conn.getResponseCode();
-                    if (code == 416 && start > 0) {
-                        // 416 = Range 起点越界:.part 是上次进程被杀/中断的残留,
-                        // 长度可能已达总长。若 416 的 Content-Range("bytes */N")
-                        // 标明总长且 start>=总长 → .part 其实已完整,直接落位;
-                        // 否则删掉残留重下(只重试一次,start 归 0)。
-                        String cr = conn.getHeaderField("Content-Range");
-                        long total416 = -1;
-                        if (cr != null) {
-                            int slash = cr.lastIndexOf('/');
-                            if (slash >= 0 && !"*".equals(cr.substring(slash + 1).trim())) {
-                                try {
-                                    total416 = Long.parseLong(cr.substring(slash + 1).trim());
-                                } catch (NumberFormatException ignored) {
-                                }
-                            }
-                        }
-                        conn.disconnect();
-                        conn = null;
-                        if (total416 > 0 && start >= total416) {
-                            File f = st.finalFile;
-                            if (!promote(st.partFile, f)) {
-                                throw new IOException("缓存落位失败: " + f.getAbsolutePath());
-                            }
-                            MusicSyncManager.endCache(st.sid);
-                            DownloadDiag.log("边下边播: .part 残留已完整,直接落位 "
-                                    + f.getName() + " " + f.length() + " bytes");
-                            try {
-                                st.cb.onCached(st.sid, f);
-                            } catch (Throwable ignored) {
-                            }
-                            return;
-                        }
-                        DownloadDiag.log("边下边播: .part 残留越界(416),删除重下 start="
-                                + start + " total=" + total416);
-                        st.partFile.delete();
-                        start = 0;
-                        conn = openUpstream(st, 0);
-                        code = conn.getResponseCode();
+                    // 数据区初始化:优先读 .from 标记(上次跳跃留下的中后段数据),
+                    // 无标记则 .part 视为从 0 连续(兼容旧格式,行为同断点续传)
+                    long runFrom = 0;
+                    long writePos = 0;
+                    if (st.partFile.exists()) {
+                        runFrom = readMarker(st);
+                        writePos = runFrom + st.partFile.length();
                     }
-                    if (code != 200 && code != 206) {
-                        throw new IOException("上游 HTTP " + code);
-                    }
-                    long total = parseTotal(conn, code);
                     synchronized (st.lock) {
-                        st.total = total;
+                        st.dataFrom = runFrom;
+                        st.cachedBytes = writePos;
                         st.lock.notifyAll();
                     }
-                    is = conn.getInputStream();
-                    boolean append = (code == 206);
-                    if (code == 200 && start > 0) {
-                        // 上游不支持 Range(返回 200):从 0 重新下,丢弃前 start 字节
-                        long skip = start;
-                        while (skip > 0) {
-                            long n = is.skip(skip);
-                            if (n <= 0) {
-                                if (is.read() == -1) {
-                                    throw new EOFException("上游数据不足(无法跳过 " + start + " 字节)");
-                                }
-                                skip--;
-                            } else {
-                                skip -= n;
-                            }
-                        }
-                        start = 0;
-                    }
-                    out = new FileOutputStream(st.partFile, append);
-                    byte[] buf = new byte[16 * 1024];
-                    long pos = start;
-                    // 限速(仅测试版):代理服务的是**当前播放的歌**,走优先档 400KB/s
-                    // (资源倾斜于当前播放,2026-10-03 用户需求;预缓存才用 100KB/s 后台档)。
-                    // 播放实时仅需 ~16KB/s,400KB/s 约 25 倍余量, seek 追赶也快;
-                    // 进度条仍可见(4MB 歌约 10 秒走完缓冲段)。
+                    final byte[] buf = new byte[16 * 1024];
                     final long throttleBps = MusicSyncManager.currentSongThrottleBps();
-                    final long throttleStart = System.currentTimeMillis();
-                    long written = 0;
-                    int n;
-                    while ((n = is.read(buf)) != -1) {
-                        out.write(buf, 0, n);
-                        out.flush();   // flush 后才推进 cachedBytes,保证读线程永远读到已完整落盘的数据
-                        pos += n;
-                        written += n;
-                        if (throttleBps > 0) {
-                            // 按"本次已写字节 ÷ 速率"与实际耗时之差 sleep;单次最多睡 400ms,
-                            // 保证中断仍有响应
-                            long want = written * 1000 / throttleBps;
-                            long elapsed = System.currentTimeMillis() - throttleStart;
-                            if (want > elapsed) {
-                                try {
-                                    Thread.sleep(Math.min(want - elapsed, 400));
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
+                    boolean retried416 = false;
+                    // ===== 外循环:每次迭代代表"从 writePos 起的一段顺序下载" =====
+                    // seek 跳跃会终结当前迭代、从新位置重新开流(2026-10-04 v5.7.379:
+                    // 此前只会从头顺序下载,快进到未下载区间时 MediaPlayer 要干等
+                    // 顺序下载爬过来,表现为"边下边播无法快进"甚至缓冲超时报错跳歌)。
+                    outer:
+                    while (true) {
+                        try {
+                            conn = openUpstream(st, writePos);
+                            st.currentConn = conn;
+                            int code = conn.getResponseCode();
+                            if (code == 416 && writePos > 0) {
+                                // 416 = Range 起点越界:.part 是上次进程被杀/中断的残留,
+                                // 长度可能已达总长。若 416 的 Content-Range("bytes */N")
+                                // 标明总长且起点>=总长且数据区从 0 连续 → .part 其实已完整,
+                                // 直接落位;否则删掉残留重下(只重试一次,start 归 0)。
+                                String cr = conn.getHeaderField("Content-Range");
+                                long total416 = -1;
+                                if (cr != null) {
+                                    int slash = cr.lastIndexOf('/');
+                                    if (slash >= 0 && !"*".equals(cr.substring(slash + 1).trim())) {
+                                        try {
+                                            total416 = Long.parseLong(cr.substring(slash + 1).trim());
+                                        } catch (NumberFormatException ignored) {
+                                        }
+                                    }
+                                }
+                                conn.disconnect();
+                                conn = null;
+                                st.currentConn = null;
+                                if (total416 > 0 && writePos >= total416 && runFrom == 0) {
+                                    File f = st.finalFile;
+                                    if (!promote(st.partFile, f)) {
+                                        throw new IOException("缓存落位失败: " + f.getAbsolutePath());
+                                    }
+                                    MusicSyncManager.endCache(st.sid);
+                                    DownloadDiag.log("边下边播: .part 残留已完整,直接落位 "
+                                            + f.getName() + " " + f.length() + " bytes");
+                                    try {
+                                        st.cb.onCached(st.sid, f);
+                                    } catch (Throwable ignored) {
+                                    }
+                                    return;
+                                }
+                                DownloadDiag.log("边下边播: .part 残留越界(416),删除重下 writePos="
+                                        + writePos + " total=" + total416);
+                                st.partFile.delete();
+                                deleteMarker(st);
+                                runFrom = 0;
+                                writePos = 0;
+                                synchronized (st.lock) {
+                                    st.dataFrom = 0;
+                                    st.cachedBytes = 0;
+                                    st.lock.notifyAll();
+                                }
+                                if (!retried416) {
+                                    retried416 = true;
+                                    continue outer;
+                                }
+                                throw new IOException("上游 416 重试后仍越界");
+                            }
+                            if (code != 200 && code != 206) {
+                                throw new IOException("上游 HTTP " + code);
+                            }
+                            long total = parseTotal(conn, code);
+                            synchronized (st.lock) {
+                                st.total = total;
+                                st.lock.notifyAll();
+                            }
+                            is = conn.getInputStream();
+                            if (code == 200 && writePos > 0) {
+                                // 上游不支持 Range(返回 200):从 0 重新下,丢弃前 writePos 字节
+                                long skip = writePos;
+                                while (skip > 0) {
+                                    long n = is.skip(skip);
+                                    if (n <= 0) {
+                                        if (is.read() == -1) {
+                                            throw new EOFException("上游数据不足(无法跳过 " + writePos + " 字节)");
+                                        }
+                                        skip--;
+                                    } else {
+                                        skip -= n;
+                                    }
+                                }
+                                runFrom = 0;
+                                writePos = 0;
+                                deleteMarker(st);
+                                synchronized (st.lock) {
+                                    st.dataFrom = 0;
+                                    st.cachedBytes = 0;
+                                    st.lock.notifyAll();
                                 }
                             }
+                            out = new RandomAccessFile(st.partFile, "rw");
+                            if (runFrom == 0 && writePos == 0) {
+                                out.setLength(0);   // 清掉残留尾部,保证文件从 0 连续
+                            }
+                            out.seek(writePos - runFrom);   // .part 内偏移 = 绝对偏移 - 数据区起点
+                            // 限速(仅测试版):代理服务的是**当前播放的歌**,走优先档 400KB/s
+                            // (资源倾斜于当前播放,2026-10-03 用户需求;预缓存才用 100KB/s 后台档)。
+                            final long throttleStart = System.currentTimeMillis();
+                            long written = 0;
+                            int n;
+                            while ((n = is.read(buf)) != -1) {
+                                if (st.jumpTarget >= 0 && st.jumpTarget != runFrom) {
+                                    break;   // seek 跳跃请求:退出读循环,下方统一消费
+                                }
+                                out.write(buf, 0, n);
+                                writePos += n;
+                                written += n;
+                                synchronized (st.lock) {
+                                    st.cachedBytes = writePos;
+                                    st.lock.notifyAll();
+                                }
+                                if (throttleBps > 0) {
+                                    // 按"本次已写字节 ÷ 速率"与实际耗时之差 sleep;单次最多睡 400ms,
+                                    // 保证中断仍有响应
+                                    long want = written * 1000 / throttleBps;
+                                    long elapsed = System.currentTimeMillis() - throttleStart;
+                                    if (want > elapsed) {
+                                        try {
+                                            Thread.sleep(Math.min(want - elapsed, 400));
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                        }
+                                    }
+                                }
+                            }
+                            // 本段结束(上游 EOF 或跳跃请求):先关流再判断
+                            if (is != null) {
+                                try {
+                                    is.close();
+                                } catch (IOException ignored) {
+                                }
+                                is = null;
+                            }
+                            if (conn != null) {
+                                try {
+                                    conn.disconnect();
+                                } catch (Throwable ignored) {
+                                }
+                                conn = null;
+                                st.currentConn = null;
+                            }
+                            long jt = consumeJump(st);
+                            if (jt >= 0 && jt != runFrom) {
+                                // ===== seek 跳跃:重置数据区,从新位置重新开流 =====
+                                synchronized (st.lock) {
+                                    st.dataFrom = jt;
+                                    st.cachedBytes = jt;
+                                    st.gen++;
+                                    st.lock.notifyAll();
+                                }
+                                writeMarker(st, jt);
+                                runFrom = jt;
+                                writePos = jt;
+                                if (out != null) {
+                                    try {
+                                        out.setLength(0);   // 数据区重置,.part 只保留新区间
+                                        out.seek(0);
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                                continue outer;
+                            }
+                            // ===== 真正的下载结束 =====
+                            if (out != null) {
+                                try {
+                                    out.close();
+                                } catch (IOException ignored) {
+                                }
+                                out = null;
+                            }
+                            long from;
+                            synchronized (st.lock) {
+                                from = st.dataFrom;
+                            }
+                            if (from == 0) {
+                                // 从 0 起连续下载完整 → 落位为最终文件(原有路径)
+                                // rename 优先(原子);serve 线程持有 .part 读句柄时 FUSE 上
+                                // rename 会失败 → promote 内部退化为 复制+删除
+                                File f = st.finalFile;
+                                if (!promote(st.partFile, f)) {
+                                    throw new IOException("缓存落位失败: " + f.getAbsolutePath());
+                                }
+                                deleteMarker(st);
+                                MusicSyncManager.endCache(st.sid);
+                                DownloadDiag.log("边下边播: 缓存完成 " + f.getName()
+                                        + " " + f.length() + " bytes");
+                                try {
+                                    st.cb.onCached(st.sid, f);
+                                } catch (Throwable ignored) {
+                                }
+                            } else {
+                                // 跳跃过:.part 只含中后段,不完整,不能落位成"完整缓存"
+                                // (落位会让离线重播拿到一段中间是空洞的歌)。
+                                // 保留 .part + .from 标记:同 sid 重播时续传尾部,快进不重下
+                                MusicSyncManager.endCache(st.sid);
+                                DownloadDiag.log("边下边播: 流结束(跳跃过,缓存不完整,保留 .part 续传) "
+                                        + st.sid + " dataFrom=" + from);
+                                // 走 onFailed 通知调用方"下载链路已结束"(非真失败):
+                                // MusicService 借此解除预缓存让路;播放本身不受影响
+                                // (数据早已流给 MediaPlayer),重播时 register 会续传
+                                try {
+                                    st.cb.onFailed(st.sid, "流结束(跳跃下载,缓存不完整,已保留续传)");
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                            return;
+                        } catch (Throwable t) {
+                            // 上游断开既可能是真失败,也可能是 serve 线程为 seek 跳跃而
+                            // disconnect() 中断了阻塞读 —— 先查跳跃请求,有则重启,无则真失败
+                            long jt = consumeJump(st);
+                            if (jt >= 0 && jt != runFrom) {
+                                synchronized (st.lock) {
+                                    st.dataFrom = jt;
+                                    st.cachedBytes = jt;
+                                    st.gen++;
+                                    st.lock.notifyAll();
+                                }
+                                writeMarker(st, jt);
+                                runFrom = jt;
+                                writePos = jt;
+                                if (out != null) {
+                                    try {
+                                        out.setLength(0);
+                                        out.seek(0);
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                                if (is != null) {
+                                    try {
+                                        is.close();
+                                    } catch (Throwable ignored) {
+                                    }
+                                    is = null;
+                                }
+                                if (conn != null) {
+                                    try {
+                                        conn.disconnect();
+                                    } catch (Throwable ignored) {
+                                    }
+                                    conn = null;
+                                    st.currentConn = null;
+                                }
+                                continue outer;
+                            }
+                            throw t;
                         }
-                        synchronized (st.lock) {
-                            st.cachedBytes = pos;
-                            st.lock.notifyAll();
-                        }
-                    }
-                    out.flush();
-                    out.close();
-                    out = null;
-                    // 落位:.part → 最终文件(此后 promoteToLocalIfCached 才可见)
-                    // rename 优先(原子);serve 线程持有 .part 读句柄时 FUSE 上 rename
-                    // 会失败 → promote 内部退化为 复制+删除
-                    File f = st.finalFile;
-                    if (!promote(st.partFile, f)) {
-                        throw new IOException("缓存落位失败: " + f.getAbsolutePath());
-                    }
-                    MusicSyncManager.endCache(st.sid);
-                    DownloadDiag.log("边下边播: 缓存完成 " + f.getName() + " " + f.length() + " bytes");
-                    try {
-                        st.cb.onCached(st.sid, f);
-                    } catch (Throwable ignored) {
-                    }
+                    }   // outer
                 } catch (Throwable t) {
                     synchronized (st.lock) {
                         st.failed = true;
@@ -416,6 +576,7 @@ public final class LocalStreamProxy {
                         st.partFile.delete();   // 半截文件绝不留在最终可见路径
                     } catch (Exception ignored) {
                     }
+                    deleteMarker(st);
                     MusicSyncManager.endCache(st.sid);
                     DownloadDiag.log("边下边播: 缓存失败 " + st.sid + " | " + t);
                     try {
@@ -433,9 +594,74 @@ public final class LocalStreamProxy {
                     if (conn != null) {
                         conn.disconnect();
                     }
+                    st.currentConn = null;
                 }
             }
         };
+    }
+
+    /**
+     * 消费一次跳跃请求(取走并清零 jumpTarget)。返回 -1 表示无请求。
+     * 只取值不改数据区状态;由调用方在确认 jt != runFrom 后发布新数据区并 gen++。
+     */
+    private static long consumeJump(StreamJob st) {
+        synchronized (st.lock) {
+            long jt = st.jumpTarget;
+            st.jumpTarget = -1;
+            return jt;
+        }
+    }
+
+    /** .part 的"数据区起点"标记:跳跃后 .part 不再从 0 连续,进程重启续传需要知道起点 */
+    private static File markerFile(StreamJob st) {
+        return new File(st.partFile.getParentFile(), st.partFile.getName() + ".from");
+    }
+
+    /** 读 .from 标记;无标记/损坏一律返回 0(=数据从 0 连续,兼容旧格式 .part) */
+    private static long readMarker(StreamJob st) {
+        FileInputStream fi = null;
+        try {
+            fi = new FileInputStream(markerFile(st));
+            byte[] b = new byte[32];
+            int n = fi.read(b);
+            if (n <= 0) {
+                return 0;
+            }
+            return Long.parseLong(new String(b, 0, n, "ASCII").trim());
+        } catch (Throwable ignored) {
+            return 0;
+        } finally {
+            if (fi != null) {
+                try {
+                    fi.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private static void writeMarker(StreamJob st, long from) {
+        FileOutputStream fo = null;
+        try {
+            fo = new FileOutputStream(markerFile(st));
+            fo.write(String.valueOf(from).getBytes("ASCII"));
+        } catch (Throwable ignored) {
+            // 标记写失败只影响"进程重启后续传起点",不影响本次运行(内存里有)
+        } finally {
+            if (fo != null) {
+                try {
+                    fo.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private static void deleteMarker(StreamJob st) {
+        try {
+            markerFile(st).delete();
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 打开上游连接(带鉴权头;中继 302 手动跟随并重放头,避免跟随丢 Cookie) */
@@ -576,8 +802,27 @@ public final class LocalStreamProxy {
     private void handleServe(Socket socket, StreamJob st, long start) throws Exception {
         OutputStream out = new BufferedOutputStream(socket.getOutputStream());
         long total;
+        int myGen;
         synchronized (st.lock) {
             total = st.total;
+            myGen = st.gen;
+            // 【seek 跳跃,2026-10-04 v5.7.379】请求起点越出当前有效数据区(远未下载到 /
+            // 已被上次跳跃丢弃)→ 让下载线程从 start 重新开流,而不是干等顺序下载爬过来
+            // (旧版"边下边播无法快进"的根因:快进几 MB 要等几十秒,MediaPlayer 缓冲
+            // 耗尽直接报 MEDIA_ERROR_UNKNOWN)。断开当前上游连接以强制下载线程退出阻塞读。
+            // 小幅读 ahead(≤96KB)不跳:正常流式推进等一拍就到,频繁重握手反而更慢。
+            if (st.downloading && (start > st.cachedBytes + JUMP_THRESHOLD
+                    || start < st.dataFrom)) {
+                st.jumpTarget = start;
+                HttpURLConnection c = st.currentConn;
+                if (c != null) {
+                    try {
+                        c.disconnect();
+                    } catch (Throwable ignored) {
+                    }
+                }
+                st.lock.notifyAll();
+            }
         }
         StringBuilder h = new StringBuilder(192);
         if (total > 0) {
@@ -616,18 +861,21 @@ public final class LocalStreamProxy {
         File readFrom = st.partFile.exists() ? st.partFile : st.finalFile;
         RandomAccessFile raf = new RandomAccessFile(readFrom, "r");
         try {
-            raf.seek(start);
             long pos = start;
             byte[] buf = new byte[16 * 1024];
             while (true) {
                 long cached;
+                long from;
                 boolean downloading;
                 synchronized (st.lock) {
                     cached = st.cachedBytes;
+                    from = st.dataFrom;
                     downloading = st.downloading;
                 }
-                if (pos < cached) {
+                if (pos >= from && pos < cached) {
+                    // .part 内偏移 = 绝对偏移 - 数据区起点(跳跃后数据区不再从 0 起)
                     int want = (int) Math.min(buf.length, cached - pos);
+                    raf.seek(pos - from);
                     int n = raf.read(buf, 0, want);
                     if (n <= 0) {
                         break;
@@ -637,9 +885,21 @@ public final class LocalStreamProxy {
                 } else if (total > 0 && pos >= total) {
                     break;   // 完整送达
                 } else if (downloading) {
-                    // 等下载推进(用户 seek 到未下载区间时在这里等待,等效"静默等待")
+                    // 等下载推进
                     synchronized (st.lock) {
                         if (st.cachedBytes <= pos && st.downloading) {
+                            if (pos < st.dataFrom && st.gen == myGen) {
+                                // 请求点已被新跳跃丢弃(本连接是旧代次残留)→ 触发回跳。
+                                // gen 不匹配则不抢:新连接正在被服务,旧连接安静饿死即可
+                                st.jumpTarget = pos;
+                                HttpURLConnection c = st.currentConn;
+                                if (c != null) {
+                                    try {
+                                        c.disconnect();
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                            }
                             st.lock.wait(15000);
                         }
                     }

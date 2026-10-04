@@ -134,6 +134,8 @@ public class MusicService extends Service {
             new LocalStreamProxy.CacheCallback() {
         @Override
         public void onCached(final String streamId, final java.io.File finalFile) {
+            // 当前歌已下载完:下载链路空出,预缓存可以恢复(播放只剩轻量本地文件读)
+            currentViaProxy = false;
             // ---- 后台线程:登记(与 autoCacheSongLocked 成功路径一致) ----
             try {
                 MusicBean song = findBeanByStreamId(streamId);
@@ -196,6 +198,7 @@ public class MusicService extends Service {
         public void onFailed(final String streamId, String reason) {
             // 失败只记日志:当前歌由 MediaPlayer 报错走 downloadThenPlay 兜底,
             // 预缓存由下一次播放成功路径触发,这里不抢带宽。
+            currentViaProxy = false;   // 下载链路已结束(无论成败),解除预缓存让路
             DownloadDiag.log("边下边播: 缓存失败 sid=" + streamId + " 原因=" + reason);
             // 广播 percent=-1 清掉界面上的缓存进度(播放条缓冲段),语义同下载失败心跳
             Intent pi = new Intent(ACTION_CACHE_PROGRESS);
@@ -220,6 +223,13 @@ public class MusicService extends Service {
 
     /** 防止快速切歌导致卡死:记录当前播放请求的唯一标识 */
     private volatile int playToken = 0;
+    /**
+     * 当前这首歌是否正走本地流代理(边下边播)下载中(2026-10-04 v5.7.379)。
+     * 车机日志(09:34-09:41 段)实锤:流代理下载(400KB/s)+ 预缓存 3 首(100KB/s)
+     * + 用户滚 810 首大列表同时发生时,2 核 CPU 与慢速 SD 卡被打满,主线程卡 5~20 秒。
+     * 流代理期间预缓存一律让路:同一时刻只留"当前歌"这一条下载链路。
+     */
+    private volatile boolean currentViaProxy = false;
     /**
      * 播放失败但该歌的代理仍在缓存时的重播意图(streamId):
      * onCached 回调里检测到它就自动本地重播;切歌/代理失败时作废。
@@ -954,6 +964,7 @@ public class MusicService extends Service {
         long tSetDs = 0L;
         /** 本次播放是否走了本地流代理(边下边播):决定预缓存的触发时机 */
         boolean viaProxy = false;
+        currentViaProxy = false;   // 每次播放先复位,下方走代理再置位
 
         try {
             // 网络歌曲:用 Navidrome stream URL
@@ -990,6 +1001,7 @@ public class MusicService extends Service {
                             player.setDataSource(this, android.net.Uri.parse(
                                     LocalStreamProxy.get().url(bean.getStreamId())));
                             viaProxy = true;
+                            currentViaProxy = true;
                             DownloadDiag.log("联网播放: 走本地流代理(边下边播) "
                                     + bean.getTitle());
                         }
@@ -1355,6 +1367,15 @@ public class MusicService extends Service {
      */
     private void preCacheUpcoming(int count) {
         if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
+            return;
+        }
+        // 【让路,2026-10-04 v5.7.379】当前歌正走流代理边下边播时不再排预缓存:
+        // 日志(09:34-09:41 段)实锤两条下载链路 + 滚动 810 首大列表并发时,
+        // 2 核 CPU 与慢速 SD 卡被打满,主线程连环卡 5~20 秒。378 的 8 秒冷却只是
+        // 把碰撞推迟了 8 秒,治本是把"同一时刻的下载链路"收敛到一条 ——
+        // 流代理歌播完/切走后,下一次触发(切歌/重播路径末尾)自然会恢复预缓存。
+        if (currentViaProxy) {
+            DownloadDiag.log("预缓存: 跳过(当前歌边下边播中,让路)");
             return;
         }
         final String syncPath = navidromeConfig.getCloudDir();
