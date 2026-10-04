@@ -496,9 +496,17 @@ public class MusicService extends Service {
                     posTrackStartPos = msec;
                     lastSyncRealtime = posTrackRealtime;
                 }
+                DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (已prepared)");
             } catch (Exception e) {
                 Log.w(TAG, "seekTo failed", e);
             }
+        } else {
+            // 缓冲未完成(prepare 中 / 下载兜底重播中):seek 不能静默丢弃 ——
+            // 否则用户拖了进度条、歌却从原位置播(2026-10-04 车机实测:
+            // "进度条在动,歌曲没跟着跳")。挂起到 onPrepared 起播时生效
+            // (onPrepared 已有 pendingSeekPosition>0 的应用逻辑)。
+            pendingSeekPosition = msec;
+            DownloadDiag.log("seek: 跳转到 " + (msec / 1000) + "s (未prepared,挂起待起播生效)");
         }
     }
 
