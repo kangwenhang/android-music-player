@@ -218,10 +218,12 @@ public final class UpdateChecker {
             String curName = pi.versionName;
             JSONObject bestHit = null;
             UpdateInfo info = null;
+            int metaDlFail = 0;
             for (int i = 0; i < hits.size(); i++) {
                 JSONObject hit = hits.get(i);
                 String jsonText = downloadEntryToString(base, shareId, token, hit);
                 if (jsonText == null) {
+                    metaDlFail++;
                     Log.w(TAG, "版本信息下载失败,跳过: " + hit.optString("file"));
                     continue;
                 }
@@ -248,6 +250,13 @@ public final class UpdateChecker {
                 }
             }
             if (bestHit == null || info == null) {
+                if (metaDlFail >= hits.size()) {
+                    // 全部版本信息都下载失败(常见:旧版 app 没有 Cookie 头,服务端 400)
+                    // 如实报错,而不是误报"已是最新版本"
+                    fail(ctx, listener, "版本信息下载失败(共 " + hits.size()
+                            + " 个),服务端拒绝;若本机版本较旧,请手动安装新 APK");
+                    return;
+                }
                 status(listener, "已是最新版本 " + curName);
                 DownloadDiag.log("[自更新] 已是最新(" + curName + "), 不提示");
                 return;
