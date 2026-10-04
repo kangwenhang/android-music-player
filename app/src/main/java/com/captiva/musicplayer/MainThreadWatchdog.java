@@ -64,8 +64,10 @@ public final class MainThreadWatchdog {
                             // 栈顶就是凶手);恢复后再抓就只剩"恢复后的 peaceful 栈"了。
                             boolean stuckConfirmed = !latch.await(WARN_MS, TimeUnit.MILLISECONDS);
                             java.lang.StackTraceElement[] stuckStack = null;
+                            long cpuAtStuck = -1L;
                             if (stuckConfirmed) {
                                 stuckStack = grabMainThreadStack();
+                                cpuAtStuck = readProcessCpuMs();
                                 // 继续等主线程恢复(总上限 180s),拿到真实卡顿时长
                                 latch.await(180_000L - WARN_MS, TimeUnit.MILLISECONDS);
                             }
@@ -91,6 +93,19 @@ public final class MainThreadWatchdog {
                                     // 全线程清单(2026-10-04):卡顿=主线程被抢时的"在场人员名单"。
                                     // 每线程记 优先级/状态/栈顶一帧,谁在占用 CPU 一眼可见
                                     dumpThreadInventory();
+                                    // 内因/外因判据:卡顿期间本进程 CPU 时间增量。
+                                    // <30% 墙钟 → 主线程没分到 CPU(外部抢占:mediaserver 解码/
+                                    //   系统进程吃满 2 核);>70% → 自己烧的(GC 风暴/分配风暴)
+                                    long cpuTotal = readProcessCpuMs();
+                                    if (cpuAtStuck >= 0 && cpuTotal >= cpuAtStuck && cost > 0) {
+                                        long used = cpuTotal - cpuAtStuck;
+                                        int pct = (int) (used * 100 / cost);
+                                        String verdict = (pct >= 70) ? "内因:本进程(GC/分配风暴)"
+                                                : (pct <= 30) ? "外因:CPU 被外部进程抢占"
+                                                : "混合";
+                                        DownloadDiag.log("[主线程] 卡顿期间本进程 CPU=" + used
+                                                + "ms/" + cost + "ms(" + pct + "%) → " + verdict);
+                                    }
                                 }
                             }
                         } catch (InterruptedException e) {
@@ -111,6 +126,37 @@ public final class MainThreadWatchdog {
         } catch (Throwable e) {
             running = false;
             DownloadDiag.logError("[主线程] 看门狗启动失败", e);
+        }
+    }
+
+    /** 读 /proc/self/stat 的 utime+stime(本进程累计 CPU 毫秒),判内因/外因用 */
+    private static long readProcessCpuMs() {
+        try {
+            byte[] buf = new byte[512];
+            int n;
+            java.io.FileInputStream fis = new java.io.FileInputStream("/proc/self/stat");
+            try {
+                n = fis.read(buf);
+            } finally {
+                fis.close();
+            }
+            if (n <= 0) {
+                return -1L;
+            }
+            String s = new String(buf, 0, n);
+            // comm 字段可能含空格/括号,从最后一个 ')' 后取字段
+            int close = s.lastIndexOf(')');
+            if (close < 0 || close + 2 >= s.length()) {
+                return -1L;
+            }
+            String[] f = s.substring(close + 2).split(" ");
+            // 去掉 comm 后 state 是第 0 字段,utime=第 11,stime=第 12(1-based)
+            long utime = Long.parseLong(f[11]);
+            long stime = Long.parseLong(f[12]);
+            long hz = 100L;   // Android USER_HZ 固定 100
+            return (utime + stime) * 1000L / hz;
+        } catch (Throwable ignored) {
+            return -1L;
         }
     }
 
