@@ -5,10 +5,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Log;
-import android.view.LayoutInflater;
+import android.graphics.drawable.Drawable;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -150,6 +151,18 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private final int coverSizeList;
     private final int colorFavoriteActive;
     private final int colorFavoriteInactive;
+    // item 代码构造用(方案 A:绕开 XML+AppCompat tint 解析,根治滑动卡顿 2026-10-04)
+    private final int dimItemPadding;      // list_item_padding(左/上/下)
+    private final int dimIndexReserve;     // index_bar_reserve(右侧留白,索引条区域)
+    private final int dimIndexWidth;       // 序号列宽 28dp
+    private final int dimCoverGapStart;    // 封面左边距 4dp
+    private final int dimCoverGapEnd;      // 封面右边距 8dp
+    private final int dimSourceDot;        // 来源标识点 6dp
+    private final int dimSourceDotGap;     // 来源标识左边距 8dp
+    private final float dimSubTextSize;    // 次要文字尺寸(px)
+    private final float dimTitleTextSize;  // 标题文字尺寸(px)
+    private final Drawable coverPlaceholder; // 封面占位背景
+    private final int colorSourceDotInit;  // 来源点初始颜色(=source_local)
 
     public MusicAdapter(Context context) {
         this.context = context;
@@ -165,8 +178,26 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         coverSizeList = (int) context.getResources().getDimension(R.dimen.cover_size_list);
         colorFavoriteActive = ContextCompat.getColor(context, R.color.favorite_active);
         colorFavoriteInactive = ContextCompat.getColor(context, R.color.favorite_inactive);
+        // item 代码构造用的尺寸/占位图(只执行一次)
+        dimItemPadding = (int) context.getResources().getDimension(R.dimen.list_item_padding);
+        dimIndexReserve = (int) context.getResources().getDimension(R.dimen.index_bar_reserve);
+        dimSubTextSize = context.getResources().getDimension(R.dimen.sub_text_size);
+        dimTitleTextSize = context.getResources().getDimension(R.dimen.list_title_text_size);
+        float density = context.getResources().getDisplayMetrics().density;
+        dimIndexWidth = dpToPx(density, 28);
+        dimCoverGapStart = dpToPx(density, 4);
+        dimCoverGapEnd = dpToPx(density, 8);
+        dimSourceDot = dpToPx(density, 6);
+        dimSourceDotGap = dpToPx(density, 8);
+        coverPlaceholder = context.getResources().getDrawable(R.drawable.bg_cover_placeholder);
+        colorSourceDotInit = colorSourceLocal;
         // 启用稳定 ID 提升 RecyclerView 回收效率
         setHasStableIds(true);
+    }
+
+    /** dp → px(XML 里写死的 4dp/8dp/6dp/28dp 换算) */
+    private static int dpToPx(float density, int dp) {
+        return (int) (dp * density + 0.5f);
     }
 
     /** 稳定 ID 映射:身份键 → 唯一 long,避免 String.hashCode() 碰撞导致不同歌曲被当成同一行而漏绘 */
@@ -943,9 +974,97 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     @NonNull
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View v = LayoutInflater.from(parent.getContext())
-                .inflate(R.layout.item_music, parent, false);
+        // 方案 A:纯代码构造 item 视图,不走 LayoutInflater/XML/AppCompat tint 解析。
+        // 车机日志(2026-10-04 download_debug(10))10 次主线程卡顿(最长 14.7s)有 9 次
+        // 现场堆栈停在 onCreateViewHolder→inflate 的 AppCompat 视图构造里(applyStyle/
+        // TintTypedArray/ColorStateList 在弱 CPU+Dalvik 上被放大到秒级)。item 布局只有
+        // 6 个视图且颜色全部写死,不依赖任何主题 tint 能力,代码构造视觉完全一致,
+        // 单次创建从百毫秒级降到毫秒级。item_music.xml 保留作视觉基准文档。
+        View v = buildItemView(parent);
         return new VH(v, this);
+    }
+
+    /**
+     * 代码构造 item 行(等价于 item_music.xml):
+     * [tv_index 28dp] [iv_cover] [纵向 tv_title/tv_artist weight=1] [v_source 6dp]
+     * 视图 id 与 XML 一致(setId),VH 侧 findViewById 逻辑不变。
+     */
+    private View buildItemView(ViewGroup parent) {
+        // 根容器:横向 LinearLayout,行背景,可点击/可聚焦(与 XML 相同,无涟漪=API17 行为一致)
+        LinearLayout root = new LinearLayout(context);
+        root.setOrientation(LinearLayout.HORIZONTAL);
+        root.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        root.setClickable(true);
+        root.setFocusable(true);
+        root.setBackgroundColor(colorListItemBg);
+        // XML: padding=list_item_padding, paddingRight/End=index_bar_reserve
+        root.setPadding(dimItemPadding, dimItemPadding, dimIndexReserve, dimItemPadding);
+        RecyclerView.LayoutParams rootLp = new RecyclerView.LayoutParams(
+                RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.WRAP_CONTENT);
+        root.setLayoutParams(rootLp);
+
+        // 序号
+        TextView tvIndex = new TextView(context);
+        tvIndex.setId(R.id.tv_index);
+        tvIndex.setGravity(android.view.Gravity.CENTER);
+        tvIndex.setTextColor(colorTextSecondary);
+        tvIndex.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dimSubTextSize);
+        LinearLayout.LayoutParams indexLp = new LinearLayout.LayoutParams(
+                dimIndexWidth, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tvIndex.setLayoutParams(indexLp);
+        root.addView(tvIndex);
+
+        // 封面
+        ImageView ivCover = new ImageView(context);
+        ivCover.setId(R.id.iv_cover);
+        ivCover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        if (coverPlaceholder != null) {
+            ivCover.setBackgroundDrawable(coverPlaceholder);
+        }
+        ivCover.setContentDescription("封面");
+        LinearLayout.LayoutParams coverLp = new LinearLayout.LayoutParams(
+                coverSizeList, coverSizeList);
+        coverLp.setMargins(dimCoverGapStart, 0, dimCoverGapEnd, 0);
+        ivCover.setLayoutParams(coverLp);
+        root.addView(ivCover);
+
+        // 标题/艺术家纵向容器(weight=1)
+        LinearLayout textCol = new LinearLayout(context);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        textCol.setLayoutParams(colLp);
+        root.addView(textCol);
+
+        TextView tvTitle = new TextView(context);
+        tvTitle.setId(R.id.tv_title);
+        tvTitle.setSingleLine(true);
+        tvTitle.setEllipsize(TextUtils.TruncateAt.END);
+        tvTitle.setTextColor(colorTextPrimary);
+        tvTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dimTitleTextSize);
+        textCol.addView(tvTitle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView tvArtist = new TextView(context);
+        tvArtist.setId(R.id.tv_artist);
+        tvArtist.setSingleLine(true);
+        tvArtist.setEllipsize(TextUtils.TruncateAt.END);
+        tvArtist.setTextColor(colorTextSecondary);
+        tvArtist.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, dimSubTextSize);
+        textCol.addView(tvArtist, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        // 来源标识点
+        View vSource = new View(context);
+        vSource.setId(R.id.v_source);
+        vSource.setBackgroundColor(colorSourceDotInit);
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(
+                dimSourceDot, dimSourceDot);
+        dotLp.setMargins(dimSourceDotGap, 0, 0, 0);
+        vSource.setLayoutParams(dotLp);
+        root.addView(vSource);
+
+        return root;
     }
 
     /** 复用的 StringBuilder(避免每次 onBind 创建新 String 对象,减少 GC) */
