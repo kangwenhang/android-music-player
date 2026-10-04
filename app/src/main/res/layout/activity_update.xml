@@ -1,115 +1,178 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 检查更新页面(1024x600 横屏):版本对比 + 状态 + 下载进度 + 更新说明 -->
+<!-- 检查更新页面(与设置页统一风格:bg_main + 标题栏 + 信息卡片 + bg_btn) -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="24dp">
+    android:background="@color/bg_main">
 
-    <TextView
-        android:id="@+id/tvTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="检查更新"
-        android:textSize="26sp"
-        android:textStyle="bold" />
-
-    <!-- 版本对比行 -->
+    <!-- 标题栏(同设置页) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="@dimen/title_bar_padding"
+        android:background="@color/bg_title_bar">
 
         <TextView
-            android:id="@+id/tvCurrent"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="当前版本: --"
-            android:textSize="18sp" />
-
-        <TextView
-            android:id="@+id/tvLatest"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="最新版本: 待检查"
-            android:textSize="18sp" />
-    </LinearLayout>
-
-    <!-- 状态行(检查中/下载中/校验/失败原因) -->
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:text="点「检查更新」开始"
-        android:textSize="16sp" />
-
-    <!-- 下载进度条(下载阶段才可见) -->
-    <ProgressBar
-        android:id="@+id/pbDownload"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:max="100"
-        android:visibility="gone" />
-
-    <!-- 更新说明(可滚动) -->
-    <TextView
-        android:id="@+id/tvNotes"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="12dp"
-        android:layout_weight="1"
-        android:background="@android:color/transparent"
-        android:scrollbars="vertical"
-        android:textSize="15sp"
-        android:visibility="gone" />
-
-    <!-- 接收测试版更新开关(仅调试包或开关打开后才有意义,始终显示) -->
-    <ToggleButton
-        android:id="@+id/tgDebugChannel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textOff="测试频道: 关(正式包默认)"
-        android:textOn="测试频道: 开(接收调试包)" />
-
-    <!-- 按钮行 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/btnCheck"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="检查更新"
-            android:textSize="17sp" />
-
-        <Button
-            android:id="@+id/btnInstall"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="12dp"
-            android:layout_weight="1"
-            android:enabled="false"
-            android:text="下载安装"
-            android:textSize="17sp" />
+            android:textColor="@color/text_title"
+            android:textSize="@dimen/title_text_size"
+            android:textStyle="bold" />
 
         <Button
             android:id="@+id/btnClose"
-            android:layout_width="0dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginLeft="12dp"
-            android:layout_weight="1"
+            android:background="@drawable/bg_btn"
             android:text="返回"
-            android:textSize="17sp" />
+            android:textColor="@color/btn_text"
+            android:textSize="@dimen/sub_text_size"
+            android:minWidth="72dp" />
+    </LinearLayout>
+
+    <!-- 内容区 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- 版本对比卡片 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="@drawable/bg_info_card">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="当前版本"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/sub_text_size" />
+
+                <TextView
+                    android:id="@+id/tvCurrent"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginLeft="16dp"
+                    android:text="--"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/sub_text_size"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="最新版本"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/sub_text_size" />
+
+                <TextView
+                    android:id="@+id/tvLatest"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginLeft="16dp"
+                    android:text="待检查"
+                    android:textColor="@color/accent"
+                    android:textSize="@dimen/sub_text_size"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 状态行 + 进度条 -->
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="正在检查…"
+            android:textColor="@color/text_secondary"
+            android:textSize="16sp" />
+
+        <ProgressBar
+            android:id="@+id/pbDownload"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:max="100"
+            android:visibility="gone" />
+
+        <!-- 更新说明卡片(可滚动) -->
+        <TextView
+            android:id="@+id/tvNotes"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="14dp"
+            android:padding="14dp"
+            android:background="@drawable/bg_info_card"
+            android:scrollbars="vertical"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:lineSpacingExtra="4dp"
+            android:visibility="gone" />
+
+        <!-- 接收测试版更新开关(与设置页 CheckBox 风格一致) -->
+        <CheckBox
+            android:id="@+id/cbDebugChannel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="接收测试版更新(正式包默认只收正式版,开启后也能收到调试包)"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp" />
+
+        <!-- 按钮行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnCheck"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_btn"
+                android:text="检查更新"
+                android:textColor="@color/btn_text"
+                android:textSize="@dimen/sub_text_size" />
+
+            <Button
+                android:id="@+id/btnInstall"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginLeft="14dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_dialog_btn_positive"
+                android:enabled="false"
+                android:text="下载安装"
+                android:textColor="@color/btn_text"
+                android:textSize="@dimen/sub_text_size" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

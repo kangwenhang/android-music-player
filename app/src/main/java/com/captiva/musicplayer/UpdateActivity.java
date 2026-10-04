@@ -5,11 +5,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ToggleButton;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -23,6 +23,10 @@ import org.json.JSONObject;
  * - 本页面把"当前版本 / 最新版本 / 状态 / 进度条 / 更新说明"全部常驻可视,
  *   下载有字节级进度条,失败原因直接写在状态行,不再靠猜。
  *
+ * 风格(v5.7.406,用户要求"跟设置页面保持一致"):
+ * bg_main 背景 + bg_title_bar 标题栏 + bg_info_card 信息卡片 +
+ * bg_btn/bg_dialog_btn_positive 按钮,全部复用设置页的颜色/尺寸资源。
+ *
  * 流程:进入自动检查 → 发现新版本点亮「下载安装」→ 点击后带进度条下载
  * → sha256 校验 → 调起系统安装器(失败会给 APK 落点提示)。
  */
@@ -33,7 +37,7 @@ public class UpdateActivity extends AppCompatActivity {
     private TextView tvStatus;
     private TextView tvNotes;
     private ProgressBar pbDownload;
-    private ToggleButton tgDebugChannel;
+    private CheckBox cbDebugChannel;
     private Button btnCheck;
     private Button btnInstall;
 
@@ -54,7 +58,7 @@ public class UpdateActivity extends AppCompatActivity {
         tvStatus = (TextView) findViewById(R.id.tvStatus);
         tvNotes = (TextView) findViewById(R.id.tvNotes);
         pbDownload = (ProgressBar) findViewById(R.id.pbDownload);
-        tgDebugChannel = (ToggleButton) findViewById(R.id.tgDebugChannel);
+        cbDebugChannel = (CheckBox) findViewById(R.id.cbDebugChannel);
         btnCheck = (Button) findViewById(R.id.btnCheck);
         btnInstall = (Button) findViewById(R.id.btnInstall);
         Button btnClose = (Button) findViewById(R.id.btnClose);
@@ -63,15 +67,14 @@ public class UpdateActivity extends AppCompatActivity {
         try {
             android.content.pm.PackageInfo pi = getPackageManager()
                     .getPackageInfo(getPackageName(), 0);
-            tvCurrent.setText("当前版本: " + pi.versionName
-                    + " (" + pi.versionCode + ")");
+            tvCurrent.setText(pi.versionName + " (" + pi.versionCode + ")");
         } catch (Throwable t) {
-            tvCurrent.setText("当前版本: 未知");
+            tvCurrent.setText("未知");
         }
 
         // 测试频道开关(记忆在 UpdateChecker 的 SharedPreferences)
-        tgDebugChannel.setChecked(UpdateChecker.isAllowDebugUpdates(this));
-        tgDebugChannel.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+        cbDebugChannel.setChecked(UpdateChecker.isAllowDebugUpdates(this));
+        cbDebugChannel.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
             @Override
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 UpdateChecker.setAllowDebugUpdates(UpdateActivity.this, isChecked);
@@ -120,10 +123,12 @@ public class UpdateActivity extends AppCompatActivity {
         pendingApkEntry = null;
         btnCheck.setEnabled(false);
         btnInstall.setEnabled(false);
+        setInstallEnabled(false);
         pbDownload.setVisibility(View.GONE);
         tvNotes.setVisibility(View.GONE);
         tvNotes.setText("");
-        tvLatest.setText("最新版本: 检查中…");
+        tvLatest.setText("检查中…");
+        tvLatest.setTextColor(getResources().getColor(R.color.text_secondary));
         setStatus("正在解析分享链接…");
 
         UpdateChecker.check(this, new UpdateChecker.StatusListener() {
@@ -138,7 +143,8 @@ public class UpdateActivity extends AppCompatActivity {
                         || msg.contains("没有 APK"))) {
                     busy = false;
                     btnCheck.setEnabled(true);
-                    tvLatest.setText("最新版本: --");
+                    tvLatest.setText("无新版本");
+                    tvLatest.setTextColor(getResources().getColor(R.color.text_secondary));
                 }
             }
         }, new UpdateChecker.UpdateCallback() {
@@ -148,13 +154,15 @@ public class UpdateActivity extends AppCompatActivity {
                 btnCheck.setEnabled(true);
                 pendingInfo = info;
                 pendingApkEntry = apkEntry;
-                tvLatest.setText("最新版本: " + info.versionName);
+                tvLatest.setText(info.versionName);
+                tvLatest.setTextColor(getResources().getColor(R.color.accent));
                 setStatus("发现新版本,点「下载安装」开始升级");
                 tvNotes.setVisibility(View.VISIBLE);
                 tvNotes.setText("更新说明:\n"
                         + (info.notes == null || info.notes.trim().isEmpty()
                         ? "(无)" : info.notes.trim()));
                 btnInstall.setEnabled(true);
+                setInstallEnabled(true);
             }
         });
     }
@@ -170,7 +178,8 @@ public class UpdateActivity extends AppCompatActivity {
         busy = true;
         btnCheck.setEnabled(false);
         btnInstall.setEnabled(false);
-        tgDebugChannel.setEnabled(false);
+        setInstallEnabled(false);
+        cbDebugChannel.setEnabled(false);
         pbDownload.setVisibility(View.VISIBLE);
         pbDownload.setIndeterminate(true);
         setStatus("正在下载 " + pendingInfo.fileName + " …");
@@ -212,12 +221,17 @@ public class UpdateActivity extends AppCompatActivity {
     private void onInstallHandoff() {
         busy = false;
         btnCheck.setEnabled(true);
-        tgDebugChannel.setEnabled(true);
+        cbDebugChannel.setEnabled(true);
         pbDownload.setVisibility(View.GONE);
         // 下载安装到本版本完成,清掉待装状态(装完后当前版本即最新)
         btnInstall.setEnabled(false);
         pendingInfo = null;
         pendingApkEntry = null;
+    }
+
+    /** 「下载安装」按钮禁用态降透明度,与启用态形成视觉区分 */
+    private void setInstallEnabled(boolean enabled) {
+        btnInstall.setAlpha(enabled ? 1.0f : 0.45f);
     }
 
     private void setStatus(String msg) {
