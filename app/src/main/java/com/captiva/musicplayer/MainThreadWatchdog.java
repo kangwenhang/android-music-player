@@ -65,9 +65,11 @@ public final class MainThreadWatchdog {
                             boolean stuckConfirmed = !latch.await(WARN_MS, TimeUnit.MILLISECONDS);
                             java.lang.StackTraceElement[] stuckStack = null;
                             long cpuAtStuck = -1L;
+                            java.util.Map<Long, Long> cpuPerThreadAtStuck = null;
                             if (stuckConfirmed) {
                                 stuckStack = grabMainThreadStack();
                                 cpuAtStuck = readProcessCpuMs();
+                                cpuPerThreadAtStuck = readThreadCpuMap();
                                 // 继续等主线程恢复(总上限 180s),拿到真实卡顿时长
                                 latch.await(180_000L - WARN_MS, TimeUnit.MILLISECONDS);
                             }
@@ -93,6 +95,9 @@ public final class MainThreadWatchdog {
                                     // 全线程清单(2026-10-04):卡顿=主线程被抢时的"在场人员名单"。
                                     // 每线程记 优先级/状态/栈顶一帧,谁在占用 CPU 一眼可见
                                     dumpThreadInventory();
+                                    // 按线程 CPU 增量排行(394):卡顿期间每个线程烧了多少 CPU,
+                                    // 直接点名元凶(TLS 握手/GC/主线程文本排版一目了然)
+                                    dumpPerThreadCpuDelta(cpuPerThreadAtStuck);
                                     // 内因/外因判据:卡顿期间本进程 CPU 时间增量。
                                     // <30% 墙钟 → 主线程没分到 CPU(外部抢占:mediaserver 解码/
                                     //   系统进程吃满 2 核);>70% → 自己烧的(GC 风暴/分配风暴)
@@ -129,12 +134,35 @@ public final class MainThreadWatchdog {
         }
     }
 
-    /** 读 /proc/self/stat 的 utime+stime(本进程累计 CPU 毫秒),判内因/外因用 */
-    private static long readProcessCpuMs() {
+    /** 读 /proc/self/task/*/stat,返回 tid→(utime+stime)毫秒 映射(单线程 CPU 记账) */
+    private static java.util.Map<Long, Long> readThreadCpuMap() {
+        java.util.Map<Long, Long> map = new java.util.HashMap<Long, Long>();
+        try {
+            java.io.File taskDir = new java.io.File("/proc/self/task");
+            java.io.File[] tids = taskDir.listFiles();
+            if (tids == null) {
+                return map;
+            }
+            for (File f : tids) {
+                try {
+                    long cpu = readStatCpuMs(f.getAbsolutePath());
+                    if (cpu >= 0) {
+                        map.put(Long.parseLong(f.getName()), cpu);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return map;
+    }
+
+    /** 读一个 /proc/<pid|tid>/stat 的 utime+stime,转毫秒;失败返回 -1 */
+    private static long readStatCpuMs(String path) {
         try {
             byte[] buf = new byte[512];
             int n;
-            java.io.FileInputStream fis = new java.io.FileInputStream("/proc/self/stat");
+            java.io.FileInputStream fis = new java.io.FileInputStream(path);
             try {
                 n = fis.read(buf);
             } finally {
@@ -144,13 +172,11 @@ public final class MainThreadWatchdog {
                 return -1L;
             }
             String s = new String(buf, 0, n);
-            // comm 字段可能含空格/括号,从最后一个 ')' 后取字段
             int close = s.lastIndexOf(')');
             if (close < 0 || close + 2 >= s.length()) {
                 return -1L;
             }
             String[] f = s.substring(close + 2).split(" ");
-            // 去掉 comm 后 state 是第 0 字段,utime=第 11,stime=第 12(1-based)
             long utime = Long.parseLong(f[11]);
             long stime = Long.parseLong(f[12]);
             long hz = 100L;   // Android USER_HZ 固定 100
@@ -158,6 +184,67 @@ public final class MainThreadWatchdog {
         } catch (Throwable ignored) {
             return -1L;
         }
+    }
+
+    /** 读 /proc/self/stat 的 utime+stime(本进程累计 CPU 毫秒),判内因/外因用 */
+    private static long readProcessCpuMs() {
+        return readStatCpuMs("/proc/self/stat");
+    }
+
+    /**
+     * 按线程 CPU 增量排行:卡顿期间每个线程烧了多少 CPU(394)。
+     * 元凶直接点名(TLS 握手线程/GC/主线程文本排版一目了然),取前 8 名。
+     */
+    private static void dumpPerThreadCpuDelta(java.util.Map<Long, Long> atStuck) {
+        if (atStuck == null || atStuck.isEmpty()) {
+            return;
+        }
+        try {
+            java.util.Map<Long, Long> now = readThreadCpuMap();
+            java.util.List<long[]> deltas = new java.util.ArrayList<long[]>();
+            long sum = 0;
+            for (java.util.Map.Entry<Long, Long> e : now.entrySet()) {
+                long base = atStuck.containsKey(e.getKey()) ? atStuck.get(e.getKey()) : 0L;
+                long d = e.getValue() - base;
+                if (d > 0) {
+                    deltas.add(new long[]{e.getKey(), d});
+                    sum += d;
+                }
+            }
+            if (deltas.isEmpty()) {
+                DownloadDiag.log("[主线程] 卡顿期间无线程 CPU 增量(时间被进程外消耗)");
+                return;
+            }
+            java.util.Collections.sort(deltas, new java.util.Comparator<long[]>() {
+                public int compare(long[] a, long[] b) {
+                    return (b[1] > a[1]) ? 1 : (b[1] < a[1]) ? -1 : 0;
+                }
+            });
+            DownloadDiag.log("[主线程] 卡顿期间各线程 CPU 增量排行:");
+            for (int i = 0; i < deltas.size() && i < 8; i++) {
+                long tid = deltas.get(i)[0];
+                long ms = deltas.get(i)[1];
+                Thread t = findThreadById(tid);
+                String name = (t != null) ? t.getName() : ("tid-" + tid);
+                String top = "(已退出)";
+                if (t != null) {
+                    java.lang.StackTraceElement[] st = t.getStackTrace();
+                    top = (st != null && st.length > 0) ? st[0].toString() : "(无栈)";
+                }
+                DownloadDiag.log("    " + name + " = " + ms + "ms | " + top);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 按 tid 找线程对象(找名字/栈顶用) */
+    private static Thread findThreadById(long tid) {
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t.getId() == tid) {
+                return t;
+            }
+        }
+        return null;
     }
 
     /** 进程退出/测试时停止采样 */
