@@ -434,6 +434,7 @@ public final class UpdateChecker {
             // 复用检查阶段的会话;没有(直接调/旧调用方)就现建一个
             if (base == null || base.trim().isEmpty() || token == null
                     || token.trim().isEmpty()) {
+                DownloadDiag.log("[自更新] 下载阶段无可用会话,现建(resolve→token)");
                 String[] sess = establishSession(shareId);
                 if (sess == null) {
                     fail(ctx, listener, "下载失败: 解析分享链接失败(已重试)\n原因: "
@@ -442,6 +443,9 @@ public final class UpdateChecker {
                 }
                 base = sess[0];
                 token = sess[1];
+            } else {
+                // 会话复用生效标志:常规路径应出现这行,且其后无 resolve 记录
+                DownloadDiag.log("[自更新] 复用检查阶段会话, 跳过 resolve, base=" + base);
             }
 
             File dest = prepareApkFile(ctx);
