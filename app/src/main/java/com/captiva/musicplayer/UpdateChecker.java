@@ -44,7 +44,10 @@ import java.util.Random;
  * <li><b>下载</b>:POST {base}/s/{shareId}/api/v1/share/download,
  *     body={"files":[{"path":"父路径/文件名","fileId":N}],"shareId":..,
  *     "downloadFilename":文件名},返回 data.path(下载 URL,相对/绝对都有可能),
- *     GET 该 URL 得到文件内容。</li>
+ *     GET 该 URL 得到文件内容。<b>【关键】GET 必须带
+ *     Cookie: {shareId}={token},否则 nginx 直接 400(空 body)——
+ *     这是与 URL ?token= 相互独立的第二道校验,浏览器由分享页 JS
+ *     自动写入 cookie,脚本/HttpURLConnection 必须手动补上。</b></li>
  * </ol>
  *
  * <p>签名算法(两个 key 同一前缀):MD5("_"连接[PREFIX, 请求路径, nonce(6位),
@@ -691,7 +694,9 @@ public final class UpdateChecker {
                                                 JSONObject entry) {
         try {
             String url = resolveDownloadUrl(base, shareId, token, entry);
-            return getString(url, null);
+            // 【关键】fnOS 下载端点要求双重校验:URL ?token= 之外还必须带
+            // Cookie: <shareId>=<token>(浏览器由分享页 JS 写入,脚本必须手动补)
+            return getStringWithCookie(url, shareId + "=" + token);
         } catch (Throwable t) {
             Log.w(TAG, "downloadEntryToString 失败", t);
             return null;
@@ -710,6 +715,9 @@ public final class UpdateChecker {
             conn.setConnectTimeout(TIMEOUT_CONNECT_MS);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
+            // 【关键】fnOS 下载端点双重校验:必须带 Cookie: <shareId>=<token>,
+            // 否则 nginx 直接 400(空 body),与 URL 里的 ?token= 是两道独立检查
+            conn.setRequestProperty("Cookie", shareId + "=" + token);
             int code = conn.getResponseCode();
             if (code != 200) {
                 return "HTTP " + code;
@@ -844,6 +852,28 @@ public final class UpdateChecker {
             if (authHeader != null) {
                 conn.setRequestProperty("Auth", authHeader);
             }
+            int code = conn.getResponseCode();
+            String text = readStream(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
+            if (code >= 400) {
+                throw new IllegalStateException("HTTP " + code);
+            }
+            return text;
+        } finally {
+            try {
+                conn.disconnect();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** GET + 自定义 Cookie(fnOS 下载端点要求 Cookie: shareId=token) */
+    private static String getStringWithCookie(String url, String cookie) throws Exception {
+        HttpURLConnection conn = TlsCompat.open(url);
+        try {
+            conn.setConnectTimeout(TIMEOUT_CONNECT_MS);
+            conn.setReadTimeout(TIMEOUT_READ_MS);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Cookie", cookie);
             int code = conn.getResponseCode();
             String text = readStream(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
             if (code >= 400) {
