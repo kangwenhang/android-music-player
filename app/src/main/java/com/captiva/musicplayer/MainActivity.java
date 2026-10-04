@@ -233,6 +233,13 @@ public class MainActivity extends AppCompatActivity {
      * 避免旧结果回来后把用户当前的列表状态覆盖回去。
      */
     private int cloudFavGen = 0;
+    /**
+     * 冷启动云端收藏集合是否已静默预取(2026-10-04 v5.7.380)。
+     * 底栏红心的并集判定(本机 ∪ 云端)依赖云端收藏 ID 集合,以前只有进过一次
+     * 收藏夹才会拉取 —— 不进收藏夹直接点播放,服务器已收藏的歌红心是灰的。
+     * API 未就绪时置 false,下次 onResume 重试。
+     */
+    private boolean cloudFavBootFetched = false;
     /** 本地/云端切换:false=云端模式(默认,云端歌单全部,已下载本地播/未下载联网播);true=本地模式(仅已下载的歌) */
     private boolean localOnlyMode = false;
     /** 来源切换是否正在执行(单飞:快速连点只重建最终目标,不并发开多个扫描/构建线程) */
@@ -1052,7 +1059,7 @@ public class MainActivity extends AppCompatActivity {
                             }
                         });
                     } else {
-                        loadCloudFavorites();
+                        loadCloudFavorites(false);
                     }
                 } else {
                     // 本地模式:收藏来自本机,不联网
@@ -1063,12 +1070,16 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 btnFavorites.setBackgroundResource(R.drawable.bg_btn);
                 Log.i(TAG, "[FavToggle] 切回全部歌曲 query='" + currentSearchQuery + "'");
-                // 退出收藏夹:清掉云端收藏集合与过滤模式,恢复完整列表。
-                // 先把在途的云端收藏拉取代次作废 —— 它回来后若发现 favoritesOnly 已为 false
+                // 退出收藏夹:恢复完整列表。
+                // 【2026-10-04 v5.7.380 修复】不再清空云端收藏 ID 集合 —— 那是服务器的
+                // 真实收藏状态缓存,底栏红心的并集判定(本机 ∪ 云端)靠它:清空后回到
+                // 全部歌曲,"服务器已收藏但本机没点过"的歌红心全部变灰(用户实测反馈)。
+                // 保留集合还有两个好处:下次进收藏夹秒开;列表显示由 favoritesMode/
+                // favoritesOnly 控制,与集合是否为空无关,保留不影响列表行为。
+                // 只作废在途的云端收藏拉取代次 —— 它回来后若发现 favoritesOnly 已为 false
                 // 就只会更新缓存、不再动列表(否则会把刚恢复的"全部歌曲"又切回收藏夹)。
                 cloudFavGen++;
-                DownloadDiag.listDiag("[收藏夹] 退出 → 恢复全部歌曲(收藏集合已清空)");
-                adapter.setCloudStarredIds(null);
+                DownloadDiag.listDiag("[收藏夹] 退出 → 恢复全部歌曲(保留云端收藏集合供红心判定)");
                 adapter.setFavoritesMode(false);
                 // 恢复搜索或全部
                 long t1 = System.currentTimeMillis();
@@ -1213,6 +1224,13 @@ public class MainActivity extends AppCompatActivity {
                             + " 云端模式=" + adapter.isCloudFavoritesMode());
                     applyFavoritesFilter();
                 }
+            } else if (adapter.isCloudFavoritesMode() && sid != null && !sid.isEmpty()) {
+                // 【v5.7.380】全部歌曲(非收藏夹)里点红心也要乐观更新云端集合:
+                // 集合现在常驻内存(供红心并集判定),不同步的话取消收藏后红心
+                // 会一直错亮到下次拉取;全部歌曲不按收藏过滤,只动集合不动列表
+                adapter.updateCloudStarredId(sid, nowFav);
+                DownloadDiag.listDiag("[全部歌曲] " + (nowFav ? "收藏" : "取消收藏")
+                        + " 乐观更新云端集合 sid=" + sid);
             }
             // 红心刷新必须在云端集合乐观更新**之后**(并集口径包含 isCloudStarred)
             updateFavoriteButton(current);
@@ -1392,10 +1410,12 @@ public class MainActivity extends AppCompatActivity {
      *
      * 失败时退回本地收藏(本机收藏照常可用),绝不留一个空白列表。
      */
-    private void loadCloudFavorites() {
+    private void loadCloudFavorites(boolean silent) {
         final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
         if (api == null) {
-            Toast.makeText(this, "未连接服务器,改用本地收藏", Toast.LENGTH_SHORT).show();
+            if (!silent) {
+                Toast.makeText(this, "未连接服务器,改用本地收藏", Toast.LENGTH_SHORT).show();
+            }
             adapter.setCloudStarredIds(null);
             applyFavoritesFilter();
             return;
@@ -1403,7 +1423,9 @@ public class MainActivity extends AppCompatActivity {
         // 本次拉取的代次:网络回来之前用户可能已经退出收藏夹、甚至又进了一次,
         // 旧结果必须作废(否则会把用户当前的列表状态覆盖回去)
         final int gen = ++cloudFavGen;
-        Toast.makeText(this, "正在获取云端收藏...", Toast.LENGTH_SHORT).show();
+        if (!silent) {
+            Toast.makeText(this, "正在获取云端收藏...", Toast.LENGTH_SHORT).show();
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -1424,10 +1446,14 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
                         if (result == null) {
-                            Toast.makeText(MainActivity.this,
-                                    "获取云端收藏失败,改用本地收藏", Toast.LENGTH_SHORT).show();
-                            adapter.setCloudStarredIds(null);
-                            applyFavoritesFilter();
+                            // 静默预取失败:什么都不动,保留现有缓存,不打扰用户
+                            // (列表也绝不能动 —— 可能正停在"全部歌曲")
+                            if (!silent) {
+                                Toast.makeText(MainActivity.this,
+                                        "获取云端收藏失败,改用本地收藏", Toast.LENGTH_SHORT).show();
+                                adapter.setCloudStarredIds(null);
+                                applyFavoritesFilter();
+                            }
                             return;
                         }
                         java.util.Set<String> ids = new java.util.HashSet<>();
@@ -1503,7 +1529,7 @@ public class MainActivity extends AppCompatActivity {
             public void run() {
                 // 回滚:以服务器真实状态为准重拉一次(只在还停在收藏夹里时才需要)
                 if (favoritesOnly && adapter.isCloudFavoritesMode()) {
-                    loadCloudFavorites();
+                    loadCloudFavorites(false);
                 }
                 Toast.makeText(MainActivity.this,
                         star ? "已收藏(服务器同步失败,仅本机)" : "已取消(服务器同步失败,仅本机)",
@@ -5171,6 +5197,17 @@ public class MainActivity extends AppCompatActivity {
             }
             // 重新加载音乐(可能改了同步目录或时长过滤)
             loadMusic();
+        }
+
+        // 【v5.7.380】冷启动静默预取云端收藏 ID 集合:底栏红心并集判定(本机 ∪ 云端)
+        // 依赖这个集合,以前只有进过一次收藏夹才会拉取。静默拉取只更新缓存与红心,
+        // 不动列表(loadCloudFavorites 内部对 favoritesOnly=false 只更新缓存)。
+        if (!cloudFavBootFetched && !localOnlyMode) {
+            MusicSourceApi bootApi = MusicDataHolder.getInstance().getMusicSourceApi();
+            if (bootApi != null) {
+                cloudFavBootFetched = true;   // API 未就绪时不置位,下次 onResume 重试
+                loadCloudFavorites(true);
+            }
         }
 
         IntentFilter f = new IntentFilter(MusicService.ACTION_STATE_CHANGED);
