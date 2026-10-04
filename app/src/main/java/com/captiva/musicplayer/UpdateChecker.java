@@ -138,6 +138,20 @@ public final class UpdateChecker {
         void onStatus(String msg);
     }
 
+    /**
+     * 发现新版本回调(独立更新页面用):检查到新版本时不弹系统对话框,
+     * 而是把信息交给页面自己渲染;传 null 保持旧的弹窗行为。
+     * 回调在主线程。
+     */
+    public interface UpdateCallback {
+        void onUpdateFound(UpdateInfo info, JSONObject apkEntry);
+    }
+
+    /** 下载进度回调(done/total 字节;total 可能为 -1 表示服务器未给长度)。主线程外,UI 侧自行 post */
+    public interface ProgressListener {
+        void onProgress(long done, long total);
+    }
+
     /** 新版本信息(update.json 的投影) */
     public static class UpdateInfo {
         public String versionName;
@@ -152,10 +166,16 @@ public final class UpdateChecker {
      * 全程后台线程;状态经 listener 回主线程;发现新版本弹窗确认后才下载。
      */
     public static void check(final Context ctx, final StatusListener listener) {
+        check(ctx, listener, null);
+    }
+
+    /** 同上,但发现新版本时优先走 callback(更新页面);callback 为 null 时弹系统对话框 */
+    public static void check(final Context ctx, final StatusListener listener,
+                             final UpdateCallback callback) {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                runCheck(ctx, listener);
+                runCheck(ctx, listener, callback);
             }
         }, "update-check").start();
     }
@@ -164,7 +184,8 @@ public final class UpdateChecker {
     // 主流程(后台线程):检查 → 比对 → 弹窗确认 → 下载 → 校验 → 安装
     // ------------------------------------------------------------------
 
-    private static void runCheck(final Context ctx, final StatusListener listener) {
+    private static void runCheck(final Context ctx, final StatusListener listener,
+                                 final UpdateCallback callback) {
         try {
             final String shareId = extractShareId(SHARE_PAGE_URL);
             status(listener, "正在解析分享链接…");
@@ -273,13 +294,17 @@ public final class UpdateChecker {
             }
             status(listener, "发现新版本 " + info.versionName);
 
-            // 7) 回主线程弹窗,用户确认后才开始下载(inner class 引用需 final)
+            // 7) 回主线程交付结果:更新页面走 callback,旧路径弹系统对话框(inner class 引用需 final)
             final JSONObject apkEntryFinal = apkEntry;
             final UpdateInfo infoFinal = info;
             MAIN.post(new Runnable() {
                 @Override
                 public void run() {
-                    promptUpdate(ctx, infoFinal, apkEntryFinal, listener);
+                    if (callback != null) {
+                        callback.onUpdateFound(infoFinal, apkEntryFinal);
+                    } else {
+                        promptUpdate(ctx, infoFinal, apkEntryFinal, listener);
+                    }
                 }
             });
         } catch (final Throwable t) {
@@ -349,7 +374,7 @@ public final class UpdateChecker {
                             new Thread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    downloadAndInstall(app, info, apkEntry, listener);
+                                    downloadAndInstall(app, info, apkEntry, listener, null);
                                 }
                             }, "update-download").start();
                         }
@@ -361,9 +386,10 @@ public final class UpdateChecker {
         }
     }
 
-    /** 后台:下载 APK → sha256 校验 → 自动调起安装器 */
-    private static void downloadAndInstall(Context ctx, UpdateInfo info,
-                                           JSONObject apkEntry, StatusListener listener) {
+    /** 后台:下载 APK → sha256 校验 → 自动调起安装器(公开给更新页面复用) */
+    public static void downloadAndInstall(Context ctx, UpdateInfo info,
+                                          JSONObject apkEntry, StatusListener listener,
+                                          ProgressListener progress) {
         try {
             String shareId = extractShareId(SHARE_PAGE_URL);
             status(listener, "正在下载 " + info.fileName + " …");
@@ -391,7 +417,8 @@ public final class UpdateChecker {
             }
 
             File dest = prepareApkFile(ctx);
-            String err = downloadEntryToFile(base, shareId, token, apkEntry, dest, MAX_APK_BYTES);
+            String err = downloadEntryToFile(base, shareId, token, apkEntry, dest,
+                    MAX_APK_BYTES, progress);
             if (err != null) {
                 fail(ctx, listener, "APK 下载失败: " + err);
                 return;
@@ -734,9 +761,10 @@ public final class UpdateChecker {
         }
     }
 
-    /** 下载到文件(带大小上限);成功返回 null,失败返回原因 */
+    /** 下载到文件(带大小上限与进度回调);成功返回 null,失败返回原因 */
     private static String downloadEntryToFile(String base, String shareId, String token,
-                                              JSONObject entry, File dest, long maxBytes) {
+                                              JSONObject entry, File dest, long maxBytes,
+                                              ProgressListener progress) {
         HttpURLConnection conn = null;
         InputStream in = null;
         FileOutputStream fos = null;
@@ -765,6 +793,9 @@ public final class UpdateChecker {
                     return "文件超过大小上限(" + maxBytes + ")";
                 }
                 fos.write(buf, 0, n);
+                if (progress != null) {
+                    progress.onProgress(done, total);
+                }
             }
             fos.flush();
             if (total > 0 && done != total) {

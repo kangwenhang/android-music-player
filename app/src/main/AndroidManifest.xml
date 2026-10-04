@@ -46,6 +46,12 @@
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
+        <!-- 检查更新页面(版本对比/进度条/更新说明) -->
+        <activity
+            android:name=".UpdateActivity"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <!-- Navidrome 服务器设置界面 -->
         <activity
             android:name=".ServerSettingsActivity"

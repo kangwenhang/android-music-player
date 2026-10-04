@@ -2015,20 +2015,14 @@ public class MainActivity extends AppCompatActivity {
         sd.body.addView(createInfoCard("GitHub:\nkangwenhang/android-music-player"));
 
         // 底部按钮
-        // 【v5.7.398】检测更新改走 fnOS 分享链接(UpdateChecker,频道分离:正式/测试),
-        // 旧的 GitHub Releases 直连链路因代理/SSL 不稳已整体移除。
+        // 【v5.7.405】检测更新改走独立页面 UpdateActivity(版本对比/进度条/更新说明
+        // 常驻可视),替代原先的 Toast+对话框流程(用户反馈不直观)。
         Button btnUpdate = createDialogButton("检测更新", true);
         btnUpdate.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 dRef[0].dismiss();
-                Toast.makeText(MainActivity.this, "正在检查更新...", Toast.LENGTH_SHORT).show();
-                UpdateChecker.check(MainActivity.this, new UpdateChecker.StatusListener() {
-                    @Override
-                    public void onStatus(String msg) {
-                        Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
-                    }
-                });
+                startActivity(new Intent(MainActivity.this, UpdateActivity.class));
             }
         });
         Button btnClose = createDialogButton("关闭", false);
