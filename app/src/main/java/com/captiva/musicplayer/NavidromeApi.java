@@ -167,6 +167,10 @@ public class NavidromeApi implements MusicSourceApi {
             while ((line = reader.readLine()) != null) {
                 sb.append(line);
             }
+            // 【2026-10-04 连接复用】读完关流并置 conn=null 跳过 finally 的 disconnect(),
+            // keep-alive 连接归还连接池,避免每次请求重做 TLS 握手(车机弱核握手风暴)
+            is.close();
+            conn = null;
             return sb.toString();
         } finally {
             if (is != null) try { is.close(); } catch (Exception ignored) {}
@@ -753,6 +757,7 @@ public class NavidromeApi implements MusicSourceApi {
         FileOutputStream fos = null;
         File partFile = null;
         String urlStr = null;
+        boolean pooled = false;   // 成功读完响应=true:finally 不断开,连接归还 keep-alive 池
         try {
             urlStr = getStreamUrl(songId);
             DownloadDiag.log("下载请求: " + DownloadDiag.safeUrl(urlStr)
@@ -824,6 +829,7 @@ public class NavidromeApi implements MusicSourceApi {
                         "缓存落位失败: " + destFile.getAbsolutePath());
             }
             Log.d(TAG, "下载完成: " + songId + " -> " + destFile.getName() + " (" + total + " bytes)");
+            pooled = true;   // 读到 EOF:连接可复用(见 finally)
             return total;
         } catch (Throwable e) {
             // 必须接 Throwable:NoSuchMethodError 这类 Error 曾让下载线程静默死亡
@@ -842,7 +848,8 @@ public class NavidromeApi implements MusicSourceApi {
         } finally {
             if (fos != null) try { fos.close(); } catch (Exception ignored) {}
             if (is != null) try { is.close(); } catch (Exception ignored) {}
-            if (conn != null) conn.disconnect();
+            // 【连接复用】成功读完整个响应时不断开(keep-alive 归还连接池,免重复 TLS 握手)
+            if (conn != null && !pooled) conn.disconnect();
         }
     }
 

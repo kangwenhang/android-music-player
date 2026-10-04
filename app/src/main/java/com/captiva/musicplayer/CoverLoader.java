@@ -898,6 +898,7 @@ public class CoverLoader {
         }
         HttpURLConnection conn = null;
         InputStream is = null;
+        boolean pooled = false;   // 成功读完响应=true:finally 不断开,连接归还 keep-alive 池
         try {
             URL url = new URL(urlStr);
             conn = TlsCompat.open(url);
@@ -920,6 +921,7 @@ public class CoverLoader {
             if (data == null || data.length == 0) {
                 return null;
             }
+            pooled = true;   // 读到 EOF:连接可复用(见 finally)
             BitmapFactory.Options opts = new BitmapFactory.Options();
             opts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(data, 0, data.length, opts);
@@ -938,7 +940,8 @@ public class CoverLoader {
             return null;
         } finally {
             if (is != null) try { is.close(); } catch (Exception ignored) {}
-            if (conn != null) conn.disconnect();
+            // 【连接复用】成功读完整个响应时不断开(keep-alive 归还连接池,免重复 TLS 握手)
+            if (conn != null && !pooled) conn.disconnect();
         }
     }
 

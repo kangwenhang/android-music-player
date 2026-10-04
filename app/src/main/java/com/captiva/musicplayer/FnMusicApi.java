@@ -293,6 +293,12 @@ public class FnMusicApi implements MusicSourceApi {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) sb.append(line);
+                // 【2026-10-04 连接复用】读完先关流并置 conn=null,跳过 finally 的
+                // disconnect(),让 keep-alive 连接归还连接池 —— 旧代码每次请求
+                // disconnect() 直接掐掉底层 socket,车机上每个请求都要重做一次
+                // TLS 握手,弱核上握手风暴把 CPU 打满(watchdog 实录 9 秒级卡顿)。
+                closeQuietly(is);
+                conn = null;
                 return sb.toString();
             } catch (Exception e) {
                 if (TlsCompat.isTlsError(e)) {
@@ -353,6 +359,9 @@ public class FnMusicApi implements MusicSourceApi {
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) sb.append(line);
+                // 【2026-10-04 连接复用】同 httpGetByUrl:成功读完不断开,归还连接池
+                closeQuietly(is);
+                conn = null;
                 return sb.toString();
             } catch (Exception e) {
                 if (TlsCompat.isTlsError(e)) {
@@ -964,6 +973,7 @@ public class FnMusicApi implements MusicSourceApi {
         FileOutputStream fos = null;
         File partFile = null;
         String urlStr = null;
+        boolean pooled = false;   // 成功读完响应=true:finally 不断开,连接归还 keep-alive 池
         try {
             urlStr = getStreamUrl(songId);
             DownloadDiag.log("下载请求: " + DownloadDiag.safeUrl(urlStr)
@@ -1046,6 +1056,7 @@ public class FnMusicApi implements MusicSourceApi {
                 throw new java.io.IOException(
                         "缓存落位失败: " + destFile.getAbsolutePath());
             }
+            pooled = true;   // 读到 EOF:连接可复用(见 finally)
             return total;
         } catch (Throwable e) {
             // 注意:必须接 Throwable 而非 Exception —— NoSuchMethodError 这类 Error
@@ -1060,7 +1071,12 @@ public class FnMusicApi implements MusicSourceApi {
         } finally {
             closeQuietly(fos);
             closeQuietly(is);
-            if (conn != null) conn.disconnect();
+            if (conn != null) {
+                // 【连接复用】成功读完整个响应时不断开:closeQuietly(is) 已把流关掉,
+                // 底层 keep-alive socket 归还连接池,下次同主机请求免 TLS 握手。
+                // 失败路径仍 disconnect():半途而废的连接不复用。
+                if (!pooled) conn.disconnect();
+            }
         }
     }
 
