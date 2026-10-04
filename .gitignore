@@ -19,3 +19,4 @@ java_brace_check.py
 pinyin_verify.py
 _gitcheck.py
 /apk/
+/cli/
