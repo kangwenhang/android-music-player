@@ -914,8 +914,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (!changed) {
             return false;
         }
-        favVersion++;                  // 让下一次 filterFavorites 不会被防抖吃掉
-        requestFilter(true, null);     // 异步遍历+diff,主线程只做增量 dispatch
+        // 只有收藏夹模式下才需要重过滤(增删行)。全部歌曲里调用本方法只是
+        // 乐观更新红心判定的集合(v5.7.380),列表不按收藏过滤 —— 绝不能
+        // requestFilter(true),否则列表会被强行切成收藏夹视图:
+        // "全部歌曲点红心 → 自动跳转到收藏列表"(2026-10-04 用户实测)。
+        if (favoritesMode) {
+            favVersion++;                  // 让下一次 filterFavorites 不会被防抖吃掉
+            requestFilter(true, null);     // 异步遍历+diff,主线程只做增量 dispatch
+        }
         return true;
     }
 
