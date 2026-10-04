@@ -275,12 +275,14 @@ public final class LocalStreamProxy {
         return new Runnable() {
             @Override
             public void run() {
-                // 边下边播下载线程降为次低优先级(2026-10-04):TLS 中继+写盘的
-                // CPU 开销在 2 核车机上会饿死主线程(卡顿 10~18s 的元凶),但
-                // 播放本身是网络/IO 受限,降级对起播速度影响很小
+                // 下载线程降为后台优先级(2026-10-04 二次收紧):此前只降到
+                // LESS_FAVORABLE(+1),2 核 CFS 下与主线程(0)几乎同权,车机实测
+                // (download_debug(11))仍连环 7~10s 冻结,栈顶全是 RectF.<init>/
+                // scaleFromDensity 这类微秒级操作=主线程被抢到饿死的特征。网络受限
+                // 的下载对 CPU 不敏感,BACKGROUND(10) 不影响起播速度
                 try {
                     android.os.Process.setThreadPriority(
-                            android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
                 } catch (Throwable ignored) {
                 }
                 st.downloading = true;
@@ -752,10 +754,11 @@ public final class LocalStreamProxy {
 
     /** 解析请求行/Range 头,定位任务后把"正在增长的本地文件"流给 MediaPlayer */
     private void serve(Socket socket) {
-        // 连接服务线程降为次低优先级(2026-10-04),理由同 download()
+        // 连接服务线程降为后台优先级(2026-10-04 二次收紧,理由同 download():
+        // +1 不够,车机实测仍被抢;纯 IO 转发,BACKGROUND 不影响播放)
         try {
             android.os.Process.setThreadPriority(
-                    android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                    android.os.Process.THREAD_PRIORITY_BACKGROUND);
         } catch (Throwable ignored) {
         }
         try {

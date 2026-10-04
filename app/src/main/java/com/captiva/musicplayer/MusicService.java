@@ -1387,11 +1387,13 @@ public class MusicService extends Service {
         priorityCacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
-                // 降为次低优先级(2026-10-04):车机 2 核,下载线程满载时主线程
-                // inflate 被饿 10~18s(见 download_debug.log 卡顿堆栈)。
+                // 降为后台优先级(2026-10-04 二次收紧):此前 LESS_FAVORABLE(+1) 在
+                // 2 核 CFS 下与主线程几乎同权,车机实测(download_debug(11))仍连环
+                // 7~10s 冻结(栈顶全是微秒级操作=饿死特征)。下载是网络受限任务,
+                // BACKGROUND(10) 不影响起播,却能让出 CPU 给主线程渲染
                 try {
                     android.os.Process.setThreadPriority(
-                            android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
                 } catch (Throwable ignored) {
                 }
                 try {
@@ -1699,10 +1701,10 @@ public class MusicService extends Service {
         priorityCacheExecutor.submit(new Runnable() {
             @Override
             public void run() {
-                // 降为次低优先级(2026-10-04):不与主线程抢 CPU,理由同上
+                // 降为后台优先级(2026-10-04 二次收紧,+1→BACKGROUND,理由同 downloadThenPlay)
                 try {
                     android.os.Process.setThreadPriority(
-                            android.os.Process.THREAD_PRIORITY_LESS_FAVORABLE);
+                            android.os.Process.THREAD_PRIORITY_BACKGROUND);
                 } catch (Throwable ignored) {
                 }
                 // 进度节流(三重),避免"每个百分点广播一次"把主线程刷爆:
