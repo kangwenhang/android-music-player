@@ -88,6 +88,7 @@ public final class DownloadDiag {
                 headerLogged = true;
                 log("==== download_debug.log 开始记录 ====");
                 log("日志路径: " + file.getAbsolutePath());
+                log("App 版本: " + appVersion());
             }
         } catch (Throwable t) {
             Log.w(TAG, "初始化失败(诊断日志不可用)", t);
@@ -214,6 +215,21 @@ public final class DownloadDiag {
         long used = (Runtime.getRuntime().totalMemory()
                 - Runtime.getRuntime().freeMemory()) / (1024 * 1024);
         return "屏幕=" + screen + " 堆=" + used + "/" + max + "MB";
+    }
+
+    /** 当前安装包版本(versionName-versionCode),诊断日志定位"这台设备跑的哪版"用 */
+    public static String appVersion() {
+        try {
+            Context c = appCtx;
+            if (c == null) {
+                return "?";
+            }
+            android.content.pm.PackageInfo pi = c.getPackageManager()
+                    .getPackageInfo(c.getPackageName(), 0);
+            return pi.versionName + " (" + pi.versionCode + ")";
+        } catch (Throwable t) {
+            return "?";
+        }
     }
 
     /**

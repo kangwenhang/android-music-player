@@ -88,6 +88,9 @@ public final class MainThreadWatchdog {
                                             DownloadDiag.log("    ...(共 " + stuckStack.length + " 帧,截断)");
                                         }
                                     }
+                                    // 全线程清单(2026-10-04):卡顿=主线程被抢时的"在场人员名单"。
+                                    // 每线程记 优先级/状态/栈顶一帧,谁在占用 CPU 一眼可见
+                                    dumpThreadInventory();
                                 }
                             }
                         } catch (InterruptedException e) {
@@ -128,5 +131,42 @@ public final class MainThreadWatchdog {
             // 取不到就退化为无堆栈(时长日志照打)
         }
         return null;
+    }
+
+    /**
+     * 卡顿时刻的全线程清单:名字/优先级/状态/栈顶一帧。
+     * 最多记 20 条(超出的合并为一行计数),避免刷爆日志。
+     * 诊断期(300ms 阈值)专用;根因定位后可随阈值一起收掉。
+     */
+    private static void dumpThreadInventory() {
+        try {
+            java.util.Map<Thread, java.lang.StackTraceElement[]> all =
+                    Thread.getAllStackTraces();
+            DownloadDiag.log("[主线程] 卡顿时刻线程清单(共 " + all.size() + " 线程):");
+            int logged = 0;
+            int skipped = 0;
+            for (java.util.Map.Entry<Thread, java.lang.StackTraceElement[]> e
+                    : all.entrySet()) {
+                Thread t = e.getKey();
+                if (t == null || "main".equals(t.getName())) {
+                    continue;
+                }
+                java.lang.StackTraceElement[] st = e.getValue();
+                String top = (st != null && st.length > 0)
+                        ? st[0].toString() : "(无栈)";
+                if (logged < 20) {
+                    DownloadDiag.log("    [" + t.getName()
+                            + " pri=" + t.getPriority()
+                            + " " + t.getState() + "] " + top);
+                    logged++;
+                } else {
+                    skipped++;
+                }
+            }
+            if (skipped > 0) {
+                DownloadDiag.log("    ...(另有 " + skipped + " 线程未列出)");
+            }
+        } catch (Throwable ignored) {
+        }
     }
 }
