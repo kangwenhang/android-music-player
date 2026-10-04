@@ -1386,6 +1386,17 @@ public class MusicService extends Service {
                                 android.os.Process.THREAD_PRIORITY_BACKGROUND);
                     } catch (Throwable ignored) {
                     }
+                    // 【2026-10-04 v5.7.378 冷却窗口】车机日志(09:14 段)显示:排队
+                    // 3 首预缓存紧跟 onResume/切歌,下载写盘+TLS 解密与主线程的
+                    // 列表滚动/封面加载争抢 CPU 与慢速 SD 卡 IO,watchdog 记录到
+                    // 连环 10~18 秒卡顿。开头睡 8 秒:切歌/回界面后的敏感窗口
+                    // 先让给用户,反正预缓存不赶时间(串行+限速本身就是慢任务)。
+                    try {
+                        Thread.sleep(8000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
                     try {
                         boolean ok = MusicSyncManager.autoCacheSong(
                                 MusicService.this, api, b, syncPath, maxBytes, null);
