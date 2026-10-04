@@ -260,12 +260,13 @@ public final class UpdateChecker {
             }
             status(listener, "发现新版本 " + info.versionName);
 
-            // 7) 回主线程弹窗,用户确认后才开始下载
+            // 7) 回主线程弹窗,用户确认后才开始下载(inner class 引用需 final)
             final JSONObject apkEntryFinal = apkEntry;
+            final UpdateInfo infoFinal = info;
             MAIN.post(new Runnable() {
                 @Override
                 public void run() {
-                    promptUpdate(ctx, info, apkEntryFinal, listener);
+                    promptUpdate(ctx, infoFinal, apkEntryFinal, listener);
                 }
             });
         } catch (final Throwable t) {
@@ -900,8 +901,8 @@ public final class UpdateChecker {
     static String md5Hex(String s) {
         try {
             return hex(MessageDigest.getInstance("MD5").digest(s.getBytes("UTF-8")));
-        } catch (java.security.NoSuchAlgorithmException e) {
-            // MD5 是 JVM 必备算法,理论不可达;兜底返回空让服务端拒绝而不是崩溃
+        } catch (Throwable e) {
+            // MD5/UTF-8 都是 JVM 必备,理论不可达;兜底返回空让服务端拒绝而不是崩溃
             return "";
         }
     }
