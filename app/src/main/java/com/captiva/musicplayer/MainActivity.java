@@ -323,6 +323,10 @@ public class MainActivity extends AppCompatActivity {
     private int pendingSyncRefresh = 0;
     private static final int REFRESH_BATCH_SIZE = 5;
 
+    // 拖动进度条中(onStartTrackingTouch~onStopTrackingTouch):轮询器暂停回写,
+    // 否则 200ms 一次的 setProgress 会把 thumb 拉回播放位置,拖动看起来"没反应"
+    private boolean scrubbing = false;
+
     /** 封面加载代次(每次 updateNowPlaying 递增,旧回调自动作废,避免暂停/恢复后封面错乱) */
     private int coverLoadToken = 0;
 
@@ -1150,17 +1154,28 @@ public class MainActivity extends AppCompatActivity {
         sbProgress.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && service != null) {
-                    service.seekTo(progress);
+                if (fromUser) {
+                    // 拖动中只预览时间,绝不真正 seek —— 连续 seek 风暴会让边下边播
+                    // 代理反复断开上游重握手(车机 TLS 1~3s/次),MediaPlayer 拿不到
+                    // 数据一直缓冲,表现为"正在缓存时拖动没反应"(2026-10-04 车机实测)。
+                    // 真正的 seek 只在松手时发生一次(onStopTrackingTouch)。
                     tvCurrentTime.setText(MusicBean.formatDuration(progress));
                 }
             }
 
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                scrubbing = true;
+            }
 
             @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                scrubbing = false;
+                if (service != null) {
+                    service.seekTo(seekBar.getProgress());
+                    tvCurrentTime.setText(MusicBean.formatDuration(seekBar.getProgress()));
+                }
+            }
         });
 
         // 播放控制
@@ -5039,6 +5054,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateProgress() {
         if (service == null || !bound) {
+            return;
+        }
+        // 用户拖动中:轮询器不回写 thumb/时间,避免与手指争夺进度条
+        if (scrubbing) {
             return;
         }
         // 宽度变化(旋转/重建)时重新标定填充层行程;未标定过(宽 0)也会在此补上
