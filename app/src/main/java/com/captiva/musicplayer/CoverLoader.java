@@ -444,8 +444,11 @@ public class CoverLoader {
             return;
         }
 
-        // 1. 先查内存缓存(命中则直接设置,不经过线程池)
-        Bitmap cached = cache.get(key);
+        // 1. 先查内存缓存(命中则直接设置,不经过线程池)。
+        //    带别名回退:网络歌被"边下边播"缓存完成后会原地转为本地歌
+        //    (MusicService: setNetwork(false)+setData(本地路径)),封面缓存 key 随之
+        //    从 net_<coverArtId> 变为 local_<路径>,直接查必然 miss → 重绑闪占位图。
+        Bitmap cached = probeMemoryWithAlias(bean, key, false);
         if (cached != null) {
             iv.setTag(key);
             iv.setImageBitmap(cached);
@@ -584,8 +587,8 @@ public class CoverLoader {
             callback.onBitmapLoaded(null);
             return;
         }
-        // 1. 先查内存缓存(不阻塞)
-        Bitmap cached = cache.get(key);
+        // 1. 先查内存缓存(不阻塞);同样带别名回退(播放栏/全屏封面同理防闪)
+        Bitmap cached = probeMemoryWithAlias(bean, key, fullRes);
         if (cached != null) {
             callback.onBitmapLoaded(cached);
             return;
@@ -618,6 +621,34 @@ public class CoverLoader {
     /** Bitmap 加载回调 */
     public interface BitmapCallback {
         void onBitmapLoaded(Bitmap bitmap);
+    }
+
+    /**
+     * 内存缓存查询(带别名回退):网络歌被"边下边播"缓存完成后会原地转为本地歌
+     * (MusicService: setNetwork(false) + setData(本地缓存路径) + 广播刷新列表),
+     * 封面缓存 key 随之从 net_<coverArtId> 变为 local_<路径> —— 直接查必然 miss,
+     * 列表/播放栏重绑时闪一下占位图(2026-10-04 用户实测)。
+     * 回退:本地 key miss 且 bean 带 coverArtId 时,查旧的 net_ key;
+     * 命中则回填本地 key(下次直接命中),并返回位图 —— 封面此前在列表里已加载过,
+     * net_ 键几乎必然在内存,视觉上零闪动。
+     */
+    private Bitmap probeMemoryWithAlias(MusicBean bean, String key, boolean fullRes) {
+        Bitmap bmp = cache.get(key);
+        if (bmp != null) {
+            return bmp;
+        }
+        if (!bean.isNetwork()) {
+            String artId = bean.getCoverArtId();
+            if (artId != null && !artId.isEmpty()) {
+                String netKey = "net_" + artId + (fullRes ? "_full" : "");
+                Bitmap alias = cache.get(netKey);
+                if (alias != null) {
+                    cache.put(key, alias);
+                    return alias;
+                }
+            }
+        }
+        return null;
     }
 
     /** 生成缓存 key */
