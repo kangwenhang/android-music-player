@@ -232,6 +232,12 @@ public class MusicService extends Service {
     /** 防止快速切歌导致卡死:记录当前播放请求的唯一标识 */
     private volatile int playToken = 0;
     /**
+     * 正在后台执行 setDataSource 的线程(v5.7.433)。
+     * resetPlayer 的 release 线程启动前会 join 它(≤500ms),避免旧 player 的
+     * reset/release 与仍在途的 setDataSource 并发踩踏同一 native 实例。
+     */
+    private volatile Thread mpPrepareThread = null;
+    /**
      * 当前这首歌是否正走本地流代理(边下边播)下载中(2026-10-04 v5.7.379)。
      * 车机日志(09:34-09:41 段)实锤:流代理下载(400KB/s)+ 预缓存 3 首(100KB/s)
      * + 用户滚 810 首大列表同时发生时,2 核 CPU 与慢速 SD 卡被打满,主线程卡 5~20 秒。
@@ -1092,72 +1098,119 @@ public class MusicService extends Service {
         // 先重置 MediaPlayer,取消之前的异步准备
         resetPlayer();
         final long tReset = System.currentTimeMillis() - tStart - tPromote;
-        long tAuth = 0L;
-        long tSetDs = 0L;
-        /** 本次播放是否走了本地流代理(边下边播):决定预缓存的触发时机 */
-        boolean viaProxy = false;
         currentViaProxy = false;   // 每次播放先复位,下方走代理再置位
 
-        try {
-            // 网络歌曲:用 Navidrome stream URL
-            // 本地歌曲:优先用 content uri,失败回退文件路径
-            if (bean.isNetwork() && bean.getStreamUrl() != null) {
-                playerSourceIsLocal = false;   // HTTP 源(代理或直连)
-                long tA = System.currentTimeMillis();
-                // 部分数据源(如飞牛)的流地址不含凭据,必须走请求头
-                java.util.Map<String, String> headers = null;
-                MusicSourceApi src = MusicDataHolder.getInstance().getMusicSourceApi();
-                if (src != null) {
-                    headers = src.getAuthHeaders();
-                }
-                tAuth = System.currentTimeMillis() - tA;
-                long tB = System.currentTimeMillis();
-                // ===== 边下边播:本地流代理优先 =====
-                // MediaPlayer 直连 HTTPS 走它自己的老网络栈(4.2.2 只开 SSLv3/TLSv1.0),
-                // 飞牛中继等要求 TLS 1.2 的站点必然握手失败(-1011)。代理把链路倒过来:
-                // MediaPlayer 连本机 127.0.0.1 纯 HTTP(无 TLS 问题),代理用 TlsCompat
-                // 拉上游流并同步写 .part 落盘,客户端从"正在增长的本地文件"读 ——
-                // 起播只需 1~2 秒(上游握手+首批字节),不再等整首下完。
-                // 注册失败(端口占用/autoCacheSong 正在下载同一首/已完整缓存)则回退直连。
-                try {
-                    String proxySyncPath = navidromeConfig != null
-                            ? navidromeConfig.getCloudDir() : null;
-                    if (navidromeConfig != null && navidromeConfig.isAutoCacheOnPlay()
-                            && proxySyncPath != null && !proxySyncPath.isEmpty()
-                            && bean.getStreamId() != null && !bean.getStreamId().isEmpty()) {
-                        java.io.File target =
-                                MusicSyncManager.buildLocalFile(bean, proxySyncPath);
-                        // 已完整缓存的目标不走代理(promoteToLocalIfCached 通常已拦截,这里双保险)
-                        if (target != null && !(target.exists() && target.length() > 1024)
-                                && LocalStreamProxy.get().register(bean.getStreamId(),
-                                        bean.getStreamUrl(), headers, target, proxyCallback)) {
-                            player.setDataSource(this, android.net.Uri.parse(
-                                    LocalStreamProxy.get().url(bean.getStreamId())));
-                            viaProxy = true;
-                            currentViaProxy = true;
-                            DownloadDiag.log("联网播放: 走本地流代理(边下边播) "
-                                    + bean.getTitle());
-                        }
+        // ===== 网络歌曲:setDataSource 整体后台化(v5.7.433) =====
+        // MediaPlayer 自己发网络请求(不走 TlsCompat),setDataSource(网络URL) 会在
+        // 调用线程做网络 I/O —— 模拟器实测一次烧 11.9s(栈顶 MediaPlayer._setDataSource
+        // ← prepareAndPlay ← next:724),主线程直接卡死。鉴权头获取 + 代理注册 +
+        // setDataSource 整段挪到后台 mp-prepare 线程;完成后回主线程 finishPrepare
+        // (监听器 + prepareAsync)。MediaPlayer 的事件回调绑定**创建线程**的 looper
+        // (player 在主线程 new),prepared/error 仍回主线程,原 token 检查逻辑不变。
+        if (bean.isNetwork() && bean.getStreamUrl() != null) {
+            playerSourceIsLocal = false;   // HTTP 源(代理或直连)
+            final MusicBean fBean = bean;
+            final MediaPlayer p = player;
+            final long fTStart = tStart;
+            final long fTPromote = tPromote;
+            final long fTReset = tReset;
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    if (token != playToken) {
+                        return;   // 开跑前就已过期
                     }
-                } catch (Throwable t) {
-                    // 代理任何异常都不能影响播放:回退直连
-                    DownloadDiag.log("边下边播代理异常,回退直连: " + t);
+                    long tA = System.currentTimeMillis();
+                    // 部分数据源(如飞牛)的流地址不含凭据,必须走请求头
+                    java.util.Map<String, String> headers = null;
+                    MusicSourceApi src = MusicDataHolder.getInstance().getMusicSourceApi();
+                    if (src != null) {
+                        headers = src.getAuthHeaders();
+                    }
+                    boolean vProxy = false;
+                    try {
+                        // ===== 边下边播:本地流代理优先 =====
+                        // MediaPlayer 直连 HTTPS 走它自己的老网络栈(4.2.2 只开 SSLv3/TLSv1.0),
+                        // 飞牛中继等要求 TLS 1.2 的站点必然握手失败(-1011)。代理把链路倒过来:
+                        // MediaPlayer 连本机 127.0.0.1 纯 HTTP(无 TLS 问题),代理用 TlsCompat
+                        // 拉上游流并同步写 .part 落盘,客户端从"正在增长的本地文件"读 ——
+                        // 起播只需 1~2 秒(上游握手+首批字节),不再等整首下完。
+                        // 注册失败(端口占用/autoCacheSong 正在下载同一首/已完整缓存)则回退直连。
+                        try {
+                            String proxySyncPath = navidromeConfig != null
+                                    ? navidromeConfig.getCloudDir() : null;
+                            if (navidromeConfig != null && navidromeConfig.isAutoCacheOnPlay()
+                                    && proxySyncPath != null && !proxySyncPath.isEmpty()
+                                    && fBean.getStreamId() != null && !fBean.getStreamId().isEmpty()) {
+                                java.io.File target =
+                                        MusicSyncManager.buildLocalFile(fBean, proxySyncPath);
+                                // 已完整缓存的目标不走代理(promoteToLocalIfCached 通常已拦截,这里双保险)
+                                if (target != null && !(target.exists() && target.length() > 1024)
+                                        && LocalStreamProxy.get().register(fBean.getStreamId(),
+                                                fBean.getStreamUrl(), headers, target, proxyCallback)) {
+                                    p.setDataSource(MusicService.this, android.net.Uri.parse(
+                                            LocalStreamProxy.get().url(fBean.getStreamId())));
+                                    vProxy = true;
+                                    DownloadDiag.log("联网播放: 走本地流代理(边下边播) "
+                                            + fBean.getTitle());
+                                }
+                            }
+                        } catch (Throwable t2) {
+                            // 代理任何异常都不能影响播放:回退直连
+                            DownloadDiag.log("边下边播代理异常,回退直连: " + t2);
+                        }
+                        if (!vProxy) {
+                            // 注意:MediaPlayer 自己发网络请求,**不走 TlsCompat**。
+                            // 安卓 4.2.2 的媒体栈只开 SSLv3/TLSv1.0,遇到要求 TLS 1.2 的
+                            // HTTPS 站点(飞牛中继等)会直接握手失败 —— 这就是"列表能刷
+                            // 出来、点击却播不了"的典型根因。
+                            DownloadDiag.log("联网播放: " + fBean.getTitle()
+                                    + " url=" + DownloadDiag.safeUrl(fBean.getStreamUrl())
+                                    + " 鉴权头=" + (headers == null ? "无" : headers.size() + "个"));
+                            if (headers != null && !headers.isEmpty()) {
+                                p.setDataSource(MusicService.this,
+                                        android.net.Uri.parse(fBean.getStreamUrl()), headers);
+                            } else {
+                                p.setDataSource(fBean.getStreamUrl());
+                            }
+                        }
+                        final long tSetDsBg = System.currentTimeMillis() - tA;
+                        final boolean fViaProxy = vProxy;
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                // token + 实例双重防串:期间用户又切了歌就放弃,
+                                // 旧 player 由新一轮 resetPlayer 负责回收
+                                if (token != playToken || player != p) {
+                                    return;
+                                }
+                                currentViaProxy = fViaProxy;
+                                finishPrepare(p, fBean, token, fViaProxy,
+                                        fTStart, fTPromote, fTReset, 0L, tSetDsBg);
+                            }
+                        });
+                    } catch (final Exception fe) {
+                        mainHandler.post(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (token != playToken) {
+                                    return;
+                                }
+                                handlePrepareFailure(fBean, token, fe);
+                            }
+                        });
+                    }
                 }
-                if (!viaProxy) {
-                // 注意:MediaPlayer 自己发网络请求,**不走 TlsCompat**。
-                // 安卓 4.2.2 的媒体栈只开 SSLv3/TLSv1.0,遇到要求 TLS 1.2 的 HTTPS 站点
-                // (飞牛中继等)会直接握手失败 —— 这就是"列表能刷出来、点击却播不了"的典型根因。
-                DownloadDiag.log("联网播放: " + bean.getTitle()
-                        + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
-                        + " 鉴权头=" + (headers == null ? "无" : headers.size() + "个"));
-                if (headers != null && !headers.isEmpty()) {
-                    player.setDataSource(this, android.net.Uri.parse(bean.getStreamUrl()), headers);
-                } else {
-                    player.setDataSource(bean.getStreamUrl());
-                }
-                }
-                tSetDs = System.currentTimeMillis() - tB;
-            } else if (bean.getUri() != null && bean.getUri().startsWith("content://")) {
+            }, "mp-prepare");
+            t.setDaemon(true);
+            mpPrepareThread = t;
+            t.start();
+            return;
+        }
+
+        // ===== 本地歌曲:content uri / 文件 fd 只做本地 I/O,主线程执行无卡顿风险 =====
+        try {
+            if (bean.getUri() != null && bean.getUri().startsWith("content://")) {
                 // MediaStore 扫描出的本地歌:content uri 由应用侧打开 fd,车机可正常播放
                 playerSourceIsLocal = true;
                 player.setDataSource(this, android.net.Uri.parse(bean.getUri()));
@@ -1193,11 +1246,28 @@ public class MusicService extends Service {
                     }
                 }
             }
+            finishPrepare(player, bean, token, false,
+                    tStart, tPromote, tReset, 0L,
+                    System.currentTimeMillis() - tStart - tPromote - tReset);
+        } catch (Exception e) {
+            handlePrepareFailure(bean, token, e);
+        }
+    }
+
+    /**
+     * setDataSource 之后的公共收尾(必须在主线程调用)。
+     * v5.7.433 从 prepareAndPlay 拆出:网络歌的 setDataSource 已挪到后台
+     * mp-prepare 线程,该线程完成后回主线程调用本方法;本地歌路径在主线程直接调用。
+     */
+    private void finishPrepare(MediaPlayer p, MusicBean bean, final int token,
+            boolean viaProxy, final long tStart, final long tPromote,
+            final long tReset, final long tAuth, final long tSetDs) {
+        try {
             // API 21 之前用 setAudioStreamType
-            player.setAudioStreamType(AudioManager.STREAM_MUSIC);
-            player.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
+            p.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            p.setWakeMode(this, PowerManager.PARTIAL_WAKE_LOCK);
             final MusicBean currentBean = bean;
-            player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+            p.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                 @Override
                 public void onPrepared(MediaPlayer mp) {
                     // 检查 token:如果已切到下一首,放弃这次准备
@@ -1254,14 +1324,14 @@ public class MusicService extends Service {
                     }
                 }
             });
-            player.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+            p.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
                 @Override
                 public void onCompletion(MediaPlayer mp) {
                     // 自动下一首
                     next();
                 }
             });
-            player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+            p.setOnErrorListener(new MediaPlayer.OnErrorListener() {
                 @Override
                 public boolean onError(MediaPlayer mp, int what, int extra) {
                     Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
@@ -1310,7 +1380,7 @@ public class MusicService extends Service {
                     return true;
                 }
             });
-            player.prepareAsync();
+            p.prepareAsync();
             // 云端歌曲:按设置异步下载到本地(自动缓存),不影响当前播放
             // (走代理时 autoCacheSong 会因 IN_FLIGHT 被代理占用而快速跳过,不双写)
             long tC = System.currentTimeMillis();
@@ -1327,46 +1397,56 @@ public class MusicService extends Service {
             } else {
                 preCacheUpcoming(3);
             }
-            // 主线程点击路径耗时汇总:定位"点击未下载歌曲卡一下"这类问题的直接证据
-            CacheDebugLog.log("点击播放主线程耗时: " + bean.getTitle()
+            // 点击播放路径耗时汇总(setDataSource 已后台化,这里含后台耗时):
+            // 定位"点击未下载歌曲卡一下"这类问题的直接证据
+            CacheDebugLog.log("点击播放耗时: " + bean.getTitle()
                     + " promote=" + tPromote + "ms"
                     + " reset=" + tReset + "ms"
                     + " auth=" + tAuth + "ms"
-                    + " setDataSource=" + tSetDs + "ms"
+                    + " setDataSource=" + tSetDs + "ms(后台)"
                     + " maybeAutoCache=" + tAuto + "ms"
                     + " 合计=" + (System.currentTimeMillis() - tStart) + "ms"
                     + " network=" + bean.isNetwork());
         } catch (Exception e) {
-            Log.e(TAG, "prepareAndPlay failed", e);
-            isPrepared = false;
-            // setDataSource 抛异常(而不是回调 onError)同样可能是联网播放失败,
-            // 例如 HTTPS 握手直接抛 SSLException,所以这里也要兜底。
-            DownloadDiag.logError("prepareAndPlay 异常: " + bean.getTitle()
-                    + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
-                    + " network=" + bean.isNetwork(), e);
-            if (bean.isNetwork() && bean.getStreamUrl() != null) {
-                // 与 onError 路径一致:代理正在缓存就等它完成重播,别排队互踩
-                if (bean.getStreamId() != null
-                        && LocalStreamProxy.get().isDownloading(bean.getStreamId())) {
-                    waitingProxyReplaySid = bean.getStreamId();
-                    DownloadDiag.log("prepareAndPlay 异常: 代理正在缓存 "
-                            + bean.getTitle() + ",等待缓存完成后重播");
-                    return;
-                }
-                // 与 onError 路径一致:下载期间静默等待,不再自动跳下一首
-                downloadThenPlay(bean, token);
+            handlePrepareFailure(bean, token, e);
+        }
+    }
+
+    /**
+     * prepareAndPlay / finishPrepare 阶段失败的统一兜底(必须在主线程调用)。
+     * v5.7.433 从 prepareAndPlay 的 catch 块拆出:后台 setDataSource 抛异常
+     * (如 HTTPS 握手直接抛 SSLException)同样走这里,兜底逻辑与主线程路径一致。
+     */
+    private void handlePrepareFailure(final MusicBean bean, final int token, Exception e) {
+        Log.e(TAG, "prepareAndPlay failed", e);
+        isPrepared = false;
+        // setDataSource 抛异常(而不是回调 onError)同样可能是联网播放失败,
+        // 例如 HTTPS 握手直接抛 SSLException,所以这里也要兜底。
+        DownloadDiag.logError("prepareAndPlay 异常: " + bean.getTitle()
+                + " url=" + DownloadDiag.safeUrl(bean.getStreamUrl())
+                + " network=" + bean.isNetwork(), e);
+        if (bean.isNetwork() && bean.getStreamUrl() != null) {
+            // 与 onError 路径一致:代理正在缓存就等它完成重播,别排队互踩
+            if (bean.getStreamId() != null
+                    && LocalStreamProxy.get().isDownloading(bean.getStreamId())) {
+                waitingProxyReplaySid = bean.getStreamId();
+                DownloadDiag.log("prepareAndPlay 异常: 代理正在缓存 "
+                        + bean.getTitle() + ",等待缓存完成后重播");
                 return;
             }
-            // 异常时也尝试跳下一首
-            mainHandler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    if (token == playToken) {
-                        next();
-                    }
-                }
-            }, 1000);
+            // 与 onError 路径一致:下载期间静默等待,不再自动跳下一首
+            downloadThenPlay(bean, token);
+            return;
         }
+        // 异常时也尝试跳下一首
+        mainHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (token == playToken) {
+                    next();
+                }
+            }
+        }, 1000);
     }
 
     /**
@@ -1809,9 +1889,22 @@ public class MusicService extends Service {
             try { dead.setOnPreparedListener(null); } catch (Throwable ignored) { }
             try { dead.setOnCompletionListener(null); } catch (Throwable ignored) { }
             try { dead.setOnErrorListener(null); } catch (Throwable ignored) { }
+            // v5.7.433:此刻 mpPrepareThread 若还活着,说明上一轮(或更早)的
+            // setDataSource 还在后台执行 —— release 线程先 join 它(≤500ms),
+            // 避免 reset/release 与在途 setDataSource 并发踩同一 native 实例。
+            // 500ms 上限防止 setDataSource 卡死时拖住回收(此时释放仍会进行,
+            // MediaPlayer 内部状态机会把后续调用判为非法状态抛异常,不会崩)。
+            // 注意必须在主线程捕获引用:新的 mp-prepare 线程要等 resetPlayer
+            // 返回后才会创建并覆盖 mpPrepareThread。
+            final Thread inflightPrepare = mpPrepareThread;
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
+                    if (inflightPrepare != null && inflightPrepare.isAlive()) {
+                        try {
+                            inflightPrepare.join(500);
+                        } catch (InterruptedException ignored) { }
+                    }
                     try {
                         dead.reset();
                     } catch (Throwable ignored) { /* 卡死实例 reset 失败无所谓 */ }
