@@ -1207,9 +1207,16 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     public void onBindViewHolder(@NonNull VH holder, int position) {
         bindCount++;
         if (bindCount % 100 == 50) {
-            DownloadDiag.listDiag("[列表] 挂载抽样#" + (bindCount / 100)
+            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+            StringBuilder sb = new StringBuilder("[列表] 挂载抽样#" + (bindCount / 100)
                     + ": bindPos=" + position
-                    + " holderLayoutPos=" + holder.getLayoutPosition());
+                    + " holderLayoutPos=" + holder.getLayoutPosition() + " 堆栈: ");
+            for (int i = 3; i < Math.min(st.length, 22); i++) {
+                sb.append(st[i].getClassName()).append('.')
+                  .append(st[i].getMethodName()).append(':')
+                  .append(st[i].getLineNumber()).append(" <- ");
+            }
+            DownloadDiag.listDiag(sb.toString());
         }
         long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         // 安全检查:防止 position 越界
