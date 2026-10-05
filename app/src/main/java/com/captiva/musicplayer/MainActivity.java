@@ -716,13 +716,14 @@ public class MainActivity extends AppCompatActivity {
         rvList.setLayoutManager(new LinearLayoutManager(this));
         // 完全禁用 item 动画(车机性能弱,任何动画都卡顿)
         rvList.setItemAnimator(null);
-        // 增大缓存池(减少滑动时重新绑定),但不要太大(车机内存有限)
-        // 【2026-10-04 v5.7.377 卡顿优化】车机日志(watchdog 18 次卡顿)显示大头是
-        // 滚动时 onCreateViewHolder 的 XML inflate(单个几百 ms)。
-        // 加大 view cache(10→24)与回收池容量(默认 5→24),fling 时跨 position
-        // 复用 ViewHolder,显著减少 create 次数。
-        rvList.setItemViewCacheSize(24);
-        rvList.getRecycledViewPool().setMaxRecycledViews(0, 24);
+        // 【2026-10-05 v5.7.416 回调默认缓存】v377 加大缓存(10→24)与回收池(5→24)是为了
+        // 压 XML inflate 卡顿;buildItemView 改纯代码构造后单次创建已是毫秒级,
+        // 囤 24 个离屏缓存反成负担:车机一屏仅 5-6 行(行高 76px/rv 高 392px),
+        // 每次 notifyItemRangeInserted 后布局都会为缓存/池额外新建 24-48 个 item,
+        // 4.2.2 Dalvik 弱 CPU 上每批补载 50 条即烧 1.4-4s(22 号车机日志实证,
+        // 卡顿时 childCount=21/22 远超可视 5-6)。回调默认值:cache=2, pool=5。
+        rvList.setItemViewCacheSize(2);
+        rvList.getRecycledViewPool().setMaxRecycledViews(0, 5);
         // 硬件层加速列表滑动(车机性能弱时减少 CPU 绘制)
         rvList.setHasFixedSize(true);
         rvList.setAdapter(adapter);
