@@ -1127,6 +1127,12 @@ public class MusicService extends Service {
                     if (src != null) {
                         headers = src.getAuthHeaders();
                     }
+                    // v5.7.433 补充护栏:多个 mp-prepare 线程会在 LocalStreamProxy.register
+                    // 的锁上排队(模拟器实测 TLS 握手秒级),stale 线程在进锁前就退出,
+                    // 让当前歌的线程尽快拿到锁位,连点下一首时起播更快
+                    if (token != playToken) {
+                        return;
+                    }
                     boolean vProxy = false;
                     try {
                         // ===== 边下边播:本地流代理优先 =====
