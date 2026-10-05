@@ -1276,9 +1276,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (recycleCount % 25 == 0) {
             DownloadDiag.listDiag("[列表] 回收明细#" + recycleCount
                     + ": pos=" + holder.getLayoutPosition()
-                    + " invalid=" + holder.isInvalid()
-                    + " vt=" + holder.getItemViewType()
-                    + " bound=" + holder.isBound());
+                    + " vt=" + holder.getItemViewType());
         }
         if (holder.itemView != null && holder.itemView.hasTransientState()) {
             failedRecycleCount++;
