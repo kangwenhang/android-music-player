@@ -1206,6 +1206,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
         bindCount++;
+        if (bindCount % 100 == 50) {
+            DownloadDiag.listDiag("[列表] 挂载抽样#" + (bindCount / 100)
+                    + ": bindPos=" + position
+                    + " holderLayoutPos=" + holder.getLayoutPosition());
+        }
         long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         // 安全检查:防止 position 越界
         if (position < 0 || position >= data.size()) {
@@ -1276,9 +1281,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (recycleCount % 25 == 0) {
             String dim = "?";
             try {
-                if (rvRef != null) {
+                if (rvRef != null && rvRef.getChildCount() > 0) {
+                    View c0 = rvRef.getChildAt(0);
+                    View cN = rvRef.getChildAt(rvRef.getChildCount() - 1);
                     dim = rvRef.getWidth() + "x" + rvRef.getHeight()
-                            + " child=" + rvRef.getChildCount();
+                            + " child=" + rvRef.getChildCount()
+                            + " 视口" + rvRef.getChildAdapterPosition(c0)
+                            + ".." + rvRef.getChildAdapterPosition(cN);
                 }
             } catch (Throwable t) { /* 诊断不改主流程 */ }
             DownloadDiag.listDiag("[列表] 回收明细#" + recycleCount
