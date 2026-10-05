@@ -318,7 +318,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         filteredData.addAll(r.filtered);
         loadedCount = r.loadCount;
         hasMore = loadedCount < filteredData.size();
-        notifyDataSetChanged();
+        nds();
         long elapsed = System.currentTimeMillis() - t0;
         Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                 + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
@@ -396,7 +396,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 }
                 int newAdded = data.size() - oldDataSize;
                 if (newAdded > 0) {
-                    notifyItemRangeInserted(oldDataSize, newAdded);
+                    nins(oldDataSize, newAdded);
                 }
             }
             hasMore = loadedCount < filteredData.size();
@@ -555,7 +555,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                                 // 换血后先按权威 bean 重定位,再整表重绑(顺序不能反,
                                 // 否则重绑用的还是 stale index)
                                 rederivePlayingIndexLocked();
-                                notifyDataSetChanged();
+                                nds();
                             } else {
                                 // 同列表内过滤(搜索/收藏增删):用增量 Diff。
                                 // Diff 基于「此刻 adapter 真正持有的 data」现算,且 dispatch 在 swap 之前,
@@ -693,7 +693,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             // (本轮起 Diff 已在主线程按当前 data 现算,dataVersion 不再决定正确性,
             //  这里只为让诊断日志里的"重算Diff="如实反映期间是否发生过补批。)
             dataVersion++;
-            notifyItemRangeInserted(start, addedCount);
+            nins(start, addedCount);
         }
         isLoading = false;
     }
@@ -733,8 +733,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             if (index >= 0 && index < filteredData.size() && index >= data.size()) {
                 ensureLoaded(index);
             }
-            if (old >= 0 && old < data.size()) notifyItemChanged(old);
-            if (index >= 0 && index < data.size()) notifyItemChanged(index);
+            if (old >= 0 && old < data.size()) nchg(old);
+            if (index >= 0 && index < data.size()) nchg(index);
         }
     }
 
@@ -757,8 +757,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         int oldIdx = playingIndex;
         playingIndex = newIdx;
-        if (oldIdx >= 0 && oldIdx < data.size()) notifyItemChanged(oldIdx);
-        if (newIdx >= 0 && newIdx < data.size()) notifyItemChanged(newIdx);
+        if (oldIdx >= 0 && oldIdx < data.size()) nchg(oldIdx);
+        if (newIdx >= 0 && newIdx < data.size()) nchg(newIdx);
     }
 
     /** 设置是否显示来源状态点(本地模式=false 隐藏;须主线程调用) */
@@ -771,14 +771,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      *
      * @param notify false = 只改状态、不通知刷新。
      *   给「来源切换」用:切换后马上就会 setData 整表换新数据,新数据自然带着
-     *   最新的 showSourceDot 渲染出来;此时若还调 notifyDataSetChanged(),
+     *   最新的 showSourceDot 渲染出来;此时若还调 nds(),
      *   会在下一帧白白重绑一次全部可见行(车机上实测 ~180ms),
      *   把「点完按钮 → 加载态上屏」这段硬生生拖长。
      */
     public void setShowSourceDot(boolean show, boolean notify) {
         if (showSourceDot == show) return;
         showSourceDot = show;
-        if (notify) notifyDataSetChanged();
+        if (notify) nds();
     }
 
     /**
@@ -796,7 +796,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private void notifyRowByStreamId(String streamId) {
         int pos = findRowByStreamId(streamId);
         if (pos >= 0) {
-            notifyItemChanged(pos);
+            nchg(pos);
             return;
         }
         // 诊断:可见列表中找不到对应行(如该歌尚未加载到当前批次)→ 进度条不会显示
@@ -870,7 +870,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             // 过滤代次只代表"有没有更新的过滤请求",与本方法无关。
             dataVersion++;
             // 只通知一次,而不是每批通知
-            notifyItemRangeInserted(startLoaded, added);
+            nins(startLoaded, added);
             long elapsed = System.currentTimeMillis() - t0;
             Log.i(TAG, "[ensureLoaded] pos=" + position + " 加载" + added + "条"
                     + " loadedCount=" + loadedCount + "/" + filteredData.size() + " " + elapsed + "ms");
@@ -1238,48 +1238,27 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
     }
 
-    // ===== 421 notify 计数(定位切歌后每秒 45 次全窗口 measure 的驱动源) =====
+    // ===== 421 notify 计数(notify 系列是 final 不能 override,改为包装私有方法,
+    //       定位切歌后每秒 45 次全窗口 measure 的驱动源) =====
 
-    @Override
-    public void notifyDataSetChanged() {
+    private void nds() {
         notifyDSCount++;
-        super.notifyDataSetChanged();
+        notifyDataSetChanged();
     }
 
-    @Override
-    public void notifyItemChanged(int position) {
+    private void nchg(int position) {
         notifyChangedCount++;
-        super.notifyItemChanged(position);
+        notifyItemChanged(position);
     }
 
-    @Override
-    public void notifyItemChanged(int position, Object payload) {
-        notifyChangedCount++;
-        super.notifyItemChanged(position, payload);
-    }
-
-    @Override
-    public void notifyItemRangeInserted(int positionStart, int itemCount) {
+    private void nins(int positionStart, int itemCount) {
         notifyInsertedCount++;
-        super.notifyItemRangeInserted(positionStart, itemCount);
+        notifyItemRangeInserted(positionStart, itemCount);
     }
 
-    @Override
-    public void notifyItemRemoved(int position) {
+    private void noth(int positionStart, int itemCount) {
         notifyOtherCount++;
-        super.notifyItemRemoved(position);
-    }
-
-    @Override
-    public void notifyItemRangeChanged(int positionStart, int itemCount) {
-        notifyOtherCount++;
-        super.notifyItemRangeChanged(positionStart, itemCount);
-    }
-
-    @Override
-    public void notifyItemMoved(int fromPosition, int toPosition) {
-        notifyOtherCount++;
-        super.notifyItemMoved(fromPosition, toPosition);
+        notifyItemRangeChanged(positionStart, itemCount);
     }
 
     // ===== 417 回收流水线诊断钩子 =====
