@@ -3524,17 +3524,23 @@ public class MainActivity extends AppCompatActivity {
         return src;
     }
 
+    /** 预编译空白正则:getLogicalKey 对全列表逐行调用,String.replaceAll 每次
+     *  都会 Pattern.compile,车机实测 ~650 行烧 605ms(24 号日志),预编译后消除 */
+    private static final java.util.regex.Pattern P_WHITESPACE =
+            java.util.regex.Pattern.compile("\\s+");
+
+    private static String collapseWhitespace(String s) {
+        return (s == null ? "" : P_WHITESPACE.matcher(s.trim()).replaceAll(" "));
+    }
+
     /** 逻辑身份键:忽略文件夹,按 标题+歌手+时长(秒,四舍五入) 判定同一首歌,用于跨文件夹去重 */
     private String getLogicalKey(MusicBean b) {
         if (b == null) return null;
         long dur = b.getDuration();
         if (dur <= 0) return null;   // 时长缺失不参与逻辑去重,避免无元数据文件被误并
-        String title = b.getTitle();
-        String artist = b.getArtist();
-        String t = (title != null ? title : "").trim().replaceAll("\\s+", " ");
-        String a = (artist != null ? artist : "").trim().replaceAll("\\s+", " ");
         long sec = (dur + 500) / 1000;   // 归到秒,容忍不同编码间 <1s 的时长抖动
-        return "meta_" + t + "|" + a + "|" + sec;
+        return "meta_" + collapseWhitespace(b.getTitle()) + "|"
+                + collapseWhitespace(b.getArtist()) + "|" + sec;
     }
 
     /** 条目质量评分,用于同键去重时择优保留(分数越高越优) */

@@ -1791,18 +1791,38 @@ public class MusicService extends Service {
         });
     }
 
+    /**
+     * 重置播放器。2026-10-05 v432:不再在主线程调 player.reset() ——
+     * 旧实例处于卡死状态(网络流断连/编码器未恢复)时 reset 会阻塞到超时,
+     * 模拟器实测一次切歌烧 11.6s(栈:MediaPlayer._reset ← resetPlayer)。
+     * 改为:每次直接 new 一个新实例接管播放,旧实例摘掉监听器后交给后台线程
+     * 慢慢 reset+release,主线程零阻塞。
+     */
     private void resetPlayer() {
         stopPosTracking();
-        if (player == null) {
-            player = new MediaPlayer();
-        } else {
-            try {
-                player.reset();
-            } catch (Exception e) {
-                player = new MediaPlayer();
-            }
-        }
+        MediaPlayer old = player;
+        player = new MediaPlayer();
         isPrepared = false;
+        if (old != null) {
+            final MediaPlayer dead = old;
+            // 先摘监听器,避免旧实例在这几毫秒里回调到新状态
+            try { dead.setOnPreparedListener(null); } catch (Throwable ignored) { }
+            try { dead.setOnCompletionListener(null); } catch (Throwable ignored) { }
+            try { dead.setOnErrorListener(null); } catch (Throwable ignored) { }
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        dead.reset();
+                    } catch (Throwable ignored) { /* 卡死实例 reset 失败无所谓 */ }
+                    try {
+                        dead.release();
+                    } catch (Throwable ignored) { }
+                }
+            }, "mp-release");
+            t.setDaemon(true);
+            t.start();
+        }
     }
 
     @Override
