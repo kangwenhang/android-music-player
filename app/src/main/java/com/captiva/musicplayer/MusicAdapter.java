@@ -213,8 +213,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         dimSourceDotGap = dpToPx(density, 8);
         coverPlaceholder = context.getResources().getDrawable(R.drawable.bg_cover_placeholder);
         colorSourceDotInit = colorSourceLocal;
-        // 启用稳定 ID 提升 RecyclerView 回收效率
-        setHasStableIds(true);
+        // 【2026-10-05 v423 修复实验:关闭稳定 ID】
+        // 原注释"启用稳定 ID 提升 RecyclerView 回收效率"——但车机+模拟器实测正好相反:
+        // 切歌后每帧全窗口 measure 时,scrap/池查找 100% 落空(创建≈回收≈绑定,
+        // 池恒空,notify 计数=0),唯一未排除的路径就是稳定 ID 查找。
+        // 身份识别已由 DiffCallback.getIdentityKey 与 findPositionByBean 承担,
+        // 稳定 ID 并无功能性依赖;关闭后 RV 走纯 position 回收路径。
+        setHasStableIds(false);
     }
 
     /** dp → px(XML 里写死的 4dp/8dp/6dp/28dp 换算) */
@@ -1267,6 +1272,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     @Override
     public void onViewRecycled(@NonNull VH holder) {
         recycleCount++;
+        // 423:每 25 个回收抽查明细(定位 scrap/池为何不命中)
+        if (recycleCount % 25 == 0) {
+            DownloadDiag.listDiag("[列表] 回收明细#" + recycleCount
+                    + ": pos=" + holder.getLayoutPosition()
+                    + " invalid=" + holder.isInvalid()
+                    + " vt=" + holder.getItemViewType()
+                    + " bound=" + holder.isBound());
+        }
         if (holder.itemView != null && holder.itemView.hasTransientState()) {
             failedRecycleCount++;
             if (!transientDumped) {
