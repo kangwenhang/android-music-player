@@ -1274,9 +1274,17 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         recycleCount++;
         // 423:每 25 个回收抽查明细(定位 scrap/池为何不命中)
         if (recycleCount % 25 == 0) {
+            String dim = "?";
+            try {
+                if (rvRef != null) {
+                    dim = rvRef.getWidth() + "x" + rvRef.getHeight()
+                            + " child=" + rvRef.getChildCount();
+                }
+            } catch (Throwable t) { /* 诊断不改主流程 */ }
             DownloadDiag.listDiag("[列表] 回收明细#" + recycleCount
                     + ": pos=" + holder.getLayoutPosition()
-                    + " vt=" + holder.getItemViewType());
+                    + " vt=" + holder.getItemViewType()
+                    + " rv=" + dim);
         }
         if (holder.itemView != null && holder.itemView.hasTransientState()) {
             failedRecycleCount++;
