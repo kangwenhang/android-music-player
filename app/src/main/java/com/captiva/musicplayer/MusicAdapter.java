@@ -328,10 +328,13 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         Log.i(TAG, "[setData] fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                 + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
         // 诊断:第一首下面是第13首 → 确认 2~12 首到底在不在 fullData / filteredData 里
-        DownloadDiag.listDiag("[列表诊断] setData: fullData=" + fullData.size()
-                + " filtered=" + r.filtered.size() + " data=" + data.size()
-                + " fullData前20=" + diagKeys(fullData, 20)
-                + " | filtered前20=" + diagKeys(r.filtered, 20));
+        // 【v5.7.435 收尾】随 LIST_DIAG 关闭(diagKeys 要遍历前 20 项拼大字符串)
+        if (DownloadDiag.LIST_DIAG) {
+            DownloadDiag.listDiag("[列表诊断] setData: fullData=" + fullData.size()
+                    + " filtered=" + r.filtered.size() + " data=" + data.size()
+                    + " fullData前20=" + diagKeys(fullData, 20)
+                    + " | filtered前20=" + diagKeys(r.filtered, 20));
+        }
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("setData", "fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                     + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
@@ -1052,35 +1055,15 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (rvRef == null && parent instanceof RecyclerView) {
             rvRef = (RecyclerView) parent;
         }
-        createCount++;
-        long now = System.currentTimeMillis();
-        // 【418 修正】第 20 个创建发生在窗口中途,原逻辑放在翻转判断里永不触发;
-        // 且池余要同时看 type -1(Adapter 未重写 getItemViewType 时的默认类型)与 0。
-        if (createCount == 20) {
-            int p0 = -1, pm1 = -1;
-            try {
-                if (rvRef != null) {
-                    p0 = rvRef.getRecycledViewPool().getRecycledViewCount(0);
-                    pm1 = rvRef.getRecycledViewPool().getRecycledViewCount(-1);
-                }
-            } catch (Throwable t) { /* 诊断不改主流程 */ }
-            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-            StringBuilder sb = new StringBuilder("[列表] 创建现场#20(vt=").append(viewType)
-                    .append(" 池0=").append(p0).append(" 池-1=").append(pm1)
-                    .append(" bind=").append(bindCount)
-                    .append(" nChg=").append(notifyChangedCount)
-                    .append(" nIns=").append(notifyInsertedCount)
-                    .append(" nDS=").append(notifyDSCount)
-                    .append(" nOth=").append(notifyOtherCount).append("): ");
-            for (int i = 3; i < Math.min(st.length, 60); i++) {
-                sb.append(st[i].getClassName()).append('.')
-                  .append(st[i].getMethodName()).append(':')
-                  .append(st[i].getLineNumber()).append(" <- ");
-            }
-            DownloadDiag.listDiag(sb.toString());
-        }
-        if (createWindowStart == 0 || now - createWindowStart > 5000) {
-            if (createCount >= 20) {
+        // 【v5.7.435 收尾】创建风暴探测随 LIST_DIAG 关闭:正常路径每次 create 只留
+        // 一个 int 自增,堆栈抓取/字符串拼接/池余查询全部跳过(LIST_DIAG 常量折叠,
+        // JIT 会把整块编译掉)。
+        if (DownloadDiag.LIST_DIAG) {
+            createCount++;
+            long now = System.currentTimeMillis();
+            // 【418 修正】第 20 个创建发生在窗口中途,原逻辑放在翻转判断里永不触发;
+            // 且池余要同时看 type -1(Adapter 未重写 getItemViewType 时的默认类型)与 0。
+            if (createCount == 20) {
                 int p0 = -1, pm1 = -1;
                 try {
                     if (rvRef != null) {
@@ -1088,20 +1071,45 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                         pm1 = rvRef.getRecycledViewPool().getRecycledViewCount(-1);
                     }
                 } catch (Throwable t) { /* 诊断不改主流程 */ }
-                DownloadDiag.listDiag("[列表] 创建风暴: 创建" + createCount
-                        + " 回收" + recycleCount + " 回收失败" + failedRecycleCount
-                        + " 绑定" + bindCount + " 池0=" + p0 + " 池-1=" + pm1
-                        + " data=" + data.size() + "(5s窗口)");
+                StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                StringBuilder sb = new StringBuilder("[列表] 创建现场#20(vt=").append(viewType)
+                        .append(" 池0=").append(p0).append(" 池-1=").append(pm1)
+                        .append(" bind=").append(bindCount)
+                        .append(" nChg=").append(notifyChangedCount)
+                        .append(" nIns=").append(notifyInsertedCount)
+                        .append(" nDS=").append(notifyDSCount)
+                        .append(" nOth=").append(notifyOtherCount).append("): ");
+                for (int i = 3; i < Math.min(st.length, 60); i++) {
+                    sb.append(st[i].getClassName()).append('.')
+                      .append(st[i].getMethodName()).append(':')
+                      .append(st[i].getLineNumber()).append(" <- ");
+                }
+                DownloadDiag.listDiag(sb.toString());
             }
-            createWindowStart = now;
-            createCount = 0;
-            recycleCount = 0;
-            failedRecycleCount = 0;
-            bindCount = 0;
-            notifyChangedCount = 0;
-            notifyInsertedCount = 0;
-            notifyDSCount = 0;
-            notifyOtherCount = 0;
+            if (createWindowStart == 0 || now - createWindowStart > 5000) {
+                if (createCount >= 20) {
+                    int p0 = -1, pm1 = -1;
+                    try {
+                        if (rvRef != null) {
+                            p0 = rvRef.getRecycledViewPool().getRecycledViewCount(0);
+                            pm1 = rvRef.getRecycledViewPool().getRecycledViewCount(-1);
+                        }
+                    } catch (Throwable t) { /* 诊断不改主流程 */ }
+                    DownloadDiag.listDiag("[列表] 创建风暴: 创建" + createCount
+                            + " 回收" + recycleCount + " 回收失败" + failedRecycleCount
+                            + " 绑定" + bindCount + " 池0=" + p0 + " 池-1=" + pm1
+                            + " data=" + data.size() + "(5s窗口)");
+                }
+                createWindowStart = now;
+                createCount = 0;
+                recycleCount = 0;
+                failedRecycleCount = 0;
+                bindCount = 0;
+                notifyChangedCount = 0;
+                notifyInsertedCount = 0;
+                notifyDSCount = 0;
+                notifyOtherCount = 0;
+            }
         }
         // 方案 A:纯代码构造 item 视图,不走 LayoutInflater/XML/AppCompat tint 解析。
         // 车机日志(2026-10-04 download_debug(10))10 次主线程卡顿(最长 14.7s)有 9 次
@@ -1205,18 +1213,21 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
-        bindCount++;
-        if (bindCount % 100 == 50) {
-            StackTraceElement[] st = Thread.currentThread().getStackTrace();
-            StringBuilder sb = new StringBuilder("[列表] 挂载抽样#" + (bindCount / 100)
-                    + ": bindPos=" + position
-                    + " holderLayoutPos=" + holder.getLayoutPosition() + " 堆栈: ");
-            for (int i = 3; i < Math.min(st.length, 22); i++) {
-                sb.append(st[i].getClassName()).append('.')
-                  .append(st[i].getMethodName()).append(':')
-                  .append(st[i].getLineNumber()).append(" <- ");
+        // 【v5.7.435 收尾】挂载抽样随 LIST_DIAG 关闭(热路径零开销)
+        if (DownloadDiag.LIST_DIAG) {
+            bindCount++;
+            if (bindCount % 100 == 50) {
+                StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                StringBuilder sb = new StringBuilder("[列表] 挂载抽样#" + (bindCount / 100)
+                        + ": bindPos=" + position
+                        + " holderLayoutPos=" + holder.getLayoutPosition() + " 堆栈: ");
+                for (int i = 3; i < Math.min(st.length, 22); i++) {
+                    sb.append(st[i].getClassName()).append('.')
+                      .append(st[i].getMethodName()).append(':')
+                      .append(st[i].getLineNumber()).append(" <- ");
+                }
+                DownloadDiag.listDiag(sb.toString());
             }
-            DownloadDiag.listDiag(sb.toString());
         }
         long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         // 安全检查:防止 position 越界
@@ -1283,28 +1294,32 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /** 回收成功计数(进缓存/进池/被丢弃都算走完了 recycle 流水线) */
     @Override
     public void onViewRecycled(@NonNull VH holder) {
-        recycleCount++;
-        // 423:每 25 个回收抽查明细(定位 scrap/池为何不命中)
-        if (recycleCount % 25 == 0) {
-            String dim = "?";
-            try {
-                if (rvRef != null && rvRef.getChildCount() > 0) {
-                    View c0 = rvRef.getChildAt(0);
-                    View cN = rvRef.getChildAt(rvRef.getChildCount() - 1);
-                    dim = rvRef.getWidth() + "x" + rvRef.getHeight()
-                            + " child=" + rvRef.getChildCount()
-                            + " 视口" + rvRef.getChildAdapterPosition(c0)
-                            + ".." + rvRef.getChildAdapterPosition(cN);
-                }
-            } catch (Throwable t) { /* 诊断不改主流程 */ }
-            DownloadDiag.listDiag("[列表] 回收明细#" + recycleCount
-                    + ": pos=" + holder.getLayoutPosition()
-                    + " vt=" + holder.getItemViewType()
-                    + " rv=" + dim);
+        // 【v5.7.435 收尾】回收明细/抽检随 LIST_DIAG 关闭(热路径零开销);
+        // transient-state 检测极轻(一次布尔查询),且它是真问题信号,保留常开
+        if (DownloadDiag.LIST_DIAG) {
+            recycleCount++;
+            // 423:每 25 个回收抽查明细(定位 scrap/池为何不命中)
+            if (recycleCount % 25 == 0) {
+                String dim = "?";
+                try {
+                    if (rvRef != null && rvRef.getChildCount() > 0) {
+                        View c0 = rvRef.getChildAt(0);
+                        View cN = rvRef.getChildAt(rvRef.getChildCount() - 1);
+                        dim = rvRef.getWidth() + "x" + rvRef.getHeight()
+                                + " child=" + rvRef.getChildCount()
+                                + " 视口" + rvRef.getChildAdapterPosition(c0)
+                                + ".." + rvRef.getChildAdapterPosition(cN);
+                    }
+                } catch (Throwable t) { /* 诊断不改主流程 */ }
+                DownloadDiag.listDiag("[列表] 回收明细#" + recycleCount
+                        + ": pos=" + holder.getLayoutPosition()
+                        + " vt=" + holder.getItemViewType()
+                        + " rv=" + dim);
+            }
         }
         if (holder.itemView != null && holder.itemView.hasTransientState()) {
             failedRecycleCount++;
-            if (!transientDumped) {
+            if (DownloadDiag.LIST_DIAG && !transientDumped) {
                 transientDumped = true;
                 dumpTransient(holder.itemView, "onViewRecycled");
             }
@@ -1316,7 +1331,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     @Override
     public boolean onFailedToRecycleView(@NonNull VH holder) {
         failedRecycleCount++;
-        if (!transientDumped) {
+        if (DownloadDiag.LIST_DIAG && !transientDumped) {
             transientDumped = true;
             dumpTransient(holder.itemView, "onFailedToRecycle");
         }

@@ -49,8 +49,14 @@ public final class DownloadDiag {
      * 与 ENABLED 独立:ENABLED 管的是"下载 / 缓存 / 播放失败"这类真问题日志
      * (车机无法缓存歌曲、播放失败等),必须常开;LIST_DIAG 只管"列表渲染调试",
      * 问题修好后关掉即可,不影响上面的失败诊断。
+     *
+     * 【v5.7.435 收尾】卡顿排查闭环(创建风暴/reset/setDataSource/正则四个根因
+     * 逐一修掉,车机 25 号日志复核通过),列表调试与全部探测随此开关关闭:
+     * MainActivity 的 RV 快照 ExtraProbe + 脏视图探测器、MusicAdapter 的
+     * 创建风暴/挂载抽样/回收明细热路径埋点均以 LIST_DIAG 门控。
+     * 需要重新排查时改回 true 即整体恢复,调用点无需改动。
      */
-    public static final boolean LIST_DIAG = true;
+    public static final boolean LIST_DIAG = false;
 
     private static final String FILE_NAME = "download_debug.log";
     /** 超过这个体积就整体重写(只保留最新一轮),防止日志把车机存储吃满 */

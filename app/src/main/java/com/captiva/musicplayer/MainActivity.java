@@ -543,34 +543,39 @@ public class MainActivity extends AppCompatActivity {
         // childCount 是"fill 病态创建"假说的决定性证据:正常 ~12(可见项),
         // 若等于 adapter 总数(如 811)= LinearLayoutManager.fill 循环失控实锤。
         // 只读数字,不进 RV 内部锁,主线程卡着也能取到。
-        MainThreadWatchdog.setExtraProbe(new MainThreadWatchdog.ExtraProbe() {
-            @Override
-            public String probe() {
-                RecyclerView rv = rvList;
-                if (rv == null) {
-                    return null;
+        // 【v5.7.435 收尾】排查闭环(车机 25 号日志复核通过),探测随 LIST_DIAG 关闭;
+        // 需要重新排查时把 DownloadDiag.LIST_DIAG 改回 true 即整体恢复。
+        if (DownloadDiag.LIST_DIAG) {
+            MainThreadWatchdog.setExtraProbe(new MainThreadWatchdog.ExtraProbe() {
+                @Override
+                public String probe() {
+                    RecyclerView rv = rvList;
+                    if (rv == null) {
+                        return null;
+                    }
+                    int childCount = rv.getChildCount();
+                    int adapterCount = (rv.getAdapter() != null) ? rv.getAdapter().getItemCount() : -1;
+                    View first = rv.getChildAt(0);
+                    int firstH = (first != null) ? first.getHeight() : -1;
+                    int firstW = (first != null) ? first.getWidth() : -1;
+                    // 418:补池余量(同时看 type -1=默认类型与 0;创建风暴时看池是否被抽干)
+                    int pool = -1, poolM1 = -1;
+                    try {
+                        pool = rv.getRecycledViewPool().getRecycledViewCount(0);
+                        poolM1 = rv.getRecycledViewPool().getRecycledViewCount(-1);
+                    } catch (Throwable t) { /* 探测不改主流程 */ }
+                    return "rv.childCount=" + childCount + " adapterCount=" + adapterCount
+                            + " firstChild=" + firstW + "x" + firstH
+                            + " rv=" + rv.getWidth() + "x" + rv.getHeight()
+                            + " pool0=" + pool + " pool-1=" + poolM1;
                 }
-                int childCount = rv.getChildCount();
-                int adapterCount = (rv.getAdapter() != null) ? rv.getAdapter().getItemCount() : -1;
-                View first = rv.getChildAt(0);
-                int firstH = (first != null) ? first.getHeight() : -1;
-                int firstW = (first != null) ? first.getWidth() : -1;
-                // 418:补池余量(同时看 type -1=默认类型与 0;创建风暴时看池是否被抽干)
-                int pool = -1, poolM1 = -1;
-                try {
-                    pool = rv.getRecycledViewPool().getRecycledViewCount(0);
-                    poolM1 = rv.getRecycledViewPool().getRecycledViewCount(-1);
-                } catch (Throwable t) { /* 探测不改主流程 */ }
-                return "rv.childCount=" + childCount + " adapterCount=" + adapterCount
-                        + " firstChild=" + firstW + "x" + firstH
-                        + " rv=" + rv.getWidth() + "x" + rv.getHeight()
-                        + " pool0=" + pool + " pool-1=" + poolM1;
-            }
-        });
+            });
+        }
         tvEmpty = findViewById(R.id.tv_empty);
         // 【425 脏视图探测器】切歌后每秒 ~45 次全窗口 measure,adapter notify=0,
         // 是某个视图在反复 requestLayout。每帧遍历 decor 树抓 isLayoutRequested 的视图。
-        if (BuildConfig.DEBUG) {
+        // 【v5.7.435 收尾】随 LIST_DIAG 关闭(根因 BoundedRecyclerView 已根治)。
+        if (DownloadDiag.LIST_DIAG && BuildConfig.DEBUG) {
             startDirtyViewProbe();
         }
         sideIndexBar = findViewById(R.id.side_index_bar);
