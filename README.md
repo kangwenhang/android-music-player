@@ -124,24 +124,25 @@
   把歌拷进去即可在本地列表里看到(本地模式的空列表提示也会引导你把歌放这里)
 - 云端歌曲按服务器分子目录存放,换服务器不会互相覆盖
 
-## 黑屏 / 卡顿排查(诊断日志）
+## 黑屏 / 卡顿排查(诊断日志)
 
-黑屏、"过一会儿黑一下、点一下又亮"这类问题在车机上完全看不到线索（没有 adb、没有 logcat），
-于是把关键事件都落到 **音乐根目录 `download_debug.log`**。复现后把文件拷出来，按下面三条对号即可定位：
+**v6.0 起诊断日志默认全部关闭**(DownloadDiag.ENABLED=false):`download_debug.log`
+不再产生,Watchdog / 生命周期 / 联网播放等记录全部停止,崩溃取证不受影响
+(`crash_log.txt` 由 UncaughtExceptionHandler 独立写入,始终生效)。
 
-| 日志里看到 | 结论 | 处理 |
-| --- | --- | --- |
-| `[屏幕] 系统广播 熄屏` + `[生命周期] onPause \| 屏幕=灭` | 系统把屏幕关了（息屏超时 / 电源策略） | App 侧已加两层常亮（见下）；另把系统「设置 → 显示 → 休眠」设为"永不" |
-| 屏幕=亮 + `[主线程] 卡顿 Xms` | App 自己卡住了主线程，窗口在这段时间画不出新帧 | 按日志里的耗时点排查同步重活（本项目历史两次黑屏都是这个原因） |
-| 屏幕=亮 + 无卡顿行 + 堆正常 | 显示 / 合成层没合成画面（模拟器宿主 GPU、车机 SurfaceFlinger） | App 改不了：换设备或关掉模拟器硬件加速再验 |
-| 又一次 `==== download_debug.log 开始记录 ====` | 进程被杀后重启，这才是真正的"内存回收" | 配合上面 `[内存] 系统要求释放内存 level=…` 看是哪个档位触发 |
+需要重新排查时,把 `DownloadDiag.java` 的 `ENABLED` 改回 `true`(列表/渲染调试再开
+`LIST_DIAG`),重新构建即可,调用点无需改动(log 内部短路)。历史排查机制备忘:
 
-日志采集点：
-- `[屏幕]` — `ACTION_SCREEN_OFF / ON / USER_PRESENT` 广播（注册在 Application 上，任何页面都不会漏）
-- `[内存]` — `Application.onTrimMemory / onLowMemory`（本项目没有任何主动回收逻辑，这两行只做取证）
-- `[主线程]` — `MainThreadWatchdog`：后台线程每 5s 往主线程丢一个空任务量往返耗时，只记超过 1.5s 的
-- `[生命周期]` — 主界面 `onResume / onPause`，带当前屏幕状态与堆占用
-- 播放/下载相关的 `[界面]`、下载失败原因同样落在这个文件
+- **MainThreadWatchdog**:后台线程每 5s 往主线程丢一个空任务量往返耗时,超过 5s
+  (真卡死级)才抓现场堆栈落盘
+- **屏幕 / 内存 / 生命周期**采集点:`ACTION_SCREEN_OFF/ON` 广播、
+  `onTrimMemory`、主界面 onResume/onPause
+- **列表渲染调试**(`LIST_DIAG`):创建风暴探测、RV 快照、回收明细、可见行 dump 等,
+  随同一开关整体恢复
+
+本项目历史上的两次大卡顿(811 首大列表创建风暴 8-20s、MediaPlayer
+reset/setDataSource 主线程阻塞 11-12s)分别由 `BoundedRecyclerView`(杜绝无界测量)
+与"MediaPlayer 操作整体后台化"根治,详见 v6.0 更新内容。
 
 ### 屏幕常亮（两层保障）
 
@@ -165,8 +166,38 @@
 
 - **main 分支**:正式版,`assembleRelease`(BuildConfig.DEBUG=false,性能监控关闭),推送后自动构建并创建 GitHub Release
 - **local-test 分支**:测试版,`assembleDebug`(性能监控开启,便于卡顿分析),推送后自动构建并创建预发布(Pre-release)
-- 版本号基于 git tag,正式版如 `v5.7`,预发布如 `v5.7.300-pre`
+- 版本号基于 git tag,正式版如 `v6.0`,预发布如 `v5.7.435-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
+
+### v6.0 更新内容(正式版)
+
+本次大版本的主线是**把 811 首大列表 + 网络流播放场景下的所有秒级卡顿根治掉**,
+并回归到零诊断开销的稳定基线。四个根因逐一闭环,车机实机日志复核通过:
+
+- **大列表渲染创建风暴根治(新增 `BoundedRecyclerView`)**:主界面中部是
+  LinearLayout 0dp+weight 链,某些全窗口 measure 会把 RecyclerView 量成
+  UNSPECIFIED → LinearLayoutManager 从锚点把整张 811 行列表逐行
+  onCreateViewHolder+bind(车机 30-80ms/行 = 8-20 秒卡顿)。自定义 RecyclerView
+  在 onMeasure 中把非 EXACTLY 模式强制收敛为上次 EXACT 尺寸,病态 pass 从源头消失。
+  实测:创建风暴从每轮 87~1594 个/5s 降到 **0**
+- **MediaPlayer.reset 主线程阻塞后台化**:旧实例处于卡死状态(网络流断连)时
+  `reset()` 会阻塞到超时(实测 11.6s)。改为每次直接 new 新实例接管播放,
+  旧实例摘掉监听器后交后台线程 reset+release,主线程零阻塞
+- **setDataSource(网络流)后台化**:MediaPlayer 自己的网络栈在调用线程做网络 I/O,
+  实测一次烧 11.9s(栈顶 `_setDataSource`)。鉴权头获取 + 边下边播代理注册 +
+  setDataSource 整段挪到后台 `mp-prepare` 线程,完成后回主线程
+  finishPrepare(监听器 + prepareAsync);token + player 实例双重防串,
+  prepared/error 回调仍走主线程 looper,兜底逻辑统一进 `handlePrepareFailure`
+- **大列表去重正则预编译**:`getLogicalKey` 的 `String.replaceAll` 每次调用都
+  Pattern.compile,对全列表逐行调用一次切歌烧 605ms;改为预编译 static Pattern
+- **诊断探测全部关闭(彻底静默)**:`DownloadDiag.ENABLED / LIST_DIAG` 均为 false,
+  `download_debug.log` 不再产生;列表调试探测(RV 快照 / 脏视图探测器 / 创建风暴
+  计数 / 挂载抽样 / 回收明细)热路径零开销;MainThreadWatchdog 回 5s 常规档,
+  只抓真卡死。需要排查时改回 true 重新构建即可
+- **回收池调优**:`setItemViewCacheSize 24→2`、`MaxRecycledViews(0) 24→5`,
+  大列表场景下限制离屏缓存与池占用(2026-10-05 决策)
+- 附带:歌词公开兜底源 `lrclib.net`(见 v5.7.1)、飞牛/Navidrome 收藏夹云同步等
+  此前 local-test 迭代内容全部并入
 
 ### v5.7.1 更新内容
 

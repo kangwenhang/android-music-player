@@ -39,8 +39,16 @@ public final class DownloadDiag {
 
     private static final String TAG = "DownloadDiag";
 
-    /** 总开关:false = 一行都不写(同时关掉下方两类日志) */
-    public static final boolean ENABLED = true;
+    /**
+     * 总开关:false = 一行都不写(同时关掉下方两类日志)。
+     *
+     * 【v6.0 彻底静默】卡顿排查主线全部闭环(创建风暴/reset/setDataSource/正则,
+     * 车机 25 号日志复核通过),正式版完全关闭落盘:download_debug.log 不再产生,
+     * Watchdog / 生命周期 / 联网播放等记录全部停止。崩溃取证不受影响
+     * (crash_log.txt 由 UncaughtExceptionHandler 独立写入)。
+     * 需要重新排查:改回 true 重新构建即可,调用点无需改动(log 内部短路)。
+     */
+    public static final boolean ENABLED = false;
 
     /**
      * 列表/收藏夹调试开关:false = 关掉本轮排查"列表错位(第一首下面是第13首)"时
