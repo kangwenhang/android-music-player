@@ -240,6 +240,29 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      * 使用 DiffUtil 增量刷新(只重绑变化行),替代 notifyDataSetChanged
      */
     public synchronized void setData(List<MusicBean> list) {
+        // 【2026-10-05 护栏】fullData 身份序列与传入列表完全一致 → 跳过换血,保留分页进度。
+        // 414 日志(21)实证的卡顿循环:云端收藏/同步/补全等场景反复用**同一份 811 首**
+        // 全量 setData —— 旧实现把已加载的 650 条重置回第一批 50 → 高亮+滚动定位 →
+        // ensureLoaded 一次补 ~600 条 → notifyItemRangeInserted(50,600) 大重布局 →
+        // 数百个 onCreateViewHolder → 秒级卡顿;每首歌循环一次(创建风暴 200-530 个/5s
+        // 持续 2 分钟,7 次卡顿 4.4s~9.9s)。数据没变时不该有这一切。
+        // 身份键有缓存(cachedIdentityKey),811 项比较亚毫秒级;标记类变化(缓存完成/
+        // 收藏)本就有单行刷新路径(cacheReceiver→refreshRowByStreamId),不依赖换血。
+        if (list != null && sameIdentitySequence(list)) {
+            StringBuilder callers = new StringBuilder();
+            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+            for (int i = 2; i < Math.min(st.length, 7); i++) {
+                String cn = st[i].getClassName();
+                callers.append(cn.substring(cn.lastIndexOf('.') + 1)).append('.')
+                        .append(st[i].getMethodName()).append(':').append(st[i].getLineNumber());
+                if (i < Math.min(st.length, 7) - 1) {
+                    callers.append(" <- ");
+                }
+            }
+            DownloadDiag.listDiag("[列表] setData 护栏命中: 身份序列未变,跳过换血(保留分页进度)"
+                    + " caller=" + callers);
+            return;
+        }
         // 整体替换数据:在途异步过滤是按**旧 fullData** 算的,结果本身已无意义,
         // 所以这里要连过滤代次一起作废(不只是 dataVersion)。
         filterGeneration++;
@@ -290,6 +313,27 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             PerfLogger.log("setData", "fullData=" + fullData.size() + " filtered=" + r.filtered.size()
                     + " loaded=" + loadedCount + " diff=" + elapsed + "ms");
         }
+    }
+
+    /**
+     * setData 护栏判据:传入列表与当前 fullData 的身份键序列逐位一致(含顺序)。
+     * 一致说明数据没有任何结构变化,换血只会白白重置分页进度、触发大重布局。
+     */
+    private boolean sameIdentitySequence(List<MusicBean> list) {
+        if (fullData == null || fullData.size() != list.size()) {
+            return false;
+        }
+        for (int i = 0; i < list.size(); i++) {
+            MusicBean a = fullData.get(i);
+            MusicBean b = list.get(i);
+            if (a == null || b == null) {
+                return false;
+            }
+            if (!a.getIdentityKey().equals(b.getIdentityKey())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
