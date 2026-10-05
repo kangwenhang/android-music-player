@@ -99,6 +99,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private int failedRecycleCount = 0;
     /** 5 秒窗口内 onBindViewHolder 计数(区分"真挂载"与"建了就扔") */
     private int bindCount = 0;
+    /** 5 秒窗口内各类 notify 计数(定位是谁在刷布局) */
+    private int notifyChangedCount = 0;
+    private int notifyInsertedCount = 0;
+    private int notifyDSCount = 0;
+    private int notifyOtherCount = 0;
     /** transient-state 详查只 dump 一次(避免风暴刷屏) */
     private boolean transientDumped = false;
     /** onCreateViewHolder 时记录的宿主 RV(取池余量用) */
@@ -1057,7 +1062,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             StackTraceElement[] st = Thread.currentThread().getStackTrace();
             StringBuilder sb = new StringBuilder("[列表] 创建现场#20(vt=").append(viewType)
                     .append(" 池0=").append(p0).append(" 池-1=").append(pm1)
-                    .append(" bind=").append(bindCount).append("): ");
+                    .append(" bind=").append(bindCount)
+                    .append(" nChg=").append(notifyChangedCount)
+                    .append(" nIns=").append(notifyInsertedCount)
+                    .append(" nDS=").append(notifyDSCount)
+                    .append(" nOth=").append(notifyOtherCount).append("): ");
             for (int i = 3; i < Math.min(st.length, 60); i++) {
                 sb.append(st[i].getClassName()).append('.')
                   .append(st[i].getMethodName()).append(':')
@@ -1084,6 +1093,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             recycleCount = 0;
             failedRecycleCount = 0;
             bindCount = 0;
+            notifyChangedCount = 0;
+            notifyInsertedCount = 0;
+            notifyDSCount = 0;
+            notifyOtherCount = 0;
         }
         // 方案 A:纯代码构造 item 视图,不走 LayoutInflater/XML/AppCompat tint 解析。
         // 车机日志(2026-10-04 download_debug(10))10 次主线程卡顿(最长 14.7s)有 9 次
@@ -1223,6 +1236,50 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("onBind", System.currentTimeMillis() - t0);
         }
+    }
+
+    // ===== 421 notify 计数(定位切歌后每秒 45 次全窗口 measure 的驱动源) =====
+
+    @Override
+    public void notifyDataSetChanged() {
+        notifyDSCount++;
+        super.notifyDataSetChanged();
+    }
+
+    @Override
+    public void notifyItemChanged(int position) {
+        notifyChangedCount++;
+        super.notifyItemChanged(position);
+    }
+
+    @Override
+    public void notifyItemChanged(int position, Object payload) {
+        notifyChangedCount++;
+        super.notifyItemChanged(position, payload);
+    }
+
+    @Override
+    public void notifyItemRangeInserted(int positionStart, int itemCount) {
+        notifyInsertedCount++;
+        super.notifyItemRangeInserted(positionStart, itemCount);
+    }
+
+    @Override
+    public void notifyItemRemoved(int position) {
+        notifyOtherCount++;
+        super.notifyItemRemoved(position);
+    }
+
+    @Override
+    public void notifyItemRangeChanged(int positionStart, int itemCount) {
+        notifyOtherCount++;
+        super.notifyItemRangeChanged(positionStart, itemCount);
+    }
+
+    @Override
+    public void notifyItemMoved(int fromPosition, int toPosition) {
+        notifyOtherCount++;
+        super.notifyItemMoved(fromPosition, toPosition);
     }
 
     // ===== 417 回收流水线诊断钩子 =====
