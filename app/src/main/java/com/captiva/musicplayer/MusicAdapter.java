@@ -91,6 +91,17 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private int createCount = 0;
     private long createWindowStart = 0;
 
+    // ===== 417 回收流水线诊断(2026-10-05 23 号日志:创建数 436~530/5s 超过行挂载数,
+    // 回收体系疑似完全失效;埋点裁决坏在哪一环)=====
+    /** 5 秒窗口内成功走 recycle 流水线的 holder 计数(onViewRecycled) */
+    private int recycleCount = 0;
+    /** 5 秒窗口内回收失败计数(onFailedToRecycleView,典型原因=hasTransientState) */
+    private int failedRecycleCount = 0;
+    /** transient-state 详查只 dump 一次(避免风暴刷屏) */
+    private boolean transientDumped = false;
+    /** onCreateViewHolder 时记录的宿主 RV(取池余量用) */
+    private RecyclerView rvRef = null;
+
     // ===== 异步过滤 / DiffUtil 增量刷新相关字段 =====
     // 过滤遍历 + Diff 计算放到后台单线程,避免主线程遍历几百上千首导致掉帧
     private final ExecutorService filterExecutor = Executors.newSingleThreadExecutor();
@@ -1026,15 +1037,38 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 车机日志(download_debug(17))记录到切歌后连续 30+ 秒的ViewHolder
         // 连续创建(12.8s/17.1s 卡顿,栈都钉在 fill→onCreateViewHolder)。
         // 5 秒窗口内创建 ≥20 个即视为回收失效,落一条诊断日志用于定位触发源。
+        if (rvRef == null && parent instanceof RecyclerView) {
+            rvRef = (RecyclerView) parent;
+        }
         createCount++;
         long now = System.currentTimeMillis();
         if (createWindowStart == 0 || now - createWindowStart > 5000) {
             if (createCount >= 20) {
-                DownloadDiag.listDiag("[列表] ViewHolder 创建风暴: "
-                        + createCount + " 个/5s(回收失效或整表重建,排查触发源)");
+                int pool = -1;
+                try {
+                    if (rvRef != null) {
+                        pool = rvRef.getRecycledViewPool().getRecycledViewCount(0);
+                    }
+                } catch (Throwable t) { /* 诊断不改主流程 */ }
+                DownloadDiag.listDiag("[列表] 创建风暴: 创建" + createCount
+                        + " 回收" + recycleCount + " 回收失败" + failedRecycleCount
+                        + " 池余" + pool + " data=" + data.size() + "(5s窗口)");
+                // 窗口内第 20 个创建时抓一次创建现场堆栈(谁在批量索要新 holder)
+                if (createCount == 20) {
+                    StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                    StringBuilder sb = new StringBuilder("[列表] 创建现场堆栈: ");
+                    for (int i = 3; i < Math.min(st.length, 13); i++) {
+                        sb.append(st[i].getClassName()).append('.')
+                          .append(st[i].getMethodName()).append(':')
+                          .append(st[i].getLineNumber()).append(" <- ");
+                    }
+                    DownloadDiag.listDiag(sb.toString());
+                }
             }
             createWindowStart = now;
             createCount = 0;
+            recycleCount = 0;
+            failedRecycleCount = 0;
         }
         // 方案 A:纯代码构造 item 视图,不走 LayoutInflater/XML/AppCompat tint 解析。
         // 车机日志(2026-10-04 download_debug(10))10 次主线程卡顿(最长 14.7s)有 9 次
@@ -1172,6 +1206,62 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
         if (PerfLogger.isEnabled()) {
             PerfLogger.log("onBind", System.currentTimeMillis() - t0);
+        }
+    }
+
+    // ===== 417 回收流水线诊断钩子 =====
+
+    /** 回收成功计数(进缓存/进池/被丢弃都算走完了 recycle 流水线) */
+    @Override
+    public void onViewRecycled(@NonNull VH holder) {
+        recycleCount++;
+        if (holder.itemView != null && holder.itemView.hasTransientState()) {
+            failedRecycleCount++;
+            if (!transientDumped) {
+                transientDumped = true;
+                dumpTransient(holder.itemView, "onViewRecycled");
+            }
+        }
+        super.onViewRecycled(holder);
+    }
+
+    /** 回收失败(holder 带 transient state 被直接丢弃,不再进池 → 池被抽干 → 创建风暴) */
+    @Override
+    public boolean onFailedToRecycleView(@NonNull VH holder) {
+        failedRecycleCount++;
+        if (!transientDumped) {
+            transientDumped = true;
+            dumpTransient(holder.itemView, "onFailedToRecycle");
+        }
+        return super.onFailedToRecycleView(holder);
+    }
+
+    /** 递归找出 itemView 树里 hasTransientState=true 的视图(定位是谁污染的) */
+    private void dumpTransient(View root, String via) {
+        try {
+            StringBuilder sb = new StringBuilder("[列表] transient-state 详查(")
+                    .append(via).append("): root=").append(root.hasTransientState());
+            java.util.ArrayDeque<View> stack = new java.util.ArrayDeque<View>();
+            stack.push(root);
+            int guard = 0;
+            while (!stack.isEmpty() && guard++ < 30) {
+                View v = stack.pop();
+                if (v instanceof ViewGroup) {
+                    ViewGroup g = (ViewGroup) v;
+                    for (int i = 0; i < g.getChildCount(); i++) {
+                        View c = g.getChildAt(i);
+                        if (c.hasTransientState()) {
+                            sb.append(" [*").append(c.getClass().getSimpleName()).append(']');
+                        }
+                        if (c instanceof ViewGroup) {
+                            stack.push(c);
+                        }
+                    }
+                }
+            }
+            DownloadDiag.listDiag(sb.toString());
+        } catch (Throwable t) {
+            DownloadDiag.listDiag("[列表] transient-state 详查异常: " + t);
         }
     }
 
