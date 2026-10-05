@@ -17,6 +17,7 @@ import android.os.Build;
 import android.os.FileObserver;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.IBinder;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -567,6 +568,11 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         tvEmpty = findViewById(R.id.tv_empty);
+        // 【425 脏视图探测器】切歌后每秒 ~45 次全窗口 measure,adapter notify=0,
+        // 是某个视图在反复 requestLayout。每帧遍历 decor 树抓 isLayoutRequested 的视图。
+        if (BuildConfig.DEBUG) {
+            startDirtyViewProbe();
+        }
         sideIndexBar = findViewById(R.id.side_index_bar);
         tvCount = findViewById(R.id.tv_count);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
@@ -4099,6 +4105,63 @@ public class MainActivity extends AppCompatActivity {
      * - 冷却窗内(连点) → 移除旧任务重排 trailing,停手 400ms 后只刷新一次。
      * 播放本体不受影响,只合并滚动+高亮这类列表 UI 开销。
      */
+    // ===== 425 脏视图探测器(诊断版) =====
+    /** 是否需要继续探测:命中 8 次后自动停,避免长跑刷屏 */
+    private int dirtyProbeHits = 0;
+    private long dirtyProbeLastLog = 0L;
+
+    private void startDirtyViewProbe() {
+        Choreographer.getInstance().postFrameCallback(new Choreographer.FrameCallback() {
+            @Override
+            public void doFrame(long frameTimeNanos) {
+                if (dirtyProbeHits < 8) {
+                    probeDirtyViews();
+                }
+                if (dirtyProbeHits < 8) {
+                    Choreographer.getInstance().postFrameCallback(this);
+                }
+            }
+        });
+    }
+
+    /** 遍历 decor 树,打印 isLayoutRequested()==true 的视图(每秒最多 2 条,命中 8 次即停) */
+    private void probeDirtyViews() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - dirtyProbeLastLog < 500) {
+            return;
+        }
+        View decor = getWindow() != null ? getWindow().getDecorView() : null;
+        if (decor == null) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        java.util.ArrayDeque<View> stack = new java.util.ArrayDeque<View>();
+        stack.push(decor);
+        int guard = 0;
+        while (!stack.isEmpty() && guard++ < 200) {
+            View v = stack.pop();
+            if (v.isLayoutRequested()) {
+                sb.append(" [").append(v.getClass().getSimpleName())
+                  .append(' ').append(v.getLeft()).append(',').append(v.getTop())
+                  .append(' ').append(v.getWidth()).append('x').append(v.getHeight()).append(']');
+                dirtyProbeHits++;
+                if (dirtyProbeHits >= 8) {
+                    break;
+                }
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup g = (ViewGroup) v;
+                for (int i = g.getChildCount() - 1; i >= 0; i--) {
+                    stack.push(g.getChildAt(i));
+                }
+            }
+        }
+        if (sb.length() > 0) {
+            dirtyProbeLastLog = now;
+            DownloadDiag.listDiag("[列表] 脏视图(requestLayout 源):" + sb);
+        }
+    }
+
     private void scheduleListRefresh() {
         long now = android.os.SystemClock.elapsedRealtime();
         boolean inCooldown = (now - lastListRefreshAt) < LIST_REFRESH_COOLDOWN_MS;
