@@ -554,15 +554,16 @@ public class MainActivity extends AppCompatActivity {
                 View first = rv.getChildAt(0);
                 int firstH = (first != null) ? first.getHeight() : -1;
                 int firstW = (first != null) ? first.getWidth() : -1;
-                // 417:补池余量(创建风暴时看池是否被抽干)
-                int pool = -1;
+                // 418:补池余量(同时看 type -1=默认类型与 0;创建风暴时看池是否被抽干)
+                int pool = -1, poolM1 = -1;
                 try {
                     pool = rv.getRecycledViewPool().getRecycledViewCount(0);
+                    poolM1 = rv.getRecycledViewPool().getRecycledViewCount(-1);
                 } catch (Throwable t) { /* 探测不改主流程 */ }
                 return "rv.childCount=" + childCount + " adapterCount=" + adapterCount
                         + " firstChild=" + firstW + "x" + firstH
                         + " rv=" + rv.getWidth() + "x" + rv.getHeight()
-                        + " pool=" + pool;
+                        + " pool0=" + pool + " pool-1=" + poolM1;
             }
         });
         tvEmpty = findViewById(R.id.tv_empty);

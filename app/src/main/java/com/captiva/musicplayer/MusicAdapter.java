@@ -97,6 +97,8 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private int recycleCount = 0;
     /** 5 秒窗口内回收失败计数(onFailedToRecycleView,典型原因=hasTransientState) */
     private int failedRecycleCount = 0;
+    /** 5 秒窗口内 onBindViewHolder 计数(区分"真挂载"与"建了就扔") */
+    private int bindCount = 0;
     /** transient-state 详查只 dump 一次(避免风暴刷屏) */
     private boolean transientDumped = false;
     /** onCreateViewHolder 时记录的宿主 RV(取池余量用) */
@@ -1042,33 +1044,46 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         }
         createCount++;
         long now = System.currentTimeMillis();
+        // 【418 修正】第 20 个创建发生在窗口中途,原逻辑放在翻转判断里永不触发;
+        // 且池余要同时看 type -1(Adapter 未重写 getItemViewType 时的默认类型)与 0。
+        if (createCount == 20) {
+            int p0 = -1, pm1 = -1;
+            try {
+                if (rvRef != null) {
+                    p0 = rvRef.getRecycledViewPool().getRecycledViewCount(0);
+                    pm1 = rvRef.getRecycledViewPool().getRecycledViewCount(-1);
+                }
+            } catch (Throwable t) { /* 诊断不改主流程 */ }
+            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+            StringBuilder sb = new StringBuilder("[列表] 创建现场#20(vt=").append(viewType)
+                    .append(" 池0=").append(p0).append(" 池-1=").append(pm1)
+                    .append(" bind=").append(bindCount).append("): ");
+            for (int i = 3; i < Math.min(st.length, 13); i++) {
+                sb.append(st[i].getClassName()).append('.')
+                  .append(st[i].getMethodName()).append(':')
+                  .append(st[i].getLineNumber()).append(" <- ");
+            }
+            DownloadDiag.listDiag(sb.toString());
+        }
         if (createWindowStart == 0 || now - createWindowStart > 5000) {
             if (createCount >= 20) {
-                int pool = -1;
+                int p0 = -1, pm1 = -1;
                 try {
                     if (rvRef != null) {
-                        pool = rvRef.getRecycledViewPool().getRecycledViewCount(0);
+                        p0 = rvRef.getRecycledViewPool().getRecycledViewCount(0);
+                        pm1 = rvRef.getRecycledViewPool().getRecycledViewCount(-1);
                     }
                 } catch (Throwable t) { /* 诊断不改主流程 */ }
                 DownloadDiag.listDiag("[列表] 创建风暴: 创建" + createCount
                         + " 回收" + recycleCount + " 回收失败" + failedRecycleCount
-                        + " 池余" + pool + " data=" + data.size() + "(5s窗口)");
-                // 窗口内第 20 个创建时抓一次创建现场堆栈(谁在批量索要新 holder)
-                if (createCount == 20) {
-                    StackTraceElement[] st = Thread.currentThread().getStackTrace();
-                    StringBuilder sb = new StringBuilder("[列表] 创建现场堆栈: ");
-                    for (int i = 3; i < Math.min(st.length, 13); i++) {
-                        sb.append(st[i].getClassName()).append('.')
-                          .append(st[i].getMethodName()).append(':')
-                          .append(st[i].getLineNumber()).append(" <- ");
-                    }
-                    DownloadDiag.listDiag(sb.toString());
-                }
+                        + " 绑定" + bindCount + " 池0=" + p0 + " 池-1=" + pm1
+                        + " data=" + data.size() + "(5s窗口)");
             }
             createWindowStart = now;
             createCount = 0;
             recycleCount = 0;
             failedRecycleCount = 0;
+            bindCount = 0;
         }
         // 方案 A:纯代码构造 item 视图,不走 LayoutInflater/XML/AppCompat tint 解析。
         // 车机日志(2026-10-04 download_debug(10))10 次主线程卡顿(最长 14.7s)有 9 次
@@ -1172,6 +1187,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
     @Override
     public void onBindViewHolder(@NonNull VH holder, int position) {
+        bindCount++;
         long t0 = PerfLogger.isEnabled() ? System.currentTimeMillis() : 0;
         // 安全检查:防止 position 越界
         if (position < 0 || position >= data.size()) {
