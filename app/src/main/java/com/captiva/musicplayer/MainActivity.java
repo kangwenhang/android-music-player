@@ -4140,7 +4140,7 @@ public class MainActivity extends AppCompatActivity {
         int guard = 0;
         while (!stack.isEmpty() && guard++ < 200) {
             View v = stack.pop();
-            if (v.isLayoutRequested()) {
+            if (v.isLayoutRequested() && v.getWidth() > 0) {
                 sb.append(" [").append(v.getClass().getSimpleName())
                   .append(' ').append(v.getLeft()).append(',').append(v.getTop())
                   .append(' ').append(v.getWidth()).append('x').append(v.getHeight()).append(']');
