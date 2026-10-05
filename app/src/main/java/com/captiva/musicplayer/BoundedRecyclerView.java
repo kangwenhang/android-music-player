@@ -3,7 +3,8 @@ package com.captiva.musicplayer;
 import android.content.Context;
 import android.util.AttributeSet;
 import android.view.View;
-import android.view.ViewGroup;
+
+import androidx.recyclerview.widget.RecyclerView;
 
 /**
  * 有界测量 RecyclerView(2026-10-05 v430 卡顿根治)。
