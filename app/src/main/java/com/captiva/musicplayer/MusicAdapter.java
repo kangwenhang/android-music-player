@@ -1058,7 +1058,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
             StringBuilder sb = new StringBuilder("[列表] 创建现场#20(vt=").append(viewType)
                     .append(" 池0=").append(p0).append(" 池-1=").append(pm1)
                     .append(" bind=").append(bindCount).append("): ");
-            for (int i = 3; i < Math.min(st.length, 30); i++) {
+            for (int i = 3; i < Math.min(st.length, 60); i++) {
                 sb.append(st[i].getClassName()).append('.')
                   .append(st[i].getMethodName()).append(':')
                   .append(st[i].getLineNumber()).append(" <- ");
