@@ -538,6 +538,27 @@ public class MainActivity extends AppCompatActivity {
 
     private void initViews() {
         rvList = findViewById(R.id.rv_list);
+        // 卡顿现场附加探测(2026-10-05):卡顿时在 watchdog 线程快照 RV 状态。
+        // childCount 是"fill 病态创建"假说的决定性证据:正常 ~12(可见项),
+        // 若等于 adapter 总数(如 811)= LinearLayoutManager.fill 循环失控实锤。
+        // 只读数字,不进 RV 内部锁,主线程卡着也能取到。
+        MainThreadWatchdog.setExtraProbe(new MainThreadWatchdog.ExtraProbe() {
+            @Override
+            public String probe() {
+                RecyclerView rv = rvList;
+                if (rv == null) {
+                    return null;
+                }
+                int childCount = rv.getChildCount();
+                int adapterCount = (rv.getAdapter() != null) ? rv.getAdapter().getItemCount() : -1;
+                View first = rv.getChildAt(0);
+                int firstH = (first != null) ? first.getHeight() : -1;
+                int firstW = (first != null) ? first.getWidth() : -1;
+                return "rv.childCount=" + childCount + " adapterCount=" + adapterCount
+                        + " firstChild=" + firstW + "x" + firstH
+                        + " rv=" + rv.getWidth() + "x" + rv.getHeight();
+            }
+        });
         tvEmpty = findViewById(R.id.tv_empty);
         sideIndexBar = findViewById(R.id.side_index_bar);
         tvCount = findViewById(R.id.tv_count);

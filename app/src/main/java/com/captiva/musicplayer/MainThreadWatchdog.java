@@ -35,6 +35,21 @@ public final class MainThreadWatchdog {
     private static volatile boolean running;
     private static volatile long lastReportTs;
 
+    /**
+     * 卡顿现场附加探测钩子(2026-10-05):由界面注册,卡顿报告时在 watchdog 线程调用,
+     * 返回一行诊断文本(如 rvList.childCount)。实现必须**非阻塞、只读**——主线程此刻
+     * 正卡着,probe 里做任何同步操作都拿不到数据甚至死锁。
+     */
+    public interface ExtraProbe {
+        String probe();
+    }
+
+    private static volatile ExtraProbe extraProbe;
+
+    public static void setExtraProbe(ExtraProbe p) {
+        extraProbe = p;
+    }
+
     private MainThreadWatchdog() {
     }
 
@@ -95,6 +110,19 @@ public final class MainThreadWatchdog {
                                     // 全线程清单(2026-10-04):卡顿=主线程被抢时的"在场人员名单"。
                                     // 每线程记 优先级/状态/栈顶一帧,谁在占用 CPU 一眼可见
                                     dumpThreadInventory();
+                                    // 附加探测(2026-10-05):界面注册的现场快照(如 rvList.childCount)。
+                                    // 卡顿时 RecyclerView 挂着多少个 child 是"fill 病态创建"假说的
+                                    // 决定性证据:正常 ~12 个,病态时会等于 adapter 总数(如 811)。
+                                    ExtraProbe p = extraProbe;
+                                    if (p != null) {
+                                        try {
+                                            String extra = p.probe();
+                                            if (extra != null) {
+                                                DownloadDiag.log("[主线程] 卡顿现场附加探测: " + extra);
+                                            }
+                                        } catch (Throwable ignored) {
+                                        }
+                                    }
                                     // 按线程 CPU 增量排行(394):卡顿期间每个线程烧了多少 CPU,
                                     // 直接点名元凶(TLS 握手/GC/主线程文本排版一目了然)
                                     dumpPerThreadCpuDelta(cpuPerThreadAtStuck);

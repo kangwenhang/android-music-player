@@ -50,7 +50,7 @@ public final class DownloadDiag {
      * (车机无法缓存歌曲、播放失败等),必须常开;LIST_DIAG 只管"列表渲染调试",
      * 问题修好后关掉即可,不影响上面的失败诊断。
      */
-    public static final boolean LIST_DIAG = false;
+    public static final boolean LIST_DIAG = true;
 
     private static final String FILE_NAME = "download_debug.log";
     /** 超过这个体积就整体重写(只保留最新一轮),防止日志把车机存储吃满 */
