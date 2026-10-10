@@ -36,7 +36,38 @@ public class LocalMusicCache {
     private volatile int lastSavedCount = 0;
 
     public LocalMusicCache(Context context) {
-        cacheFile = new File(context.getCacheDir(), CACHE_FILE);
+        // 与 SongCache 同理:本地歌单缓存是"云端不可用回退路径"的数据源,
+        // 放 getCacheDir 会被系统/清缓存清掉,导致离线首开歌单(含收藏标记)消失,改存 filesDir
+        cacheFile = new File(context.getFilesDir(), CACHE_FILE);
+        migrateFromLegacyCacheDir(context);
+    }
+
+    /** 旧版缓存在 getCacheDir,一次性搬到 filesDir(老用户升级无感) */
+    private static void migrateFromLegacyCacheDir(Context context) {
+        if (context == null) return;
+        File legacy = new File(context.getCacheDir(), CACHE_FILE);
+        File target = new File(context.getFilesDir(), CACHE_FILE);
+        if (!legacy.exists() || legacy.length() == 0 || target.exists()) {
+            return;
+        }
+        java.io.InputStream in = null;
+        java.io.OutputStream out = null;
+        try {
+            in = new java.io.FileInputStream(legacy);
+            out = new java.io.FileOutputStream(target);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) != -1) {
+                out.write(buf, 0, len);
+            }
+            Log.i(TAG, "本地歌单缓存已从 cacheDir 迁移到 filesDir");
+        } catch (Exception e) {
+            Log.w(TAG, "迁移本地歌单缓存失败(忽略,等待下次扫描重建)", e);
+            target.delete();
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) {}
+            try { if (out != null) out.close(); } catch (Exception ignored) {}
+        }
     }
 
     /**

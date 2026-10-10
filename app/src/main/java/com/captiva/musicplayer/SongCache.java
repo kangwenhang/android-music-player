@@ -52,7 +52,42 @@ public class SongCache {
      * @param serverType {@link MusicSourceFactory#TYPE_NAVIDROME} 或 {@link MusicSourceFactory#TYPE_FNMUSIC}
      */
     public SongCache(Context context, String serverType) {
-        cacheFile = new File(context.getCacheDir(), cacheFileNameFor(serverType));
+        cacheFile = new File(context.getFilesDir(), cacheFileNameFor(serverType));
+        migrateFromLegacyCacheDir(context, cacheFileNameFor(serverType));
+    }
+
+    /**
+     * 旧版缓存文件在 getCacheDir()(系统临时缓存目录,存储压力下会被系统自动清理,
+     * 或被用户"清缓存"一并清掉)。云端歌单缓存是列表唯一来源,丢了会导致
+     * 离线/首次启动时整个云端歌单(含收藏标记的歌)消失,直到下次联网同步。
+     * 已改存 getFilesDir()(持久数据目录)。这里做一次性迁移:新位置不存在
+     * 而旧位置有完整文件时,搬过来,老用户升级无感。
+     */
+    private static void migrateFromLegacyCacheDir(Context context, String fileName) {
+        if (context == null) return;
+        File legacy = new File(context.getCacheDir(), fileName);
+        File target = new File(context.getFilesDir(), fileName);
+        if (!legacy.exists() || legacy.length() == 0 || target.exists()) {
+            return;
+        }
+        java.io.InputStream in = null;
+        java.io.OutputStream out = null;
+        try {
+            in = new java.io.FileInputStream(legacy);
+            out = new java.io.FileOutputStream(target);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) != -1) {
+                out.write(buf, 0, len);
+            }
+            Log.i(TAG, "云端歌单缓存已从 cacheDir 迁移到 filesDir: " + fileName);
+        } catch (Exception e) {
+            Log.w(TAG, "迁移云端歌单缓存失败(忽略,等待下次同步重建)", e);
+            target.delete();
+        } finally {
+            try { if (in != null) in.close(); } catch (Exception ignored) {}
+            try { if (out != null) out.close(); } catch (Exception ignored) {}
+        }
     }
 
     /**
