@@ -144,6 +144,14 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      */
     private volatile Set<String> cloudStarredIds = null;
     /**
+     * 收藏歌单快照注入(离线兜底,FavoriteStore 的内容)。
+     * 收藏视图渲染时,主列表里匹配不上的快照 bean 会追加到收藏过滤结果尾部 ——
+     * 断网/主列表缺失时收藏歌单依然可见。仅 favMode=true 分支生效,
+     * "全部歌曲"视图(setData/filter)完全不受影响。
+     * 快照本身已是"收藏中的歌",无需再过收藏判定,只做去重 + 搜索词过滤。
+     */
+    private volatile List<MusicBean> favoritesExtras = null;
+    /**
      * 收藏集合的代次:每增删一个云端收藏 ID 就 +1。
      * 存在的理由:防抖签名原本只有 "关键词",而"收藏状态变了但关键词没变"时
      * 两次 filterFavorites 的签名完全相同 —— 一旦落在防抖窗口内,列表就会**不刷新**
@@ -637,6 +645,23 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
                 }
             }
         }
+        // 收藏快照注入:主列表里匹配不上的收藏歌(离线/列表缺失场景)追加到尾部。
+        // 只在收藏视图生效;按身份键去重(已在主列表命中的不重复显示),应用搜索词过滤。
+        // 快照 bean 保留云端元数据(streamUrl),离线可见、联网可播。
+        if (favMode && favoritesExtras != null && !favoritesExtras.isEmpty()) {
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (MusicBean b : r.filtered) {
+                String k = b.getIdentityKey();
+                if (k != null) seen.add(k);
+            }
+            for (MusicBean e : favoritesExtras) {
+                if (e == null || !matchesFilter(e)) continue;
+                String k = e.getIdentityKey();
+                if (k == null || seen.contains(k)) continue;
+                seen.add(k);
+                r.filtered.add(e);
+            }
+        }
         r.loadCount = Math.min(BATCH_SIZE, r.filtered.size());
         r.firstBatch = new ArrayList<>(r.filtered.subList(0, r.loadCount));
         return r;
@@ -981,6 +1006,12 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
      */
     public synchronized void setCloudStarredIds(Set<String> ids) {
         cloudStarredIds = ids;
+    }
+
+    /** 设置收藏歌单快照注入列表(null=清除);favVersion 自增以突破防抖 */
+    public synchronized void setFavoritesExtras(List<MusicBean> extras) {
+        favoritesExtras = extras;
+        favVersion++;
     }
 
     /** 当前是否处于云端收藏夹模式(列表由服务器收藏 ID 过滤而来) */

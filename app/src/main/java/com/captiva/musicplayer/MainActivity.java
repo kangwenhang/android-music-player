@@ -1042,8 +1042,9 @@ public class MainActivity extends AppCompatActivity {
                         loadCloudFavorites(false);
                     }
                 } else {
-                    // 本地模式:收藏来自本机,不联网
+                    // 本地模式:收藏来自本机,不联网(同时清掉云端快照注入,两套收藏互不混)
                     adapter.setCloudStarredIds(null);
+                    adapter.setFavoritesExtras(null);
                     applyFavoritesFilter();
                 }
                 Log.i(TAG, "[FavToggle] 收藏模式完成 " + (System.currentTimeMillis() - t0) + "ms");
@@ -1414,12 +1415,24 @@ public class MainActivity extends AppCompatActivity {
      */
     private void loadCloudFavorites(boolean silent) {
         final MusicSourceApi api = MusicDataHolder.getInstance().getMusicSourceApi();
+        final String serverType = navidromeConfig.getServerType();
+        final String syncPath = navidromeConfig.getCloudDir();
         if (api == null) {
             if (!silent) {
                 Toast.makeText(this, "未连接服务器,改用本地收藏", Toast.LENGTH_SHORT).show();
+                adapter.setCloudStarredIds(null);
+                applyFavoritesFilter();
+                // 断网兜底:有收藏快照就按快照渲染收藏夹(歌单独立持久化,不依赖主列表)
+                List<MusicBean> snap = FavoriteStore.load(this, serverType);
+                if (snap != null && !snap.isEmpty()) {
+                    applyStarredSnapshot(snap);
+                    Toast.makeText(this, "离线显示上次云端收藏 " + snap.size() + " 首",
+                            Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                adapter.setCloudStarredIds(null);
+                applyFavoritesFilter();
             }
-            adapter.setCloudStarredIds(null);
-            applyFavoritesFilter();
             return;
         }
         // 本次拉取的代次:网络回来之前用户可能已经退出收藏夹、甚至又进了一次,
@@ -1437,7 +1450,17 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Throwable t) {
                     DownloadDiag.logError("获取云端收藏失败", t);
                 }
+                // 网络失败(null,注意"服务器返回 0 首"是权威结果不兜底):
+                // 读离线收藏快照 —— 歌单独立持久化,断网/首开也可见(后台线程做目录绑定)
+                List<MusicBean> snapshot = null;
+                if (starred == null) {
+                    snapshot = FavoriteStore.load(MainActivity.this, serverType);
+                    if (snapshot != null && !snapshot.isEmpty()) {
+                        bindLocalAvailabilityForSnapshot(snapshot, syncPath);
+                    }
+                }
                 final List<MusicBean> result = starred;
+                final List<MusicBean> snap = snapshot;
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -1451,6 +1474,14 @@ public class MainActivity extends AppCompatActivity {
                             // 静默预取失败:什么都不动,保留现有缓存,不打扰用户
                             // (列表也绝不能动 —— 可能正停在"全部歌曲")
                             if (!silent) {
+                                if (snap != null && !snap.isEmpty()) {
+                                    // 离线快照渲染:收藏歌单不再因断网消失
+                                    applyStarredSnapshot(snap);
+                                    Toast.makeText(MainActivity.this,
+                                            "获取云端收藏失败,离线显示上次收藏 " + snap.size() + " 首",
+                                            Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
                                 Toast.makeText(MainActivity.this,
                                         "获取云端收藏失败,改用本地收藏", Toast.LENGTH_SHORT).show();
                                 adapter.setCloudStarredIds(null);
@@ -1458,6 +1489,15 @@ public class MainActivity extends AppCompatActivity {
                             }
                             return;
                         }
+                        // 拉取成功:快照落盘(后台线程),并清掉旧注入 —— 以服务器数据为准
+                        final List<MusicBean> toSave = result;
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                FavoriteStore.save(MainActivity.this, serverType, toSave);
+                            }
+                        }, "FavStoreSave").start();
+                        adapter.setFavoritesExtras(null);
                         java.util.Set<String> ids = new java.util.HashSet<>();
                         for (MusicBean b : result) {
                             String sid = b != null ? b.getStreamId() : null;
@@ -1505,6 +1545,65 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         }).start();
+    }
+
+    /**
+     * 用收藏快照渲染收藏夹(离线兜底):ID 集合 + 快照注入,主列表匹配不上的歌
+     * 由快照 bean 补显(联网可播;已下载的在绑定阶段已转本地路径)。用户停在
+     * "全部歌曲"时只更新缓存不动列表,与网络成功路径的语义一致。
+     */
+    private void applyStarredSnapshot(List<MusicBean> snap) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (MusicBean b : snap) {
+            String sid = b != null ? b.getStreamId() : null;
+            if (sid != null && !sid.isEmpty()) {
+                ids.add(sid);
+            }
+        }
+        adapter.setCloudStarredIds(ids);
+        adapter.setFavoritesExtras(new ArrayList<>(snap));
+        if (!favoritesOnly) {
+            return;
+        }
+        adapter.filterFavorites(null, true);
+        updateCount();
+        if (ids.isEmpty()) {
+            tvEmpty.setVisibility(View.VISIBLE);
+            tvEmpty.setText("云端还没有收藏的歌曲\n播放歌曲时点击底栏爱心收藏");
+        } else {
+            tvEmpty.setVisibility(View.GONE);
+        }
+        updatePlayingHighlight();
+    }
+
+    /**
+     * 收藏快照的本地可用性绑定(后台线程调用,含同步目录遍历 I/O):
+     * 已下载的歌转本地播(与 buildCloudDrivenList 同一套判定),
+     * 未下载的保持联网播。快照 bean 带 streamId,身份键与主列表一致。
+     */
+    private void bindLocalAvailabilityForSnapshot(List<MusicBean> snap, String syncPath) {
+        if (snap == null || syncPath == null || syncPath.isEmpty()) {
+            return;
+        }
+        try {
+            java.util.Set<String> localFiles = collectExistingLocalPaths(syncPath);
+            boolean hasSyncDir = !localFiles.isEmpty();
+            for (MusicBean b : snap) {
+                if (b == null) {
+                    continue;
+                }
+                String expected = MusicSyncManager.buildLocalFile(b, syncPath).getAbsolutePath();
+                if (hasSyncDir && localFiles.contains(expected)) {
+                    b.setNetwork(false);
+                    b.setData(expected);
+                    b.setUri(null);
+                } else {
+                    b.setNetwork(true);
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "收藏快照绑定本地可用性失败(按联网播处理)", t);
+        }
     }
 
     /**
@@ -2629,6 +2728,7 @@ public class MainActivity extends AppCompatActivity {
         // 不重置的话,从云端收藏夹切到本地时仍会用"服务器收藏 ID"去过滤本地歌,
         // 结果就是列表空空如也(本地歌大多没有对应的服务器收藏 ID)。
         adapter.setCloudStarredIds(null);
+        adapter.setFavoritesExtras(null);
         adapter.setFavoritesMode(false);
         if (favoritesOnly) {
             favoritesOnly = false;
