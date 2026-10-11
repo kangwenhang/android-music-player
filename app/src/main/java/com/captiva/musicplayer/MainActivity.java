@@ -3858,10 +3858,33 @@ public class MainActivity extends AppCompatActivity {
                             @Override
                             public void run() {
                                 isAutoSyncing = false;
-                                // 同步完成必须刷新歌曲列表,让新同步的歌曲出现在列表里。
-                                // refreshSyncList() 内部仅当确实发现新文件(toAdd 非空)才重建列表;
-                                // "已是最新"时只是一次整目录扫描、不会重建,开销可接受。
-                                refreshSyncList();
+                                // 同步完成必须刷新歌曲列表。云端驱动模式下列表来源是
+                                // SongCache(云端歌单缓存),此时刚被 sync() 更新过 ——
+                                // 必须从云端缓存重建列表;refreshSyncList() 扫的是同步
+                                // 目录,"仅拉列表"同步不下载音频、目录恒空,列表会永远
+                                // 停在"未找到音乐"(首次配置账号后的经典复现)。
+                                // applyMusicListToUi 不触发 startBackgroundSync,无重入。
+                                if (!localOnlyMode) {
+                                    new Thread(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            final List<MusicBean> list = buildCloudDrivenList(
+                                                    navidromeConfig.getServerType(),
+                                                    navidromeConfig.getCloudDir());
+                                            if (list != null) {
+                                                java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
+                                                warmKeys(list);
+                                                applyMusicListToUi(list, false);
+                                            } else {
+                                                // 云端缓存不可用(被清等):退回扫目录旧行为
+                                                refreshSyncList();
+                                            }
+                                        }
+                                    }, "SyncCloudRebuild").start();
+                                } else {
+                                    // 本地模式:同步完成只可能是下载了音频,扫目录追加
+                                    refreshSyncList();
+                                }
                                 // 同步完成:清除无封面黑名单,允许重新尝试(新文件可能带封面)
                                 CoverLoader.getInstance().clearNoCoverCache();
                                 // 预提取新同步歌曲的封面到内部存储
