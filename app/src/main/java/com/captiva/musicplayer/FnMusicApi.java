@@ -795,15 +795,28 @@ public class FnMusicApi implements MusicSourceApi {
     public List<MusicBean> getStarredSongs() {
         List<MusicBean> all = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
+        // 【2026-10-11 修复"断网重启后收藏快照被清空"】
+        // 原实现:第 0 页请求失败(data==null)就 break,最后 return all(空列表)。
+        // 上层 loadCloudFavorites 把"空列表"当成服务器权威的"0 首收藏",
+        // 于是 FavoriteStore.save(0 首) 把离线快照覆盖掉 —— 断网重启一次,
+        // 辛苦攒的收藏歌单快照就没了(实测:71 首 → 0 首)。
+        // 现在:网络失败必须返回 null(与"服务器明确说没收藏"区分开):
+        // - 第 0 页就失败:一个字节数据都没拿到,无从判断服务器状态 → null
+        // - 中途页失败且还没取够 total:结果不完整,不能拿半截数据覆盖完整快照 → null
+        int total = -1;
+        boolean networkFail = false;
         for (int page = 0; page < MAX_FAV_PAGES; page++) {
             JSONObject data = requestJsonGet("/favorite-track/list",
                     map("size", String.valueOf(FAV_PAGE_SIZE),
                             "offset", String.valueOf(page * FAV_PAGE_SIZE)));
             if (data == null) {
                 DownloadDiag.log("云端收藏第 " + page + " 页: 请求无响应(网络/鉴权)");
+                if (page == 0 || (total > 0 && all.size() < total)) {
+                    networkFail = true;
+                }
                 break;
             }
-            int total = data.optInt("total", -1);
+            total = data.optInt("total", -1);
             JSONArray arr = data.optJSONArray("list");
             if (arr == null || arr.length() == 0) {
                 DownloadDiag.log("云端收藏第 " + page + " 页: list 为空, total=" + total);
@@ -826,8 +839,9 @@ public class FnMusicApi implements MusicSourceApi {
             if (added == 0) break;                          // offset 无效,全是重复 → 停
             if (pageList.size() < FAV_PAGE_SIZE) break;     // 最后一页
         }
-        DownloadDiag.log("云端收藏取完: " + all.size() + " 首");
-        return all;
+        DownloadDiag.log("云端收藏取完: " + all.size() + " 首"
+                + (networkFail ? " (网络失败,按 null 处理)" : ""));
+        return networkFail ? null : all;
     }
 
     @Override
