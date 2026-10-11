@@ -759,7 +759,13 @@ public class MusicSyncManager {
         }
     }
 
-    /** 按 streamId 去重后追加(保持与旧实现一致的判空语义) */
+    /**
+     * 去重后追加。
+     * 【修复 816→811】旧实现:streamId==null 的歌直接丢弃,空串("")的歌互相合并 ——
+     * 服务器返回 N 首缺 guid 的歌只会剩 1 首,每次刷新列表都悄悄变少。
+     * 新实现:streamId 为空(null/空串)的歌改用「标题|艺术家|专辑」降级键去重,
+     * 既不丢歌、也不会把不同歌错合并,同时打 WARN 点名,方便确认是哪些歌没拿到 guid。
+     */
     private static void addDeduped(List<MusicBean> target, Set<String> seenIds,
                                    List<MusicBean> src) {
         if (src == null || src.isEmpty()) {
@@ -770,13 +776,27 @@ public class MusicSyncManager {
                 continue;
             }
             String streamId = b.getStreamId();
-            if (streamId == null) {
+            if (streamId == null || streamId.isEmpty()) {
+                Log.w(TAG, "歌曲缺少 streamId(降级用标题键去重): "
+                        + b.getTitle() + " - " + b.getArtist()
+                        + (streamId == null ? " [null]" : " [空串]"));
+                if (seenIds.add("fb:" + fallbackKey(b))) {
+                    target.add(b);
+                }
                 continue;
             }
             if (seenIds.add(streamId)) {
                 target.add(b);
             }
         }
+    }
+
+    /** streamId 缺失时的降级去重键:标题|艺术家|专辑 */
+    private static String fallbackKey(MusicBean b) {
+        String t = b.getTitle() == null ? "" : b.getTitle().trim();
+        String a = b.getArtist() == null ? "" : b.getArtist().trim();
+        String al = b.getAlbum() == null ? "" : b.getAlbum().trim();
+        return t + "|" + a + "|" + al;
     }
 
     /** 静默休眠(重试退避用,不向上抛中断异常) */

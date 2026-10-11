@@ -3605,6 +3605,7 @@ public class MainActivity extends AppCompatActivity {
         java.util.LinkedHashMap<String, MusicBean> best = new java.util.LinkedHashMap<>();
         int removed = 0;
         int uniqueCounter = 0;
+        StringBuilder removedNames = new StringBuilder();
         for (MusicBean b : src) {
             String key = useLogical ? getLogicalKey(b) : getDedupKey(b);
             if (key == null) {
@@ -3616,6 +3617,13 @@ public class MainActivity extends AppCompatActivity {
             if (prev == null) {
                 best.put(key, b);
             } else {
+                // 【点名日志】记下被合并的歌(保留质量高者),方便在服务器端清理重复
+                if (removedNames.length() < 200) {
+                    MusicBean dropped = beanQuality(b) > beanQuality(prev) ? prev : b;
+                    if (removedNames.length() > 0) removedNames.append("、");
+                    removedNames.append(dropped.getTitle() == null ? "?" : dropped.getTitle())
+                               .append("(").append(dropped.getArtist() == null ? "?" : dropped.getArtist()).append(")");
+                }
                 if (beanQuality(b) > beanQuality(prev)) {
                     best.put(key, b);
                 }
@@ -3623,7 +3631,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (removed > 0) {
-            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目");
+            Log.d(TAG, "列表去重: 移除 " + removed + " 首重复条目 [" + removedNames + "]");
             return new ArrayList<>(best.values());
         }
         return src;
@@ -3873,8 +3881,14 @@ public class MainActivity extends AppCompatActivity {
                                                     navidromeConfig.getCloudDir());
                                             if (list != null) {
                                                 java.util.Collections.sort(list, MusicTitleComparator.INSTANCE);
-                                                warmKeys(list);
-                                                applyMusicListToUi(list, false);
+                                                // 【修复 816→811】与 applySourceMode 云端分支对齐:
+                                                // 这里也必须过 dedupeList(路径/逻辑身份两层),否则
+                                                // 同步后显示 816、一切换变 811,计数漂移。
+                                                // 重复来源:同一首歌在服务器挂在多张专辑(不同 streamId),
+                                                // fetch 按 streamId 去重挡不住,逻辑身份去重才会合并。
+                                                List<MusicBean> dedupedSync = dedupeList(list);
+                                                warmKeys(dedupedSync);
+                                                applyMusicListToUi(dedupedSync, false);
                                             } else {
                                                 // 云端缓存不可用(被清等):退回扫目录旧行为
                                                 refreshSyncList();
