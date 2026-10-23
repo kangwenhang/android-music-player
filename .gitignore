@@ -20,5 +20,6 @@ pinyin_verify.py
 _gitcheck.py
 /apk/
 /cli/
+/docs/
 /android/
 page.png
