@@ -13,8 +13,6 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import org.json.JSONObject;
-
 /**
  * 检查更新页面(v5.7.405 之后替代 Toast/对话框流程)
  *
@@ -43,10 +41,6 @@ public class UpdateActivity extends AppCompatActivity {
 
     /** 检查到的待安装信息(非空时「下载安装」可用) */
     private UpdateChecker.UpdateInfo pendingInfo;
-    private JSONObject pendingApkEntry;
-    /** 检查阶段已验证的会话(下载时直接复用,避免重新走不稳定的 resolve 链路) */
-    private String pendingBase;
-    private String pendingToken;
     private boolean busy;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -123,9 +117,6 @@ public class UpdateActivity extends AppCompatActivity {
         }
         busy = true;
         pendingInfo = null;
-        pendingApkEntry = null;
-        pendingBase = null;
-        pendingToken = null;
         btnCheck.setEnabled(false);
         btnInstall.setEnabled(false);
         setInstallEnabled(false);
@@ -134,7 +125,7 @@ public class UpdateActivity extends AppCompatActivity {
         tvNotes.setText("");
         tvLatest.setText("检查中…");
         tvLatest.setTextColor(getResources().getColor(R.color.text_secondary));
-        setStatus("正在解析分享链接…");
+        setStatus("正在连接更新服务器…");
 
         UpdateChecker.check(this, new UpdateChecker.StatusListener() {
             @Override
@@ -144,7 +135,7 @@ public class UpdateActivity extends AppCompatActivity {
                 // UpdateCallback 只在"发现新版本"时被调,这两条路都不走回调。
                 if (msg != null && (msg.startsWith("已是最新")
                         || msg.contains("失败")
-                        || msg.contains("没有版本信息")
+                        || msg.contains("无法连接")
                         || msg.contains("没有 APK"))) {
                     busy = false;
                     btnCheck.setEnabled(true);
@@ -154,14 +145,10 @@ public class UpdateActivity extends AppCompatActivity {
             }
         }, new UpdateChecker.UpdateCallback() {
             @Override
-            public void onUpdateFound(UpdateChecker.UpdateInfo info, JSONObject apkEntry,
-                                      String base, String token) {
+            public void onUpdateFound(UpdateChecker.UpdateInfo info) {
                 busy = false;
                 btnCheck.setEnabled(true);
                 pendingInfo = info;
-                pendingApkEntry = apkEntry;
-                pendingBase = base;
-                pendingToken = token;
                 tvLatest.setText(info.versionName);
                 tvLatest.setTextColor(getResources().getColor(R.color.accent));
                 setStatus("发现新版本,点「下载安装」开始升级");
@@ -180,7 +167,7 @@ public class UpdateActivity extends AppCompatActivity {
     // ------------------------------------------------------------------
 
     private void startDownload() {
-        if (busy || pendingInfo == null || pendingApkEntry == null) {
+        if (busy || pendingInfo == null) {
             return;
         }
         busy = true;
@@ -192,8 +179,7 @@ public class UpdateActivity extends AppCompatActivity {
         pbDownload.setIndeterminate(true);
         setStatus("正在下载 " + pendingInfo.fileName + " …");
 
-        UpdateChecker.downloadAndInstall(this, pendingInfo, pendingApkEntry,
-                pendingBase, pendingToken,
+        UpdateChecker.downloadAndInstall(this, pendingInfo,
                 new UpdateChecker.StatusListener() {
                     @Override
                     public void onStatus(String msg) {
@@ -235,7 +221,6 @@ public class UpdateActivity extends AppCompatActivity {
         // 下载安装到本版本完成,清掉待装状态(装完后当前版本即最新)
         btnInstall.setEnabled(false);
         pendingInfo = null;
-        pendingApkEntry = null;
     }
 
     /** 「下载安装」按钮禁用态降透明度,与启用态形成视觉区分 */
