@@ -22,3 +22,6 @@ _gitcheck.py
 /cli/
 /android/
 page.png
+
+# 本地临时产物(Conscrypt AAR/so、临时上传文件等)
+/tmp/

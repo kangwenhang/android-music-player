@@ -114,6 +114,8 @@ public final class UpdateChecker {
 
     private static final int TIMEOUT_CONNECT_MS = 8000;
     private static final int TIMEOUT_READ_MS = 20000;
+    /** 换票据最多试几次(每次失败都会消耗掉连接池里的一条死连接) */
+    private static final int TICKET_TRIES = 3;
 
     /** 版本信息文件上限 64KB(正常不到 1KB,防呆) */
     private static final int MAX_META_BYTES = 64 * 1024;
@@ -491,12 +493,38 @@ public final class UpdateChecker {
     // ------------------------------------------------------------------
 
     /**
-     * 换一张匿名下载票据。
-     * POST 分享 API(空体),服务端在 Set-Cookie 里下发
-     * {@code tcs_ticket=xxxx; Path=/ds/dav/; Max-Age=3600}。
+     * 换一张匿名下载票据(内含重试)。
+     *
+     * <p>【2026-10-23 实测根因】4.2.2 模拟器和车机上都是同一种表现:
+     * 「检查更新」一路顺畅,一点「下载安装」就报"拿不到下载票据",
+     * 抛 EOFException 卡在 readResponseHeaders。原因是 HttpURLConnection 的
+     * 连接池留着服务端已关掉的 keep-alive 连接:服务端是 Apache,空闲几秒就 FIN,
+     * 且默认不在响应里回 Connection: close,libcore 便照常回收。
+     * 池里有死连接时,GET 能被 HttpEngine 自动重放(所以检查阶段毫无异常),
+     * 而 <b>带体的 POST 无法自动重放</b>,就直接 EOF 了。</p>
+     *
+     * <p>两道保险:① UpdateSsl.open 全链路带 Connection: close,让连接压根不进池;
+     * ② 万一还有残留的死连接,换票据最多试 {@link #TICKET_TRIES} 次 ——
+     * 每次失败都会消耗掉池里的一条,下一次就是新连接了。
+     * 车机网络本就不稳,重试顺带也覆盖了偶发的握手/RST。</p>
+     *
      * 失败返回 null(原因写进 DownloadDiag)。
      */
     private static String obtainTicket(Context ctx) {
+        for (int i = 1; i <= TICKET_TRIES; i++) {
+            String t = obtainTicketOnce(ctx);
+            if (t != null) {
+                return t;
+            }
+            DownloadDiag.log("[自更新] 换票据第 " + i + " 次失败"
+                    + (i < TICKET_TRIES ? ", 换新连接重试" : ", 已用尽次数"));
+        }
+        return null;
+    }
+
+    /** 换票据的单次尝试。POST 分享 API(空体),服务端在 Set-Cookie 里下发
+     * {@code tcs_ticket=xxxx; Path=/ds/dav/; Max-Age=3600}。失败返回 null。 */
+    private static String obtainTicketOnce(Context ctx) {
         HttpURLConnection conn = null;
         try {
             conn = UpdateSsl.open(ctx, HOST + PATH_TICKET + SHARE_ID);
@@ -746,6 +774,13 @@ public final class UpdateChecker {
         /** 打开 HTTPS 连接(内置证书 + TLS 1.2 都已装好) */
         static HttpURLConnection open(Context ctx, String urlStr) throws Exception {
             HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+            // 【2026-10-23 实测】必须显式关掉 keep-alive,根因见 obtainTicket 的注释。
+            // TeraCloud 是 Apache,空闲连接几秒就被 FIN 掉,而它默认不在响应里回
+            // Connection: close,4.2 的 libcore 于是把这条死连接照常回收进池;
+            // 主动声明后服务端原样回显(实测会回 Connection: close),连接不再入池,
+            // 每次请求都新开一条。代价是每请求多一次 TLS 握手(约 0.3s/次),
+            // 换来的收益是彻底消灭"检查正常、一点下载就拿不到票据"。
+            conn.setRequestProperty("Connection", "close");
             if (conn instanceof HttpsURLConnection) {
                 SSLSocketFactory f = get(ctx);
                 if (f != null) {
