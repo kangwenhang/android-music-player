@@ -20,16 +20,12 @@ pinyin_verify.py
 _gitcheck.py
 /apk/
 /docs/
-# 2026-10-24:上传搬到 Actions 后,CI 必须能 checkout 到下面这个脚本,
-# 所以要放行它(以及 README)。不能直接写 /cli/ —— 那样整个目录被排除,
-# 目录内的否定规则不生效,CI 会报 "can't open file 'cli/teracloud_publish.py'"。
-/cli/*
-!/cli/teracloud_publish.py
-!/cli/README.md
-# 凭据/PAT 显式再挡一道,防止上面的放行规则被误改成 /cli/**
-/cli/.gh_token
-/cli/.webdav_cred
-/cli/__pycache__/
+# 本地工具目录(推送/PAT/凭据/一次性脚本),整目录不入库。
+# 【2026-10-24】上传逻辑已内联进 .github/workflows/build.yml(heredoc 现场生成
+# /tmp/teracloud_publish.py),CI 不再需要 checkout 本目录,所以这里可以直接整目录排除。
+# 注意 gitignore 语义:被 /cli/ 排除的目录,无法再用目录内否定规则放行单个文件,
+# 这也是当初不得不临时放行 teracloud_publish.py 的原因 —— 内联后该 workaround 作废。
+/cli/
 /android/
 page.png
 
