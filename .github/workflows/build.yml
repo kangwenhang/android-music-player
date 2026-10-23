@@ -353,3 +353,55 @@ jobs:
             exit 1
           fi
           echo "正式版发布完成: ${TAG}"
+
+      # ========== 上传到 TeraCloud(车机自更新源) ==========
+      # 为什么必须在这一步做:
+      #   车机自更新的 APK + update*.json 必须和"这次构建的 APK"严格同源。
+      #   放在本地上传会漏传/传错版本(人肉跑脚本),放在 CI 里则每次构建自动闭环。
+      #   元数据里的 versionName / versionCode 直接用 aapt 从 APK 里读出来,
+      #   与 APK 内嵌值 100% 同源 —— 不靠重新推导,杜绝"包里 447、JSON 写 446"。
+      #
+      # 凭据: 走 Actions 的 secrets(或 variables),两者都没配时脚本自动跳过、
+      #        不阻断构建;配了却上传失败才会把构建搞红(这时车机真拿不到包)。
+      - name: Upload to TeraCloud (车机自更新源)
+        env:
+          # secrets 优先;没配就落到仓库 variables;都没配则为空 → 脚本跳过
+          WEBDAV_USER: ${{ secrets.WEBDAV_USER || vars.WEBDAV_USER }}
+          WEBDAV_PASS: ${{ secrets.WEBDAV_PASS || vars.WEBDAV_PASS }}
+        run: |
+          APK_PATH=$(find ${{ steps.buildinfo.outputs.apk_dir }} -name "*.apk" | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::没找到 APK,终止上传"
+            exit 1
+          fi
+
+          # aapt 随 build-tools 装上,前几步已在用
+          BADGING=$(aapt dump badging "$APK_PATH" 2>/dev/null | head -1)
+          VNAME=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          VCODE=$(echo "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          echo "APK: $APK_PATH"
+          echo "读到版本: ${VNAME:-未知} (code=${VCODE:-未知})"
+          if [ -z "$VNAME" ]; then
+            echo "::error::aapt 读不到 versionName,终止上传(避免写出错的元数据)"
+            exit 1
+          fi
+
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            CHANNEL=release
+          else
+            CHANNEL=debug
+          fi
+
+          # 用显式 if 而不是 [ ... ] && ...:CI 默认 bash -e 下短测试失败会
+          # 让整条 && 列表返回 1,读起来也容易误会,这里老老实实写 if。
+          ARGS=(--apk "$APK_PATH" --channel "$CHANNEL" --version-name "$VNAME")
+          if [ -n "$VCODE" ]; then
+            ARGS+=(--version-code "$VCODE")
+          fi
+          # release 正文由上面对应分支的步骤生成,抽其中的『## 本次更新』小节
+          if [ -f /tmp/release_notes.md ]; then
+            ARGS+=(--notes-file /tmp/release_notes.md)
+          fi
+
+          # 一律写 python3:ubuntu runner 上不保证有 `python` 这个别名
+          python3 cli/teracloud_publish.py "${ARGS[@]}"

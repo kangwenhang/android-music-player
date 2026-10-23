@@ -19,7 +19,16 @@ java_brace_check.py
 pinyin_verify.py
 _gitcheck.py
 /apk/
-/cli/
+# 2026-10-24:上传搬到 Actions 后,CI 必须能 checkout 到下面这个脚本,
+# 所以要放行它(以及 README)。不能直接写 /cli/ —— 那样整个目录被排除,
+# 目录内的否定规则不生效,CI 会报 "can't open file 'cli/teracloud_publish.py'"。
+/cli/*
+!/cli/teracloud_publish.py
+!/cli/README.md
+# 凭据/PAT 显式再挡一道,防止上面的放行规则被误改成 /cli/**
+/cli/.gh_token
+/cli/.webdav_cred
+/cli/__pycache__/
 /android/
 page.png
 
