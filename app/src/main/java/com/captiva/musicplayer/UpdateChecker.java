@@ -25,6 +25,7 @@ import java.net.Socket;
 import java.net.URL;
 import java.security.KeyStore;
 import java.security.MessageDigest;
+import java.security.Provider;
 import java.security.SecureRandom;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
@@ -80,8 +81,10 @@ import javax.net.ssl.X509TrustManager;
  *
  * <p><b>车机(安卓 4.2.2)的两个必踩的坑</b>,都在 {@link UpdateSsl} 里解决:</p>
  * <ol>
- * <li>TLS 1.2 默认不启用(TeraCloud 只接受 TLS 1.2,TLS 1.0/1.1 直接握手失败)
- *     → 用包装后的 SSLSocketFactory 强制打开设备支持的全部 TLS 协议;</li>
+ * <li><b>JSSE 里根本没有 TLS 1.2</b>(TeraCloud 只接受 TLS 1.2,TLS 1.0/1.1 直接握手失败)。
+ *     官方说"API 16 起支持、API 20 起默认启用",但 4.2/4.3 实测
+ *     {@code getSupportedProtocols()} 只有 SSLv3/TLSv1,开不出来
+ *     → API 21 以下自带 Conscrypt(BoringSSL)这套 TLS 栈;</li>
  * <li>系统根证书太旧,没有 2025 年的 GlobalSign R46
  *     → 内置 TeraCloud 证书链(res/raw/teracloud_ca.pem)作为兜底信任锚,
  *       系统信任优先、校验不过才用内置证书,<b>不做无条件信任</b>。</li>
@@ -124,6 +127,9 @@ public final class UpdateChecker {
     private static final int META_OK = 0;
     private static final int META_MISSING = 1;
     private static final int META_FAILED = 2;
+
+    /** 更新链路锁死的 TLS 版本(TeraCloud 只接受 1.2,见 UpdateSsl 的说明) */
+    private static final String TLS_12 = "TLSv1.2";
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
@@ -715,6 +721,19 @@ public final class UpdateChecker {
      * 内置的 TeraCloud 证书链(GlobalSign GCC R46 AlphaSSL CA 2025 + 交叉签名的
      * GlobalSign Root R46)。这样新设备照常走系统根证书,车机那种 2015 年的
      * 根证书列表也能校验通过,但没有任何一条路径是无条件信任。</p>
+     *
+     * <p>【2026-10-23 追加】车机 4.2.2 除了证书老,还有更硬的一关:
+     * <b>它的 JSSE 里根本没有 TLS 1.2</b>。官方文档说 TLSv1.1/1.2「API 16 起支持、
+     * API 20 起默认启用」,但 4.2/4.3 的实测结果是
+     * {@code getSupportedProtocols()} 只返回 SSLv3/TLSv1,
+     * 怎么 {@code setEnabledProtocols} 都开不出 TLS 1.2(4.4 起才真能开)。
+     * 而 TeraCloud 只接受 TLS 1.2 → 唯一的办法是自带一套 TLS 栈,
+     * 即 Conscrypt(BoringSSL 的 JCA Provider)。</p>
+     *
+     * <p>为避免连累其它网络请求(Navidrome / 歌词等照旧走系统),
+     * 这里<b>不做</b> {@code Security.insertProviderAt}(那会全局换 provider),
+     * 而是把 provider 实例显式传给 {@code SSLContext.getInstance},
+     * 于是只有更新链路用到它,加载也只发生在用户点"检查更新"之后。</p>
      */
     private static final class UpdateSsl {
 
@@ -741,24 +760,74 @@ public final class UpdateChecker {
                 return factory;
             }
             tried = true;
+
+            // 信任管理器先建好,两条路共用:系统信任优先,不过再用内置 TeraCloud 证书
+            X509TrustManager tm = null;
             try {
                 X509TrustManager system = defaultTrustManager();
                 X509TrustManager embedded = loadBundledCa(ctx);
-                TrustManager[] managers;
-                if (embedded == null) {
-                    managers = new TrustManager[]{system};
-                } else {
-                    managers = new TrustManager[]{new FallbackTrustManager(system, embedded)};
+                tm = (embedded == null) ? system : new FallbackTrustManager(system, embedded);
+                Log.i(TAG, "更新链路: 内置 TeraCloud 证书=" + (embedded != null));
+            } catch (Throwable t) {
+                Log.w(TAG, "信任管理器构建失败", t);
+                DownloadDiag.logError("[自更新] 信任管理器构建失败", t);
+            }
+
+            // API 21 以下(车机 4.2.2)系统栈开不出 TLS 1.2,优先用自带的 Conscrypt;
+            // API 21+ 系统原生就支持 1.2,没必要多加载一套 .so
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.LOLLIPOP) {
+                SSLSocketFactory conscrypt = buildConscrypt(tm);
+                if (conscrypt != null) {
+                    factory = conscrypt;
+                    return factory;
                 }
-                SSLContext sc = SSLContext.getInstance("TLS");
+            }
+            factory = buildSystem(tm);
+            return factory;
+        }
+
+        /**
+         * 用 APK 自带的 Conscrypt 建 TLS 上下文。
+         *
+         * <p>关键:provider 实例<b>不</b>插进 {@code Security} 全局列表,
+         * 而是显式传给 getInstance。这样 Conscrypt 只服务于更新链路,
+         * Navidrome/歌词等请求完全不受影响。</p>
+         */
+        private static SSLSocketFactory buildConscrypt(X509TrustManager tm) {
+            try {
+                Provider p = org.conscrypt.Conscrypt.newProvider();
+                TrustManager[] managers;
+                if (tm != null) {
+                    managers = new TrustManager[]{tm};
+                } else {
+                    managers = new TrustManager[]{
+                            org.conscrypt.Conscrypt.getDefaultX509TrustManager()};
+                }
+                SSLContext sc = SSLContext.getInstance("TLS", p);
                 sc.init(null, managers, new SecureRandom());
-                factory = new Tls12SocketFactory(sc.getSocketFactory());
-                Log.i(TAG, "更新链路 TLS 就绪(内置证书=" + (embedded != null) + ")");
+                Log.i(TAG, "更新链路 TLS: Conscrypt(自带 TLS 1.2)");
+                DownloadDiag.log("[自更新] 更新链路 TLS = Conscrypt");
+                return new ForcedProtocolSocketFactory(sc.getSocketFactory(), TLS_12);
+            } catch (Throwable t) {
+                // Conscrypt 拿不到(缺 .so / 链接失败)就退回系统栈,
+                // 并在日志里留痕,方便判断是"没装进去"还是"装了也谈不成"
+                Log.w(TAG, "Conscrypt 不可用,回退系统 TLS", t);
+                DownloadDiag.logError("[自更新] Conscrypt 不可用,回退系统 TLS", t);
+                return null;
+            }
+        }
+
+        /** 用系统自带 TLS 栈建上下文(API 21+ 走这条) */
+        private static SSLSocketFactory buildSystem(X509TrustManager tm) {
+            try {
+                SSLContext sc = SSLContext.getInstance("TLS");
+                sc.init(null, tm != null ? new TrustManager[]{tm} : null, new SecureRandom());
+                Log.i(TAG, "更新链路 TLS: 系统(API " + android.os.Build.VERSION.SDK_INT + ")");
+                return new ForcedProtocolSocketFactory(sc.getSocketFactory(), TLS_12);
             } catch (Throwable t) {
                 Log.w(TAG, "更新链路 TLS 初始化失败,回退系统默认", t);
-                factory = null;
+                return null;
             }
-            return factory;
         }
 
         /** 系统默认信任管理器 */
@@ -832,16 +901,21 @@ public final class UpdateChecker {
         }
 
         /**
-         * 包装 SSLSocketFactory:创建出的 SSLSocket 强制打开设备支持的全部 TLS 协议。
-         * 只启用 TLS 1.2 不够 —— 4.x 的 SSLSocketFactory 默认把 TLSv1.2 排除在 enabled 之外,
-         * 而 TeraCloud 只接受 TLS 1.2(TLS 1.0/1.1 握手直接失败)。
+         * 包装 SSLSocketFactory:创建出的 SSLSocket 只启用指定协议。
+         *
+         * <p>为什么强制到 TLS 1.2 而不是"全开":TeraCloud 只接受 TLS 1.2
+         * (TLS 1.0/1.1 握手直接失败)。客户端同时报 1.0/1.1 虽不至于谈崩,
+         * 但把老协议也亮出来没任何好处,不如锁死 1.2 让行为可预测。</p>
          */
-        private static final class Tls12SocketFactory extends SSLSocketFactory {
+        private static final class ForcedProtocolSocketFactory extends SSLSocketFactory {
 
             private final SSLSocketFactory delegate;
+            /** 只想启用的协议名 */
+            private final String only;
 
-            Tls12SocketFactory(SSLSocketFactory delegate) {
+            ForcedProtocolSocketFactory(SSLSocketFactory delegate, String only) {
                 this.delegate = delegate;
+                this.only = only;
             }
 
             @Override
@@ -882,7 +956,6 @@ public final class UpdateChecker {
                 return enable(delegate.createSocket(address, port, localAddress, localPort));
             }
 
-            /** 打开设备支持的全部 TLS 协议(TLSv1 / TLSv1.1 / TLSv1.2) */
             private Socket enable(Socket socket) {
                 if (socket instanceof SSLSocket) {
                     SSLSocket ssl = (SSLSocket) socket;
@@ -890,15 +963,31 @@ public final class UpdateChecker {
                         String[] supported = ssl.getSupportedProtocols();
                         List<String> use = new ArrayList<String>();
                         for (String p : supported) {
-                            if (p != null && p.startsWith("TLS")) {
+                            if (only.equals(p)) {
                                 use.add(p);
+                            }
+                        }
+                        if (use.isEmpty()) {
+                            // 该 TLS 栈连 1.2 都没有 —— 车机 4.2.2 的系统栈正是如此。
+                            // 退而求其次全开,让握手有机会成功,并把真相写进日志:
+                            // 看到这行就说明"系统栈确实开不出 1.2",必须靠 Conscrypt。
+                            for (String p : supported) {
+                                if (p != null && p.startsWith("TLS")) {
+                                    use.add(p);
+                                }
+                            }
+                            if (!use.isEmpty()) {
+                                String msg = "SSLSocket 不支持 " + only
+                                        + ", 可用协议仅 " + use;
+                                Log.w(TAG, msg);
+                                DownloadDiag.log("[自更新] " + msg);
                             }
                         }
                         if (!use.isEmpty()) {
                             ssl.setEnabledProtocols(use.toArray(new String[0]));
                         }
                     } catch (Throwable t) {
-                        Log.w(TAG, "启用 TLS 协议失败", t);
+                        Log.w(TAG, "启用 " + only + " 失败", t);
                     }
                 }
                 return socket;

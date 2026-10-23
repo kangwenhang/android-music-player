@@ -135,6 +135,14 @@ android {
 
         // 老系统 multidex 支持
         multiDexEnabled true
+
+        // 【2026-10-23】只打 32 位 ARM。
+        // 车机是 4.2.2 的 32 位 ARM;64 位设备(如测试用小米)能直接跑 32 位库,
+        // 所以没必要把 arm64/x86 的 .so 也塞进 APK —— Conscrypt 四个 ABI 共 7.9MB,
+        // 只留 armeabi-v7a 就是 1.28MB,省 6.6MB。
+        ndk {
+            abiFilters 'armeabi-v7a'
+        }
     }
 
     // JDK 8 兼容
@@ -170,4 +178,13 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.3.1'
     implementation 'androidx.recyclerview:recyclerview:1.2.1'
     implementation 'androidx.multidex:multidex:2.0.1'
+
+    // 【2026-10-23】自带 TLS 1.2 能力,专供自更新链路(TeraCloud 只接受 TLS 1.2)。
+    // 车机 4.2.2 的 JSSE 里根本没有 TLSv1.2:官方说"API 16 起支持、API 20 起默认启用",
+    // 但 4.2/4.3 实测 getSupportedProtocols() 只有 SSLv3/TLSv1,setEnabledProtocols
+    // 开不出 1.2(4.4 起才真能开)。故直接换一套 TLS 栈。
+    // 选 2.5.2 的原因:它的 AAR manifest 是 minSdkVersion="9"(与 minSdk 17 不冲突,
+    // 不会触发 manifest merger 报错),且仍保留 armeabi-v7a(2.5.0+ 才砍掉 armeabi/mips);
+    // 多个实测 gist 显示 2.5.2 在 Android 4.1+ 正常工作。
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
 }
