@@ -369,20 +369,60 @@ jobs:
           WEBDAV_USER: ${{ secrets.WEBDAV_USER || vars.WEBDAV_USER }}
           WEBDAV_PASS: ${{ secrets.WEBDAV_PASS || vars.WEBDAV_PASS }}
         run: |
+          # 凭据没配就直接跳过,构建不变红 —— 可以先推流水线,Secrets 后补。
+          # 判断放在最前面:否则会先撞上下面读版本失败而把构建搞红。
+          if [ -z "${WEBDAV_USER}" ] || [ -z "${WEBDAV_PASS}" ]; then
+            echo "[跳过] 未配置 TeraCloud 上传凭据 (WEBDAV_USER / WEBDAV_PASS), 本次不上传。"
+            echo "       到 Settings → Secrets and variables → Actions 里填上即可, 无需改本文件。"
+            exit 0
+          fi
+
           APK_PATH=$(find ${{ steps.buildinfo.outputs.apk_dir }} -name "*.apk" | head -1)
           if [ -z "$APK_PATH" ]; then
             echo "::error::没找到 APK,终止上传"
             exit 1
           fi
 
-          # aapt 随 build-tools 装上,前几步已在用
-          BADGING=$(aapt dump badging "$APK_PATH" 2>/dev/null | head -1)
-          VNAME=$(echo "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
-          VCODE=$(echo "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          # ---- 读版本(三道保险)----
+          # 坑:build-tools 不在 PATH 上(workflow 里 zipalign/apksigner 都是拼绝对路径),
+          #    且 runner 上装的是 build-tools 37.0.0,**aapt(v1) 在 31+ 已被移除**,
+          #    裸敲 `aapt` 必然 command not found。所以按目录找 aapt2 → aapt。
+          ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | sort -V | tail -1)
+          AAPT=""
+          for c in aapt2 aapt; do
+            if [ -x "${BUILD_TOOLS}${c}" ]; then
+              AAPT="${BUILD_TOOLS}${c}"
+              break
+            fi
+          done
+
+          VNAME=""
+          VCODE=""
+          if [ -n "$AAPT" ]; then
+            echo "解析工具: $AAPT"
+            # 取 package: 那一行,别用 head -1(aapt2 前面可能还有别的输出)
+            # 只挑含 versionName 的那行(aapt / aapt2 两种输出都覆盖),
+            # 别用 head -1:aapt2 前面可能还有别的输出
+            BADGING=$("$AAPT" dump badging "$APK_PATH" 2>/dev/null | grep -m1 "versionName=" || true)
+            VNAME=$(printf '%s' "$BADGING" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+            VCODE=$(printf '%s' "$BADGING" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          else
+            echo "[警告] 找不到 aapt/aapt2,改用兜底来源推算版本"
+          fi
+          # 兜底 1: local-test 上构建前注入的 APP_VERSION_NAME(与 APK 内嵌值同源)
+          if [ -z "$VNAME" ] && [ -n "$APP_VERSION_NAME" ]; then
+            VNAME="$APP_VERSION_NAME"
+          fi
+          # 兜底 2: main 上取 HEAD 的 tag(APK 版本名就是它)
+          if [ -z "$VNAME" ]; then
+            VNAME=$(git describe --tags --exact-match HEAD 2>/dev/null | sed 's/^v//' || true)
+          fi
+
           echo "APK: $APK_PATH"
           echo "读到版本: ${VNAME:-未知} (code=${VCODE:-未知})"
           if [ -z "$VNAME" ]; then
-            echo "::error::aapt 读不到 versionName,终止上传(避免写出错的元数据)"
+            echo "::error::三种来源都拿不到 versionName,终止上传(宁可不发,也不发错版本)"
             exit 1
           fi
 
