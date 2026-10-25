@@ -170,8 +170,9 @@ jobs:
 
           # 获取上一个 Release 的 tag(用于 changelog)
           # 排除固定的"最新调试包"入口 tag:它不随构建前进,若被当成上一个版本会让 changelog 错乱
+          # 同时排除 pre-release(debug 预发布链):取最近一个正式版做基准,changelog 才有实际内容
           PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=20" \
-            --jq '[.[] | select(.tag_name | endswith("-latest") | not)][0].tag_name' 2>/dev/null || echo "")
+            --jq '[.[] | select(.tag_name | endswith("-latest") | not) | select(.prerelease == false)][0].tag_name' 2>/dev/null || echo "")
           echo "上一个 Release tag: ${PREV_TAG:-无}"
 
           if [ -n "$PREV_TAG" ]; then
@@ -287,8 +288,10 @@ jobs:
           fi
 
           # 计算 changelog 基准:上一个 Release,需排除本次要发布的 tag(否则拿自己当基准,changelog 恒为空)
+          # 还必须排除 debug 预 release(v*.452-pre 这类)—— 否则取到的基准比 HEAD 还新,
+          # rev-list 恒为 0,正式版 notes 永远是"无代码变更"(v6.2/v6.3 两连坑)
           PREV_TAG=$(gh api "repos/${{ github.repository }}/releases?per_page=20" \
-            --jq "[.[] | select(.tag_name != \"$TAG\") | select(.tag_name | endswith(\"-latest\") | not)][0].tag_name // empty" 2>/dev/null || echo "")
+            --jq "[.[] | select(.tag_name != \"$TAG\") | select(.prerelease == false) | select(.tag_name | endswith(\"-latest\") | not)][0].tag_name // empty" 2>/dev/null || echo "")
           echo "上一个 Release tag: ${PREV_TAG:-无}"
 
           if [ -n "$PREV_TAG" ]; then
