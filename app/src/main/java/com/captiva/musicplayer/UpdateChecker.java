@@ -76,7 +76,8 @@ import javax.net.ssl.X509TrustManager;
  * <ul>
  * <li>正式频道:update.json(描述正式包 app-release.apk)</li>
  * <li>测试频道:update-debug.json(描述调试包 app-debug.apk)</li>
- * <li>正式包默认只收正式频道;调试包两个频道都收;正式包打开"接收测试版更新"后也收测试频道。</li>
+ * <li>默认只收正式频道;勾选"接收测试版更新"后测试频道才参与候选(唯一开关,
+ *     与当前包是正式/调试无关)</li>
  * </ul>
  *
  * <p><b>车机(安卓 4.2.2)的两个必踩的坑</b>,都在 {@link UpdateSsl} 里解决:</p>
@@ -139,7 +140,7 @@ public final class UpdateChecker {
     }
 
     // ------------------------------------------------------------------
-    // "接收测试版更新"开关(正式包默认收不到调试包;开关打开后才能收到)
+    // "接收测试版更新"开关(默认只收正式频道;勾选后测试频道才参与候选)
     // ------------------------------------------------------------------
 
     public static boolean isAllowDebugUpdates(Context ctx) {
@@ -213,10 +214,13 @@ public final class UpdateChecker {
                 return;
             }
 
-            // 2) 频道分离:正式包默认只看 update.json;调试包或开了"接收测试版更新"再加测试频道
+            // 2) 频道分离:默认只看 update.json;勾选"接收测试版更新"才加测试频道。
+            //    【行为变更】旧逻辑给调试包(BuildConfig.DEBUG)无条件加测试频道,
+            //    导致调试包用户不受勾选框控制,未勾选也能收到 pre 包(实测车机
+            //    6.2.451-pre 未勾选却提示 6.3.453-pre)。现在勾选框是唯一开关。
             List<String> metaNames = new ArrayList<String>();
             metaNames.add(META_RELEASE);
-            if (BuildConfig.DEBUG || isAllowDebugUpdates(ctx)) {
+            if (isAllowDebugUpdates(ctx)) {
                 metaNames.add(META_DEBUG);
             }
             DownloadDiag.log("[自更新] 检查频道: " + metaNames
