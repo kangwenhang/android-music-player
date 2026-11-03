@@ -176,8 +176,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private final int colorPlayingTextSub;
     private final int colorTextPrimary;
     private final int colorTextSecondary;
-    private final int colorSourceNetwork;
     private final int colorSourceLocal;
+    private final Drawable dotCached;      // 缓存状态点:绿=已缓存(本地可用)
+    private final Drawable dotNotCached;   // 缓存状态点:红=云端未缓存
     private final int coverSizeList;
     private final int colorFavoriteActive;
     private final int colorFavoriteInactive;
@@ -187,12 +188,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private final int dimIndexWidth;       // 序号列宽 28dp
     private final int dimCoverGapStart;    // 封面左边距 4dp
     private final int dimCoverGapEnd;      // 封面右边距 8dp
-    private final int dimSourceDot;        // 来源标识点 6dp
-    private final int dimSourceDotGap;     // 来源标识左边距 8dp
+    private final int dimSourceDot;        // 缓存状态点 12dp(与右上角服务器状态点同大)
+    private final int dimSourceDotGap;     // 状态点左边距 8dp
     private final float dimSubTextSize;    // 次要文字尺寸(px)
     private final float dimTitleTextSize;  // 标题文字尺寸(px)
     private final Drawable coverPlaceholder; // 封面占位背景
-    private final int colorSourceDotInit;  // 来源点初始颜色(=source_local)
 
     public MusicAdapter(Context context) {
         this.context = context;
@@ -203,8 +203,22 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         colorPlayingTextSub = ContextCompat.getColor(context, R.color.playing_text_sub);
         colorTextPrimary = ContextCompat.getColor(context, R.color.text_primary);
         colorTextSecondary = ContextCompat.getColor(context, R.color.text_secondary);
-        colorSourceNetwork = ContextCompat.getColor(context, R.color.source_network);
         colorSourceLocal = ContextCompat.getColor(context, R.color.source_local);
+        // 缓存状态点(2026-11-03 用户决策):由"来源标识"改为"缓存状态"——
+        // 绿=已缓存(MusicService 缓存完成后 bean 原地 setNetwork(false),同一判定),
+        // 红=云端未缓存。颜色直接复用右上角服务器状态点的红绿,自带日夜两套;
+        // 圆形(OVAL)与右上角一致;尺寸 6dp 方块 → 12dp 圆,电阻屏上看得清。
+        // 预建两个 Drawable 实例在 bind 时换引用(零分配,不 mutate 共享实例)。
+        dotCached = new android.graphics.drawable.GradientDrawable();
+        ((android.graphics.drawable.GradientDrawable) dotCached).setShape(
+                android.graphics.drawable.GradientDrawable.OVAL);
+        ((android.graphics.drawable.GradientDrawable) dotCached)
+                .setColor(ContextCompat.getColor(context, R.color.server_status_connected));
+        dotNotCached = new android.graphics.drawable.GradientDrawable();
+        ((android.graphics.drawable.GradientDrawable) dotNotCached).setShape(
+                android.graphics.drawable.GradientDrawable.OVAL);
+        ((android.graphics.drawable.GradientDrawable) dotNotCached)
+                .setColor(ContextCompat.getColor(context, R.color.server_status_disconnected));
         coverSizeList = (int) context.getResources().getDimension(R.dimen.cover_size_list);
         colorFavoriteActive = ContextCompat.getColor(context, R.color.favorite_active);
         colorFavoriteInactive = ContextCompat.getColor(context, R.color.favorite_inactive);
@@ -217,10 +231,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         dimIndexWidth = dpToPx(density, 28);
         dimCoverGapStart = dpToPx(density, 4);
         dimCoverGapEnd = dpToPx(density, 8);
-        dimSourceDot = dpToPx(density, 6);
+        dimSourceDot = dpToPx(density, 12); // 与右上角服务器状态点(12dp)同大
         dimSourceDotGap = dpToPx(density, 8);
         coverPlaceholder = context.getResources().getDrawable(R.drawable.bg_cover_placeholder);
-        colorSourceDotInit = colorSourceLocal;
         // 【2026-10-05 v423 修复实验:关闭稳定 ID】
         // 原注释"启用稳定 ID 提升 RecyclerView 回收效率"——但车机+模拟器实测正好相反:
         // 切歌后每帧全窗口 measure 时,scrap/池查找 100% 落空(创建≈回收≈绑定,
@@ -1222,10 +1235,10 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         textCol.addView(tvArtist, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        // 来源标识点
+        // 缓存状态点(圆形,初始先给绿——bind 时会按实际状态换)
         View vSource = new View(context);
         vSource.setId(R.id.v_source);
-        vSource.setBackgroundColor(colorSourceDotInit);
+        vSource.setBackgroundDrawable(dotCached);
         LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(
                 dimSourceDot, dimSourceDot);
         dotLp.setMargins(dimSourceDotGap, 0, 0, 0);
@@ -1281,7 +1294,9 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         holder.itemView.setBackgroundColor(playing ? colorPlayingBg : colorListItemBg);
         holder.tvTitle.setTextColor(playing ? colorPlayingText : colorTextPrimary);
         holder.tvArtist.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
-        holder.vSource.setBackgroundColor(bean.isNetwork() ? colorSourceNetwork : colorSourceLocal);
+        // 缓存状态点:绿=已缓存/本地可用(isNetwork()==false,含缓存完成后的原地翻转),
+        // 红=云端未缓存;换 Drawable 引用而非 mutate,零分配
+        holder.vSource.setBackgroundDrawable(bean.isNetwork() ? dotNotCached : dotCached);
         holder.vSource.setVisibility(showSourceDot ? View.VISIBLE : View.GONE);
 
         // 使用缓存的封面尺寸
