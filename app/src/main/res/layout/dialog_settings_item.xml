@@ -13,11 +13,14 @@
     android:background="@drawable/bg_settings_item">
 
     <!-- 图标(emoji,无需图片资源) -->
+    <!-- v6.4.1:必须显式上色。漏设时继承主题默认 textColor(浅),日间浅底上看不清;
+         text_secondary 随昼夜切换,日 #5F6470 / 夜 #9A9AA0,装饰图标比正文略淡 -->
     <TextView
         android:id="@+id/tv_item_icon"
         android:layout_width="36dp"
         android:layout_height="wrap_content"
         android:gravity="center"
+        android:textColor="@color/text_secondary"
         android:textSize="24sp" />
 
     <!-- 菜单文字 -->

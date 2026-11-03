@@ -57,7 +57,7 @@
     <color name="eq_toggle_text_off">#9AA0AE</color>
 
     <color name="title_grad_start">#EDEFF4</color>
-    <color name="title_grad_end">#E0E3EB</color>
+    <color name="title_grad_end">#D9DEE9</color>
     <!-- v6.4.1:分隔线整体加深一档(#D5DAE6 级在车机上被压得几乎看不见) -->
     <color name="title_line">#B0B7C6</color>
     <color name="btn_grad_start">#E8EAF0</color>

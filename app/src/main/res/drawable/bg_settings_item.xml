@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置菜单列表项背景(低饱和深色,按压微亮) -->
+<!-- 设置菜单列表项背景(卡片略亮于弹窗背景+清晰描边,按压变蓝) -->
+<!-- v6.4.1:原常态底 card_grad_b 与弹窗背景 bg_main 几乎同色、描边 btn_grad_start
+     比背景还亮,日间下 9 行菜单融成一片(用户截图)。改用亮卡+深描边。 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="@color/card_grad_a" />
+            <solid android:color="@color/card_selected" />
             <corners android:radius="10dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/card_grad_b" />
+            <solid android:color="@color/card_grad_a" />
             <corners android:radius="10dp" />
-            <stroke android:width="1dp" android:color="@color/btn_grad_start" />
+            <stroke android:width="1dp" android:color="@color/btn_border" />
         </shape>
     </item>
 </selector>
