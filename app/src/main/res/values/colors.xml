@@ -136,6 +136,8 @@
     <color name="lrc_normal">#CC3A3F4C</color>
     <!-- 歌词封面遮罩:夜间蒙黑压暗,白天蒙白提亮(保证深色歌词字可读) -->
     <color name="lrc_scrim">#B3FFFFFF</color>
+    <!-- 未播放/无歌词时的区域分界灰蒙版 -->
+    <color name="lrc_empty_scrim">#1F000000</color>
     <color name="white_33">#55FFFFFF</color>
     <!-- 列表分隔线(v6.4.1 新增,配 ListDivider):日间中灰,夜间深一档 -->
     <color name="list_divider">#BCC3D2</color>

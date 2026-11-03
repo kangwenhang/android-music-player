@@ -818,6 +818,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         if (newIdx >= 0 && newIdx < data.size()) nchg(newIdx);
     }
 
+    /** 该行是否为正在播放行(ListDivider 用于在渐变行上下不打灰线) */
+    public boolean isPlayingPosition(int position) {
+        return position >= 0 && position == playingIndex;
+    }
+
     /** 设置是否显示来源状态点(本地模式=false 隐藏;须主线程调用) */
     public void setShowSourceDot(boolean show) {
         setShowSourceDot(show, true);

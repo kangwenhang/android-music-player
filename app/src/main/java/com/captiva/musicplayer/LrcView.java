@@ -56,6 +56,7 @@ public class LrcView extends View {
     private static final int COLOR_SHADOW_NORMAL = Color.parseColor("#80000000");
     // 遮罩色从资源取:夜间蒙黑/白天蒙白(v6.4)
     private int COLOR_SCRIM;
+    private int COLOR_EMPTY_SCRIM;
 
     /** 行间距(每行歌词之间的间距,px) */
     private float lineSpacing = 12f;
@@ -170,6 +171,8 @@ public class LrcView extends View {
         COLOR_CURRENT = getResources().getColor(R.color.lrc_current);
         COLOR_NORMAL = getResources().getColor(R.color.lrc_normal);
         COLOR_SCRIM = getResources().getColor(R.color.lrc_scrim);
+        // 未播放/无歌词时的灰蒙版:与左侧歌曲列表划出区域分界(2026-11-03 用户要求)
+        COLOR_EMPTY_SCRIM = getResources().getColor(R.color.lrc_empty_scrim);
         // 当前行:亮色高亮
         currentPaint.setColor(COLOR_CURRENT);
         currentPaint.setTextSize(currentTextSize);
@@ -407,6 +410,8 @@ public class LrcView extends View {
 
         // 2. 绘制歌词
         if (lrcList == null || lrcList.isEmpty()) {
+            // 未播放/无歌词:叠一层灰蒙版,把右侧面板与左侧歌曲列表划出区域分界
+            canvas.drawColor(COLOR_EMPTY_SCRIM);
             currentPaint.setTextSize(normalTextSize);
             currentPaint.setColor(COLOR_NO_LRC);
             canvas.drawText("暂无歌词", vw / 2f, vh / 2f, currentPaint);

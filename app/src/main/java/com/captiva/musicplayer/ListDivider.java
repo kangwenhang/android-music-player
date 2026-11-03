@@ -35,11 +35,12 @@ public final class ListDivider extends RecyclerView.ItemDecoration {
         rightInsetPx = (int) ctx.getResources().getDimension(R.dimen.index_bar_reserve);
     }
 
-    /** 给每条 item 底部预留 1dp 空隙,线画在空隙里,不叠在内容上 */
+    /** 给每条 item 底部预留 1dp 空隙,线画在空隙里,不叠在内容上。
+     *  播放行(蓝渐变)不留空隙:灰线/浅缝切在渐变上割裂感极重(2026-11-03 用户反馈) */
     @Override
     public void getItemOffsets(Rect outRect, View view, RecyclerView parent,
                                RecyclerView.State state) {
-        outRect.bottom = heightPx;
+        outRect.bottom = isPlayingRow(parent, view) ? 0 : heightPx;
     }
 
     @Override
@@ -49,10 +50,22 @@ public final class ListDivider extends RecyclerView.ItemDecoration {
         final int n = parent.getChildCount();
         for (int i = 0; i < n; i++) {
             View child = parent.getChildAt(i);
+            // 播放行自身不断线;下一行是播放行也不断(灰线切在蓝渐变上极其刺眼)
+            if (isPlayingRow(parent, child)) continue;
+            if (i + 1 < n && isPlayingRow(parent, parent.getChildAt(i + 1))) continue;
             RecyclerView.LayoutParams lp =
                     (RecyclerView.LayoutParams) child.getLayoutParams();
             final int top = child.getBottom() + lp.bottomMargin;
             c.drawRect(left, top, right, top + heightPx, paint);
         }
+    }
+
+    /** 该 child 是否为正在播放行(渐变背景) */
+    private boolean isPlayingRow(RecyclerView parent, View child) {
+        RecyclerView.Adapter<?> ad = parent.getAdapter();
+        if (!(ad instanceof MusicAdapter)) return false;
+        int pos = parent.getChildAdapterPosition(child);
+        if (pos == RecyclerView.NO_POSITION) return false;
+        return ((MusicAdapter) ad).isPlayingPosition(pos);
     }
 }
