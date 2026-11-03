@@ -170,7 +170,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     private volatile boolean logNextFilter = false;
 
     // 缓存颜色和尺寸(避免每次 onBindViewHolder 重复查询 Resources)
-    private final int colorPlayingBg;
+    private final Drawable playingBgDrawable; // 播放行高亮:按钮同款蓝渐变
     private final int colorListItemBg;
     private final int colorPlayingText;
     private final int colorPlayingTextSub;
@@ -197,7 +197,18 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     public MusicAdapter(Context context) {
         this.context = context;
         // 预加载所有颜色和尺寸(只执行一次)
-        colorPlayingBg = ContextCompat.getColor(context, R.color.playing_highlight);
+        // 播放行高亮(2026-11-03 用户决策):由大面积浅蓝纯色(#D6E9F9)改为
+        // 播放大按钮同款蓝渐变(playing_bright #42A5F5 → playing_deep #1565C0),
+        // 消除列表高亮与底部控制栏蓝色元素的割裂感;行上文字同步翻白(见 colors)。
+        // 只在构造时创建一次,bind 换引用,零分配。
+        android.graphics.drawable.GradientDrawable playingGrad =
+                new android.graphics.drawable.GradientDrawable();
+        playingGrad.setOrientation(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR);
+        playingGrad.setColors(new int[]{
+                ContextCompat.getColor(context, R.color.playing_bright),
+                ContextCompat.getColor(context, R.color.playing_deep)});
+        playingBgDrawable = playingGrad;
         colorListItemBg = ContextCompat.getColor(context, R.color.list_item_bg);
         colorPlayingText = ContextCompat.getColor(context, R.color.playing_text);
         colorPlayingTextSub = ContextCompat.getColor(context, R.color.playing_text_sub);
@@ -1291,7 +1302,11 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
 
         // 使用缓存的颜色(避免每次 bind 调用 ContextCompat.getColor)
         boolean playing = position == playingIndex;
-        holder.itemView.setBackgroundColor(playing ? colorPlayingBg : colorListItemBg);
+        if (playing) {
+            holder.itemView.setBackgroundDrawable(playingBgDrawable);
+        } else {
+            holder.itemView.setBackgroundColor(colorListItemBg);
+        }
         holder.tvTitle.setTextColor(playing ? colorPlayingText : colorTextPrimary);
         holder.tvArtist.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
         // 缓存状态点:绿=已缓存/本地可用(isNetwork()==false,含缓存完成后的原地翻转),

@@ -8,12 +8,14 @@
 
     <color name="list_item_bg">#E7E9EF</color>
     <color name="playing_highlight">#D6E9F9</color>
+    <!-- seekbar 缓冲段:半透明 playing_bright,替代原来发灰的浅蓝 accent_glow -->
+    <color name="seek_buffer">#6642A5F5</color>
 
     <color name="text_primary">#1A1D26</color>
     <color name="text_secondary">#5F6470</color>
     <color name="text_title">#10131A</color>
-    <color name="playing_text">#0288D1</color>
-    <color name="playing_text_sub">#42A5F5</color>
+    <color name="playing_text">#FFFFFF</color> <!-- 行背景=蓝渐变,文字翻白 -->
+    <color name="playing_text_sub">#E3F2FD</color>
 
     <color name="accent">#0288D1</color>
 

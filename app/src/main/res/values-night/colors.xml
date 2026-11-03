@@ -15,8 +15,8 @@
     <color name="text_primary">#F0F0F0</color>
     <color name="text_secondary">#9A9AA0</color>
     <color name="text_title">#FFFFFF</color>
-    <color name="playing_text">#4FC3F7</color>
-    <color name="playing_text_sub">#82D4F7</color>
+    <color name="playing_text">#FFFFFF</color> <!-- 行背景=蓝渐变,文字翻白 -->
+    <color name="playing_text_sub">#DCEFFB</color>
 
     <!-- 强调色 -->
     <color name="accent">#4FC3F7</color>
@@ -134,6 +134,7 @@
     <color name="accent_pale">#81D4FA</color>
     <color name="accent_pale2">#B3E5FC</color>
     <color name="accent_glow">#664FC3F7</color>
+    <color name="seek_buffer">#6642A5F5</color>
     <!-- 亮蓝(渐变填充用,两套同值;文本用 accent 会翻转) -->
     <color name="accent_bright">#4FC3F7</color>
     <color name="paused_bright">#FF5252</color>
