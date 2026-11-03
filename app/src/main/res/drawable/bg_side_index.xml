@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 索引条浮层底色:半透明深色圆角块 + 强调色细描边,使其看起来"浮"在歌曲列表之上 -->
+<!-- 索引条浮层底色:半透明深色圆角块 + 中性细描边
+     (2026-11-03 用户反馈:浅色模式下 accent 蓝描边在列表右缘割裂感重,
+      降为 list_divider 中性色,随 DayNight 昼夜切换) -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="@color/side_index_shadow" />
     <corners android:radius="16dp" />
     <stroke
         android:width="1.5dp"
-        android:color="@color/accent" />
+        android:color="@color/list_divider" />
 </shape>
