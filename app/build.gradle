@@ -143,6 +143,11 @@ android {
         ndk {
             abiFilters 'armeabi-v7a'
         }
+
+        // 【2026-11-03】密度裁剪:车机屏幕密度在 mdpi~xhdpi 档,
+        // 剔除 androidx 自带的 xxhdpi/xxxhdpi/tvdpi 位图(appcompat 的
+        // abc_switch/popup 等,~50KB),自家图标在 mdpi/xhdpi 两档不受影响
+        resConfigs 'mdpi', 'hdpi', 'xhdpi'
     }
 
     // JDK 8 兼容
@@ -154,6 +159,13 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            // 【2026-11-03】OTA 分发瘦身:debug 包是车机实际分发的形态,
+            // 开 R8 资源/代码裁剪(classes2.dex 未裁剪时占 1.6MB,大头是 androidx)。
+            // 用 proguard-android.txt(非 optimize 版)+ -dontobfuscate +
+            // 保留整个自家包,只裁 androidx 未用代码/资源,降低运行时风险。
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
         release {
             signingConfig signingConfigs.debug
