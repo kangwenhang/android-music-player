@@ -23,16 +23,14 @@ public final class ListDivider extends RecyclerView.ItemDecoration {
 
     private final Paint paint = new Paint();
     private final int heightPx;
-    private final int rightInsetPx;
 
     public ListDivider(Context ctx) {
         paint.setColor(ctx.getResources().getColor(R.color.list_divider));
         // 1dp,取整后至少 1px,避免低密度屏画不出线
         heightPx = Math.max(1,
                 (int) (ctx.getResources().getDisplayMetrics().density + 0.5f));
-        // 右端在索引条预留区(index_bar_reserve 64dp)前收住:
-        // 分隔线伸进右侧悬浮索引条/歌词分界一带会显得支离破碎(2026-11-03 用户反馈)
-        rightInsetPx = (int) ctx.getResources().getDimension(R.dimen.index_bar_reserve);
+        // 注:曾试过右端缩进 index_bar_reserve,实测列表右缘出现突兀空列,
+        // 已回退(2026-11-03);区域分界交给歌词面板的灰蒙版。
     }
 
     /** 给每条 item 底部预留 1dp 空隙,线画在空隙里,不叠在内容上。
@@ -46,7 +44,7 @@ public final class ListDivider extends RecyclerView.ItemDecoration {
     @Override
     public void onDrawOver(Canvas c, RecyclerView parent, RecyclerView.State state) {
         final int left = parent.getPaddingLeft();
-        final int right = parent.getWidth() - parent.getPaddingRight() - rightInsetPx;
+        final int right = parent.getWidth() - parent.getPaddingRight();
         final int n = parent.getChildCount();
         for (int i = 0; i < n; i++) {
             View child = parent.getChildAt(i);

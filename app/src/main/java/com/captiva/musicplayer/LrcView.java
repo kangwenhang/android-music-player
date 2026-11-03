@@ -414,7 +414,14 @@ public class LrcView extends View {
             canvas.drawColor(COLOR_EMPTY_SCRIM);
             currentPaint.setTextSize(normalTextSize);
             currentPaint.setColor(COLOR_NO_LRC);
-            canvas.drawText("暂无歌词", vw / 2f, vh / 2f, currentPaint);
+            // 真居中:画笔是 Align.LEFT,直接用 (vw/2, vh/2) 会右偏+偏高 ——
+            // 水平按实测文本宽折算,垂直把基线从中点回调半个字高
+            String tip = "暂无歌词";
+            float tw = currentPaint.measureText(tip);
+            Paint.FontMetrics fm = currentPaint.getFontMetrics();
+            float textX = (vw - tw) / 2f;
+            float textY = vh / 2f - (fm.ascent + fm.descent) / 2f;
+            canvas.drawText(tip, textX, textY, currentPaint);
             currentPaint.setColor(COLOR_CURRENT);
             return;
         }
