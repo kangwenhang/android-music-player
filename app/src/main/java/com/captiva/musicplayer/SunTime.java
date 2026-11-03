@@ -34,12 +34,15 @@ public final class SunTime {
             return null;
         }
         try {
-            // 当日 0h UT 的儒略日(Fliegel & Van Flandern 公历→JDN)
+            // 当日正午的儒略日 JDN(Fliegel & Van Flandern 公历→JDN)。
+            // 注意:JDN 是整数、以正午 12:00 UT 为基准;当日 0h UT = JDN − 0.5,
+            // 这个 −0.5 在下面 utcBase 处统一做,此处**不能**再 +0.5
+            // (v6.4.2 曾 +0.5 导致 utcBase 落在正午 → 全部时刻偏移 12 小时)。
             int a = (14 - month) / 12;
             int y = year + 4800 - a;
             int m = month + 12 * a - 3;
             double jdn = day + (153 * m + 2) / 5 + 365L * y + y / 4 - y / 100
-                    + y / 400 - 32045 + 0.5;
+                    + y / 400 - 32045;
             double t = (jdn - 2451545.0) / 36525.0;
 
             // 太阳几何平黄经 / 平近点角 / 轨道偏心率
@@ -82,7 +85,7 @@ public final class SunTime {
             double ha = 4.0 * Math.toDegrees(Math.acos(cosW)); // 分钟(4 分钟/度)
 
             // 升落时刻换算回 UTC 纪元毫秒:
-            //   (jdn − 0.5) = 当日 0h UT 的 JD;2440587.5 = 1970-01-01 0h UT
+            //   jdn = 当日正午的 JD,jdn − 0.5 = 当日 0h UT;2440587.5 = 1970-01-01 0h UT
             //   noon 含了 tzMin 的钟面偏移,转回 UTC 要减掉
             double utcBase = (jdn - 0.5 - 2440587.5) * 86400000.0;
             double utcNoon = utcBase + (noon - tzMin) * 60000.0;

@@ -52,11 +52,22 @@ public final class ThemeManager {
         apply(ctx);
     }
 
-    /** 读取定位到的坐标 {纬度, 经度};未定位过返回 null */
+    /** 中国范围粗界(纬 18~53.6 / 经 73.5~135.1):超出视为定位垃圾,不采纳 */
+    private static final double LAT_MIN = 18.0, LAT_MAX = 53.6;
+    private static final double LON_MIN = 73.5, LON_MAX = 135.1;
+
+    /**
+     * 读取定位到的坐标 {纬度, 经度};未定位过或坐标不合理(如无 GMS 车机的
+     * NETWORK 服务商返回的境外预置垃圾缓存)返回 null → 自动模式回退固定时间。
+     * 范围校验放在读取侧:历史版本存进去的脏坐标在这里自动失效,无需迁移。
+     */
     public static float[] getCoords(Context ctx) {
         SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!sp.contains(KEY_LAT) || !sp.contains(KEY_LON)) return null;
-        return new float[]{sp.getFloat(KEY_LAT, 999f), sp.getFloat(KEY_LON, 999f)};
+        float lat = sp.getFloat(KEY_LAT, 999f);
+        float lon = sp.getFloat(KEY_LON, 999f);
+        if (lat < LAT_MIN || lat > LAT_MAX || lon < LON_MIN || lon > LON_MAX) return null;
+        return new float[]{lat, lon};
     }
 
     /** 保存定位坐标(日出日落切换立即生效) */

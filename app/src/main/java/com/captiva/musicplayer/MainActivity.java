@@ -2028,7 +2028,7 @@ public class MainActivity extends AppCompatActivity {
         label.setTextSize(19);
         float[] ll = ThemeManager.getCoords(this);
         if (ll == null) {
-            label.setText("◎ 日出日落定位: 未设置 (点击定位)");
+            label.setText("◎ 日出日落定位: 未设置 (点击定位)" + deviceClockTag());
             label.setTextColor(getResources().getColor(R.color.text_secondary));
         } else {
             java.util.Calendar c = java.util.Calendar.getInstance();
@@ -2039,7 +2039,8 @@ public class MainActivity extends AppCompatActivity {
             String extra = rs == null ? "" : String.format(java.util.Locale.CHINA,
                     "  今日 %s~%s", formatClock(rs[0]), formatClock(rs[1]));
             label.setText(String.format(java.util.Locale.CHINA,
-                    "◎ 已定位: %.2f, %.2f%s (点击重新定位)", ll[0], ll[1], extra));
+                    "◎ 已定位: %.2f, %.2f%s%s (点击重新定位)",
+                    ll[0], ll[1], deviceClockTag(), extra));
             label.setTextColor(getResources().getColor(R.color.text_primary));
         }
         row.addView(label);
@@ -2138,10 +2139,20 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 定位结果落地:存坐标 + Toast 显示今日日出日落时间 */
+    /** 定位结果落地:合理性门禁 → 存坐标 + Toast 显示今日日出日落时间 */
     private void applyCoords(android.location.Location loc) {
         double lat = loc.getLatitude();
         double lon = loc.getLongitude();
+        // 合理性门禁:无 GMS 的车机上 NETWORK 服务商常返回预置垃圾缓存
+        // (实测出现过美国加州 39.24,-123.15)。坐标超出中国范围一律不采纳,
+        // 自动模式回退 7:00-19:00;设备真在境外的场景极少,取最稳妥假设。
+        if (lat < 18.0 || lat > 53.6 || lon < 73.5 || lon > 135.1) {
+            Toast.makeText(this, String.format(java.util.Locale.CHINA,
+                    "定位结果异常: %.2f, %.2f 明显偏离常规位置,已忽略%s\n"
+                            + "请检查车机的定位服务/GPS;自动模式仍按 7:00-19:00 切换",
+                    lat, lon, deviceClockTag()), Toast.LENGTH_LONG).show();
+            return;
+        }
         ThemeManager.setCoords(this, lat, lon);
         java.util.Calendar c = java.util.Calendar.getInstance();
         long[] rs = SunTime.sunRiseSetUtcMillis(
@@ -2151,13 +2162,29 @@ public class MainActivity extends AppCompatActivity {
         String msg;
         if (rs == null) {
             msg = String.format(java.util.Locale.CHINA,
-                    "位置已记录: %.2f, %.2f", lat, lon);
+                    "位置已记录: %.2f, %.2f%s", lat, lon, deviceClockTag());
         } else {
             msg = String.format(java.util.Locale.CHINA,
-                    "位置已记录: %.2f, %.2f\n今日日出 %s / 日落 %s (自动模式按此切换)",
-                    lat, lon, formatClock(rs[0]), formatClock(rs[1]));
+                    "位置已记录: %.2f, %.2f%s\n今日日出 %s / 日落 %s (自动模式按此切换)",
+                    lat, lon, deviceClockTag(), formatClock(rs[0]), formatClock(rs[1]));
         }
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * 设备时钟/时区诊断串:车机常无网络授时,RTC 日期漂移或时区停在 GMT
+     * 会让"日出日落时间"看起来莫名其妙,把它亮出来一眼可辨。
+     * 例:(设备 11-03 GMT+08:00)
+     */
+    private String deviceClockTag() {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        java.util.TimeZone tz = java.util.TimeZone.getDefault();
+        int offMin = tz.getOffset(c.getTimeInMillis()) / 60000;
+        int abs = Math.abs(offMin);
+        return String.format(java.util.Locale.CHINA, " (设备 %02d-%02d GMT%s%02d:%02d)",
+                c.get(java.util.Calendar.MONTH) + 1,
+                c.get(java.util.Calendar.DAY_OF_MONTH),
+                offMin < 0 ? "-" : "+", abs / 60, abs % 60);
     }
 
     /** epoch 毫秒 → HH:mm(本地时区) */
