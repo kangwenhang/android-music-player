@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 车机深色主题,高对比度,适配安卓 4.0+ -->
+<!-- 车机主题:DayNight 自动昼夜切换(v6.4)
+     白天=values/colors.xml 浅色,夜间=values-night/colors.xml 深色,
+     由 ThemeManager 调 AppCompatDelegate.setDefaultNightMode 控制模式 -->
 <resources>
 
-    <style name="Theme.CaptivaMusic" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.CaptivaMusic" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="colorPrimary">@color/accent</item>
         <item name="colorPrimaryDark">@color/bg_title_bar</item>
         <item name="colorAccent">@color/accent</item>
@@ -32,9 +34,9 @@
         <item name="android:taskToBackExitAnimation">@null</item>
     </style>
 
-    <!-- 全屏深色 Dialog 主题(设置弹窗使用)
+    <!-- 全屏 Dialog 主题(设置弹窗使用)
          用 Dialog 而非 Dialog.Alert 做父类,避免浮动窗口属性干扰全屏 -->
-    <style name="Theme.CaptivaDialog" parent="Theme.AppCompat.Dialog">
+    <style name="Theme.CaptivaDialog" parent="Theme.AppCompat.DayNight.Dialog">
         <item name="android:windowBackground">@color/bg_main</item>
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowNoTitle">true</item>

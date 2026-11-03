@@ -3,13 +3,13 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="oval">
-            <solid android:color="#40404A" />
+            <solid android:color="@color/close_btn_border" />
             <size android:width="52dp" android:height="52dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
-            <solid android:color="#2A2A34" />
+            <solid android:color="@color/btn_grad_start" />
             <size android:width="52dp" android:height="52dp" />
         </shape>
     </item>

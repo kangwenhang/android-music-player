@@ -32,14 +32,11 @@ public class SideIndexBar extends View {
     /** 字母字号(sp)。在 CELL_H_DP 格子里足够大 */
     private static final float LETTER_SIZE_SP = 26f;
 
-    /** 普通字母色(对应 text_secondary) */
-    private static final int COLOR_NORMAL = Color.parseColor("#9A9AA0");
-    /** 不可用字母(该字母没有歌)更暗 */
-    private static final int COLOR_DISABLED = Color.parseColor("#4A4A52");
-    /** 选中高亮(对应 accent) */
-    private static final int COLOR_SELECTED = Color.parseColor("#4FC3F7");
-    /** 中间选中带的半透明底色 */
-    private static final int COLOR_BAND = Color.parseColor("#334FC3F7");
+    /** 颜色在 init() 里从资源解析(v6.4 昼夜切换自动跟随) */
+    private int COLOR_NORMAL;
+    private int COLOR_DISABLED;
+    private int COLOR_SELECTED;
+    private int COLOR_BAND;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     /** 索引条宽度(布局未指定时的兜底) */
@@ -73,6 +70,10 @@ public class SideIndexBar extends View {
     }
 
     private void init() {
+        COLOR_NORMAL = getResources().getColor(R.color.text_secondary);
+        COLOR_DISABLED = getResources().getColor(R.color.index_disabled);
+        COLOR_SELECTED = getResources().getColor(R.color.accent);
+        COLOR_BAND = getResources().getColor(R.color.accent_band);
         for (int i = 0; i < available.length; i++) {
             available[i] = true;
         }

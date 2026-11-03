@@ -46,14 +46,16 @@ public class LrcView extends View {
     private final Paint coverPaint = new Paint();
     private final Paint scrimPaint = new Paint();
 
-    // 预计算颜色常量(避免 onDraw 中每次调用 Color.parseColor → 解析开销)
-    private static final int COLOR_BG_DARK = Color.parseColor("#1A1A1E");
-    private static final int COLOR_NO_LRC = Color.parseColor("#99FFFFFF");
-    private static final int COLOR_CURRENT = Color.parseColor("#FFFFFF");
-    private static final int COLOR_NORMAL = Color.parseColor("#CCFFFFFF");
+    // 颜色在 init() 里从资源解析(v6.4 昼夜切换:白天/夜间两套配色自动跟随)
+    // 阴影/遮罩与主题无关,保留常量
+    private int COLOR_BG_DARK;
+    private int COLOR_NO_LRC;
+    private int COLOR_CURRENT;
+    private int COLOR_NORMAL;
     private static final int COLOR_SHADOW_CURRENT = Color.parseColor("#AA000000");
     private static final int COLOR_SHADOW_NORMAL = Color.parseColor("#80000000");
-    private static final int COLOR_SCRIM = Color.parseColor("#99000000");
+    // 遮罩色从资源取:夜间蒙黑/白天蒙白(v6.4)
+    private int COLOR_SCRIM;
 
     /** 行间距(每行歌词之间的间距,px) */
     private float lineSpacing = 12f;
@@ -162,6 +164,12 @@ public class LrcView extends View {
     }
 
     private void init() {
+        // 从当前主题资源取色(DayNight 切换时 Activity 重建,这里拿到的就是新配色)
+        COLOR_BG_DARK = getResources().getColor(R.color.lrc_bg);
+        COLOR_NO_LRC = getResources().getColor(R.color.lrc_no_lrc);
+        COLOR_CURRENT = getResources().getColor(R.color.lrc_current);
+        COLOR_NORMAL = getResources().getColor(R.color.lrc_normal);
+        COLOR_SCRIM = getResources().getColor(R.color.lrc_scrim);
         // 当前行:亮色高亮
         currentPaint.setColor(COLOR_CURRENT);
         currentPaint.setTextSize(currentTextSize);
@@ -393,9 +401,8 @@ public class LrcView extends View {
             // 暗化遮罩
             canvas.drawRect(0, 0, vw, vh, scrimPaint);
         } else {
-            // 无封面时用纯色背景
+            // 无封面时用纯色背景(不叠遮罩:纯色对比已足够,昼间浅底叠黑会变脏灰)
             canvas.drawColor(COLOR_BG_DARK);
-            canvas.drawRect(0, 0, vw, vh, scrimPaint);
         }
 
         // 2. 绘制歌词

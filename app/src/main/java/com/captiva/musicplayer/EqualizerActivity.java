@@ -249,10 +249,10 @@ public class EqualizerActivity extends AppCompatActivity {
     private void highlightPreset(Button btn, boolean selected) {
         if (selected) {
             btn.setBackgroundResource(R.drawable.bg_eq_preset_selected);
-            btn.setTextColor(0xFFFFFFFF);
+            btn.setTextColor(getResources().getColor(R.color.btn_playing_text));
         } else {
             btn.setBackgroundResource(R.drawable.bg_eq_preset);
-            btn.setTextColor(0xFFB0B0B8);
+            btn.setTextColor(getResources().getColor(R.color.eq_preset_text));
         }
     }
 
@@ -286,7 +286,7 @@ public class EqualizerActivity extends AppCompatActivity {
             // 频率标签
             TextView tvFreq = new TextView(this);
             tvFreq.setText(freqText);
-            tvFreq.setTextColor(0xFF9A9AA0);
+            tvFreq.setTextColor(getResources().getColor(R.color.eq_freq_label));
             tvFreq.setTextSize(18f);
             tvFreq.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams freqLp = new LinearLayout.LayoutParams(
@@ -342,7 +342,7 @@ public class EqualizerActivity extends AppCompatActivity {
             TextView tvValue = new TextView(this);
             tvValue.setTag("value");
             tvValue.setText(formatLevel(currentLevel));
-            tvValue.setTextColor(0xFF4FC3F7);
+            tvValue.setTextColor(getResources().getColor(R.color.eq_value_label));
             tvValue.setTextSize(18f);
             tvValue.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams valLp = new LinearLayout.LayoutParams(

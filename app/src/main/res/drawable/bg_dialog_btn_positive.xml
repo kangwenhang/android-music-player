@@ -3,16 +3,16 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="#2A4050" />
+            <solid android:color="@color/pos_btn_press_a" />
             <corners android:radius="14dp" />
-            <stroke android:width="1dp" android:color="#3A6080" />
+            <stroke android:width="1dp" android:color="@color/pos_btn_press_b" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#1E3545" />
+            <solid android:color="@color/pos_btn_a" />
             <corners android:radius="14dp" />
-            <stroke android:width="1dp" android:color="#2A5070" />
+            <stroke android:width="1dp" android:color="@color/pos_btn_b" />
         </shape>
     </item>
 </selector>

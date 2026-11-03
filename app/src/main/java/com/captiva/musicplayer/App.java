@@ -37,6 +37,9 @@ public class App extends MultiDexApplication {
     @Override
     public void onCreate() {
         super.onCreate();
+        // 主题模式(自动昼夜/白天/夜间):进程启动即设置夜间档位,
+        // 否则首帧会先按 DayNight 默认(跟随系统)渲染再跳变
+        ThemeManager.apply(this);
         // 初始化封面磁盘缓存
         CoverLoader.getInstance().initDiskCache(this);
         // 全局崩溃捕获:车机不方便接 adb,任何未捕获异常先把完整堆栈落盘

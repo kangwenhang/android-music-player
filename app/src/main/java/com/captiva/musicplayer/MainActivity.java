@@ -309,6 +309,15 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    /** 自动昼夜切换分钟轮询(v6.4):只有"自动"模式有时间分界需要跨过,手动模式不跑逻辑 */
+    private final Runnable themeTickTask = new Runnable() {
+        @Override
+        public void run() {
+            ThemeManager.checkAutoTick(MainActivity.this);
+            handler.postDelayed(this, 60000);
+        }
+    };
+
     // 自动缓存完成/进度广播接收:刷新来源标识(云端→本地)与未缓存歌曲的进度条
     private final BroadcastReceiver cacheReceiver = new BroadcastReceiver() {
         @Override
@@ -628,7 +637,7 @@ public class MainActivity extends AppCompatActivity {
         android.graphics.Paint paint = new android.graphics.Paint();
         paint.setAntiAlias(true);
         // 蓝色描边圆
-        paint.setColor(0xFF4FC3F7);
+        paint.setColor(getResources().getColor(R.color.accent_bright));
         canvas.drawCircle(thumbSize / 2f, thumbSize / 2f, thumbSize / 2f - 1, paint);
         // 白色内圆
         paint.setColor(0xFFFFFFFF);
@@ -1274,7 +1283,7 @@ public class MainActivity extends AppCompatActivity {
         tvSong.setText(current.getTitle());
         tvSong.setTextSize(14);
         tvSong.setGravity(Gravity.CENTER);
-        tvSong.setTextColor(0xFF888888);
+        tvSong.setTextColor(getResources().getColor(R.color.text_secondary));
         tvSong.setPadding(0, 0, 0, dp(15));
         sd.body.addView(tvSong);
 
@@ -1292,7 +1301,7 @@ public class MainActivity extends AppCompatActivity {
         tvHint.setText("正值=歌词延后显示(歌词快了)\n负值=歌词提前显示(歌词慢了)\n每步 200ms");
         tvHint.setTextSize(13);
         tvHint.setGravity(Gravity.CENTER);
-        tvHint.setTextColor(0xFF999999);
+        tvHint.setTextColor(getResources().getColor(R.color.text_secondary));
         tvHint.setPadding(0, dp(5), 0, dp(15));
         sd.body.addView(tvHint);
 
@@ -1708,7 +1717,7 @@ public class MainActivity extends AppCompatActivity {
             // 主界面对齐:只要在前台,屏幕保持全亮。
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             // 清除默认 Dialog 背景Drawable(可能带圆角/padding)
-            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF16161C));
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(getResources().getColor(R.color.bg_main)));
         }
     }
 
@@ -1739,7 +1748,8 @@ public class MainActivity extends AppCompatActivity {
         Button btn = new Button(this);
         btn.setText(text);
         btn.setTextColor(positive
-                ? getResources().getColor(R.color.accent) : 0xFFC0C0C5);
+                ? getResources().getColor(R.color.accent)
+                : getResources().getColor(R.color.dialog_btn_text));
         btn.setTextSize(16);
         btn.setMinWidth(0);
         btn.setMinimumWidth(0);
@@ -1772,10 +1782,11 @@ public class MainActivity extends AppCompatActivity {
         return tv;
     }
 
-    /** 弹出设置菜单:均衡器 / 服务器设置 / 自动播放 / 时长过滤 / 刷新列表 / 屏幕信息 / 清除缓存 / 关于 */
+    /** 弹出设置菜单:均衡器 / 服务器设置 / 界面主题 / 自动播放 / 时长过滤 / 刷新列表 / 屏幕信息 / 清除缓存 / 关于 */
     private void showSettingsMenu() {
         final String[] itemTexts = {
             "均衡器", "服务器设置",
+            "界面主题: " + ThemeManager.modeName(ThemeManager.getMode(this)),
             "自动播放: " + (navidromeConfig.isAutoPlay() ? "开启" : "关闭"),
             "时长过滤设置", "刷新歌曲列表", "屏幕分辨率与DPI", "清除列表缓存", "关于"
         };
@@ -1783,7 +1794,8 @@ public class MainActivity extends AppCompatActivity {
         // 区块(1F3xx+),📡⏱🔄📐🗑 这类全显示空白;☁⌛↻✕ 为车机实测有字形。
         // 【2026-10-04 v5.7.369】▭(U+25AD)车机实测无字形(用户截图空白),换 GB2312
         // 一级符号 □(U+25A1);ⓘ(U+24D8)同属非 GB2312 高危字形,预防性换字母 i。
-        final String[] itemIcons = {"♪", "☁", "▶", "⌛", "↻", "□", "✕", "i"};
+        // 「昼」为 GB2312 一级汉字,字形零风险(◐/☀ 这类符号车机字体未实测)。
+        final String[] itemIcons = {"♪", "☁", "昼", "▶", "⌛", "↻", "□", "✕", "i"};
 
         // 自定义 Adapter:图标 + 文字 + 箭头
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
@@ -1827,16 +1839,18 @@ public class MainActivity extends AppCompatActivity {
                     needReload = true;
                     startActivity(new Intent(MainActivity.this, ServerSettingsActivity.class));
                 } else if (which == 2) {
-                    showAutoPlayDialog();
+                    showThemeDialog();
                 } else if (which == 3) {
-                    showDurationFilterDialog();
+                    showAutoPlayDialog();
                 } else if (which == 4) {
-                    refreshMusicList();
+                    showDurationFilterDialog();
                 } else if (which == 5) {
-                    showScreenInfoDialog();
+                    refreshMusicList();
                 } else if (which == 6) {
-                    showClearCacheDialog();
+                    showScreenInfoDialog();
                 } else if (which == 7) {
+                    showClearCacheDialog();
+                } else if (which == 8) {
                     showAboutDialog();
                 }
             }
@@ -1877,7 +1891,8 @@ public class MainActivity extends AppCompatActivity {
             dot.setTextSize(22);
             dot.setText(selected ? "●" : "○");
             dot.setTextColor(selected
-                    ? getResources().getColor(R.color.accent) : 0xFF6A6A70);
+                    ? getResources().getColor(R.color.accent)
+                    : getResources().getColor(R.color.pager_dot_off));
             dot.setPadding(0, 0, 18, 0);
 
             // 文字
@@ -1906,6 +1921,74 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // 底部按钮
+        Button btnCancel = createDialogButton("关闭", false);
+        btnCancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { dRef[0].dismiss(); }
+        });
+        sd.buttons.addView(btnCancel);
+
+        showDialogFull(sd.dialog);
+    }
+
+    /** 界面主题选择对话框:自动(按时间) / 白天 / 夜间(v6.4 昼夜自动切换) */
+    private void showThemeDialog() {
+        final SubDialog sd = createSubDialog("昼", "界面主题");
+        int current = ThemeManager.getMode(this);
+        final String[] items = {"自动 (7:00-19:00 白天,其余夜间)", "白天 (浅色)", "夜间 (深色)"};
+        final int[] values = {ThemeManager.MODE_AUTO, ThemeManager.MODE_DAY, ThemeManager.MODE_NIGHT};
+        final Dialog[] dRef = new Dialog[1];
+        dRef[0] = sd.dialog;
+
+        sd.body.addView(createInfoCard("选\"自动\"时按车机时间在白天浅色与夜间深色间自动切换;切换立即生效"));
+
+        for (int i = 0; i < items.length; i++) {
+            final int index = i;
+            final boolean selected = (current == values[i]);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(28, 22, 28, 22);
+            row.setBackgroundResource(R.drawable.bg_dialog_option);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            rowLp.bottomMargin = 12;
+            row.setLayoutParams(rowLp);
+
+            // 选中圆点
+            final TextView dot = new TextView(this);
+            dot.setTextSize(22);
+            dot.setText(selected ? "●" : "○");
+            dot.setTextColor(selected
+                    ? getResources().getColor(R.color.accent)
+                    : getResources().getColor(R.color.pager_dot_off));
+            dot.setPadding(0, 0, 18, 0);
+
+            TextView label = new TextView(this);
+            label.setText(items[i]);
+            label.setTextColor(getResources().getColor(R.color.text_primary));
+            label.setTextSize(20);
+            label.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+            row.addView(dot);
+            row.addView(label);
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    ThemeManager.setMode(MainActivity.this, values[index]);
+                    Toast.makeText(MainActivity.this,
+                            "界面主题: " + ThemeManager.modeName(values[index]),
+                            Toast.LENGTH_SHORT).show();
+                    dRef[0].dismiss();
+                    // setMode 内部走 setDefaultNightMode,所有 Activity 自动重建换肤
+                }
+            });
+
+            sd.body.addView(row);
+        }
+
         Button btnCancel = createDialogButton("关闭", false);
         btnCancel.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -2273,7 +2356,7 @@ public class MainActivity extends AppCompatActivity {
                 tvText.setText(item);
                 // 当前激活预设:高亮 + ✓;其余恢复默认色
                 if (isActive) {
-                    tvText.setTextColor(0xFF4FC3F7);
+                    tvText.setTextColor(getResources().getColor(R.color.accent));
                     tvText.setTypeface(null, android.graphics.Typeface.BOLD);
                     tvCheck.setVisibility(View.VISIBLE);
                 } else {
@@ -4780,6 +4863,10 @@ public class MainActivity extends AppCompatActivity {
         // 从其他页面返回时重新隐藏系统 UI
         hideSystemUI();
         Log.i(TAG, "[onResume] hideSystemUI=" + (System.currentTimeMillis() - t0) + "ms");
+        // 自动昼夜切换:恢复前台先对齐一次,再以分钟级轮询跨越时间分界(后台时无需运行)
+        ThemeManager.apply(this);
+        handler.removeCallbacks(themeTickTask);
+        handler.post(themeTickTask);
         // 从均衡器页面返回时刷新EQ按钮显示(可能修改了设置或新增了自定义预设)
         updateEqButtonText(null);
         // 从设置页面返回时,如果配置有更新则重新加载
@@ -4903,6 +4990,7 @@ public class MainActivity extends AppCompatActivity {
         // 停止帧率监控和日志刷新
         Choreographer.getInstance().removeFrameCallback(frameCallback);
         handler.removeCallbacks(logFlushTask);
+        handler.removeCallbacks(themeTickTask);
         // 清除 Handler 消息队列中所有残留回调(防止 Activity 销毁后 Runnable 仍执行)
         handler.removeCallbacksAndMessages(null);
         // 停止目录监听,释放 inotify 资源

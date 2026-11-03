@@ -1,69 +1,136 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主背景(深色基底,略带蓝调更现代) -->
-    <color name="bg_main">#16161C</color>
-    <color name="bg_title_bar">#1E1E26</color>
-    <color name="bg_control_bar">#1E1E26</color>
+    <!-- 昼间(白天)浅色配色 v6.4:自动昼夜切换的白天形态
+         夜间深色配色在 values-night/colors.xml,由 DayNight 主题按模式自动选用 -->
+    <color name="bg_main">#F2F3F7</color>
+    <color name="bg_title_bar">#FFFFFF</color>
+    <color name="bg_control_bar">#FFFFFF</color>
 
-    <!-- 列表(与主背景接近,消除色块感) -->
-    <color name="list_item_bg">#16161C</color>
-    <color name="playing_highlight">#1E2D3D</color>
+    <color name="list_item_bg">#FAFAFC</color>
+    <color name="playing_highlight">#D6E9F9</color>
 
-    <!-- 文本 -->
-    <color name="text_primary">#F0F0F0</color>
-    <color name="text_secondary">#9A9AA0</color>
-    <color name="text_title">#FFFFFF</color>
-    <color name="playing_text">#4FC3F7</color>
-    <color name="playing_text_sub">#82D4F7</color>
+    <color name="text_primary">#1A1D26</color>
+    <color name="text_secondary">#5F6470</color>
+    <color name="text_title">#10131A</color>
+    <color name="playing_text">#0288D1</color>
+    <color name="playing_text_sub">#42A5F5</color>
 
-    <!-- 强调色 -->
-    <color name="accent">#4FC3F7</color>
+    <color name="accent">#0288D1</color>
 
-    <!-- 按钮 -->
-    <color name="btn_bg">#2A2A34</color>
-    <color name="btn_text">#FFFFFF</color>
+    <color name="btn_bg">#E8EAF0</color>
+    <color name="btn_text">#1A1D26</color>
     <color name="btn_play_bg">#4FC3F7</color>
     <color name="btn_play_text">#0A1A2A</color>
-    <!-- 播放状态:蓝色 / 暂停状态:红色 -->
     <color name="btn_playing_bg">#1E88E5</color>
     <color name="btn_playing_text">#FFFFFF</color>
     <color name="btn_paused_bg">#E53935</color>
     <color name="btn_paused_text">#FFFFFF</color>
 
-    <!-- 搜索栏 -->
-    <color name="search_bg">#22222A</color>
-    <color name="search_hint">#6A6A70</color>
+    <color name="search_bg">#F0F2F7</color>
+    <color name="search_hint">#9AA0AE</color>
 
-    <!-- 封面占位 -->
-    <color name="cover_placeholder">#2A2A34</color>
+    <color name="cover_placeholder">#E2E5EC</color>
 
-    <!-- Navidrome 来源标识 -->
-    <!-- 来源状态点:绿=已缓存本地(完成态),蓝灰=云端未缓存(点播放即按需下载) -->
-    <color name="source_network">#78909C</color>
-    <color name="source_local">#66BB6A</color>
+    <color name="source_network">#607D8B</color>
+    <color name="source_local">#43A047</color>
 
-    <!-- 服务器状态 -->
-    <color name="server_status_connected">#66BB6A</color>
-    <color name="server_status_disconnected">#E53935</color>
-    <color name="server_status_connecting">#FFA726</color>
-    <color name="server_status_retrying">#FF7043</color>
-    <color name="server_status_offline">#78909C</color>
+    <color name="server_status_connected">#43A047</color>
+    <color name="server_status_disconnected">#D32F2F</color>
+    <color name="server_status_connecting">#F57C00</color>
+    <color name="server_status_retrying">#E64A19</color>
+    <color name="server_status_offline">#607D8B</color>
 
-    <!-- 收藏爱心 -->
-    <color name="favorite_active">#FF5252</color>
-    <color name="favorite_inactive">#6A6A70</color>
+    <color name="favorite_active">#E53935</color>
+    <color name="favorite_inactive">#B4BAC6</color>
 
-    <!-- 均衡器 -->
-    <color name="eq_card_bg">#1E1E26</color>
-    <color name="eq_preset_bg">#2A2A34</color>
+    <color name="eq_card_bg">#F4F5F9</color>
+    <color name="eq_preset_bg">#E8EAF0</color>
     <color name="eq_preset_selected_bg">#4FC3F7</color>
-    <color name="eq_preset_text">#C0C0C5</color>
+    <color name="eq_preset_text">#3A3F4C</color>
     <color name="eq_preset_selected_text">#0A1A2A</color>
-    <color name="eq_band_panel_bg">#1A1A20</color>
-    <color name="eq_freq_label">#9A9AA0</color>
-    <color name="eq_value_label">#4FC3F7</color>
-    <color name="eq_hint_text">#6A6A70</color>
-    <!-- EQ 启用开关文字色(开=白,关=中灰) v5.7.373 -->
-    <color name="eq_toggle_text_on">#FFFFFF</color>
-    <color name="eq_toggle_text_off">#9A9AA4</color>
+    <color name="eq_band_panel_bg">#E4E7EF</color>
+    <color name="eq_freq_label">#6B7080</color>
+    <color name="eq_value_label">#0288D1</color>
+    <color name="eq_hint_text">#9AA0AE</color>
+    <color name="eq_toggle_text_on">#0288D1</color>
+    <color name="eq_toggle_text_off">#9AA0AE</color>
+
+    <color name="title_grad_start">#FFFFFF</color>
+    <color name="title_grad_end">#EFF1F6</color>
+    <color name="title_line">#D5DAE6</color>
+    <color name="btn_grad_start">#E8EAF0</color>
+    <color name="btn_grad_end">#DCE0E9</color>
+    <color name="btn_border">#C8CCD8</color>
+    <color name="btn_grad_press_start">#D0D5E0</color>
+    <color name="btn_grad_press_end">#C2C8D6</color>
+    <color name="btn_border_press">#A8B0C0</color>
+    <color name="search_grad_start">#FAFBFD</color>
+    <color name="search_grad_end">#F0F2F7</color>
+    <color name="search_border">#D5D9E4</color>
+    <color name="dialog_btn_grad_start">#F0F2F7</color>
+    <color name="dialog_btn_grad_end">#E2E5EE</color>
+    <color name="pos_btn_press_a">#C4E4F8</color>
+    <color name="pos_btn_press_b">#9ED0F0</color>
+    <color name="pos_btn_a">#D2E9FA</color>
+    <color name="pos_btn_b">#ABD8F3</color>
+    <color name="card_grad_a">#FFFFFF</color>
+    <color name="card_grad_b">#F1F3F8</color>
+    <color name="card_selected">#D6E9F9</color>
+    <color name="accent_line">#8FC4E8</color>
+    <color name="info_grad_a">#FFFFFF</color>
+    <color name="info_grad_b">#F3F5FA</color>
+    <color name="info_border">#D8DCE6</color>
+    <color name="eq_band_grad_a">#E4E7EF</color>
+    <color name="preset_grad_a">#EDF0F6</color>
+    <color name="preset_border">#C5CAD8</color>
+    <color name="toggle_track_off">#C5CAD6</color>
+    <color name="toggle_rim">#66B2EBFF</color>
+    <color name="thumb_tint">#E8F4FE</color>
+    <color name="thumb_border">#B8C4D8</color>
+    <color name="index_letter_bg">#D9EDF0F7</color>
+    <color name="side_index_shadow">#33000000</color>
+    <color name="close_btn_border">#C0C6D4</color>
+    <color name="circle_grad_a">#E2E5EE</color>
+    <color name="circle_grad_b">#D6DAE5</color>
+    <color name="circle_border">#C4CAD8</color>
+    <color name="circle_border_press">#9AA4B8</color>
+    <color name="seek_track">#D8DCE4</color>
+    <color name="seek_center_line">#C0C6D4</color>
+    <color name="eq_header_a">#1A73B8</color>
+    <color name="eq_header_b">#2980B9</color>
+    <color name="accent_light">#29B6F6</color>
+    <color name="accent_deep">#0288D1</color>
+    <color name="accent_deeper">#01579B</color>
+    <color name="accent_pale">#81D4FA</color>
+    <color name="accent_pale2">#B3E5FC</color>
+    <color name="accent_glow">#664FC3F7</color>
+    <color name="accent_bright">#4FC3F7</color>
+    <color name="paused_bright">#FF5252</color>
+    <color name="playing_deep">#1565C0</color>
+    <color name="playing_mid">#1976D2</color>
+    <color name="playing_bright">#42A5F5</color>
+    <color name="playing_soft">#64B5F6</color>
+    <color name="playing_pale">#90CAF9</color>
+    <color name="paused_deep">#C62828</color>
+    <color name="paused_deeper">#B71C1C</color>
+    <color name="paused_soft">#EF5350</color>
+    <color name="paused_pale">#FF8A80</color>
+    <color name="source_green_deep">#43A047</color>
+    <color name="launcher_red">#FA2D48</color>
+    <color name="launcher_red2">#FF6B6B</color>
+    <color name="icon_note">#8A90A0</color>
+    <color name="dialog_btn_text">#3A3F4C</color>
+    <color name="pager_dot_off">#B4BAC6</color>
+    <color name="eq_quick_bg">#E3F1FD</color>
+    <color name="eq_quick_text">#14243A</color>
+    <color name="eq_quick_accent">#1565C0</color>
+    <color name="index_disabled">#C5CAD6</color>
+    <color name="accent_band">#331292D0</color>
+    <color name="lrc_bg">#F2F3F7</color>
+    <color name="lrc_no_lrc">#995F6470</color>
+    <color name="lrc_current">#10131A</color>
+    <color name="lrc_normal">#CC3A3F4C</color>
+    <!-- 歌词封面遮罩:夜间蒙黑压暗,白天蒙白提亮(保证深色歌词字可读) -->
+    <color name="lrc_scrim">#B3FFFFFF</color>
+    <color name="white_33">#55FFFFFF</color>
 </resources>

@@ -5,8 +5,8 @@
         <shape android:shape="rectangle">
             <gradient
                 android:angle="135"
-                android:startColor="#55555F"
-                android:endColor="#45454F" />
+                android:startColor="@color/btn_grad_press_start"
+                android:endColor="@color/btn_grad_press_end" />
             <corners android:radius="14dp" />
         </shape>
     </item>
@@ -14,10 +14,10 @@
         <shape android:shape="rectangle">
             <gradient
                 android:angle="135"
-                android:startColor="#3A3A44"
-                android:endColor="#2E2E38" />
+                android:startColor="@color/dialog_btn_grad_end"
+                android:endColor="@color/dialog_btn_grad_start" />
             <corners android:radius="14dp" />
-            <stroke android:width="1dp" android:color="#45454F" />
+            <stroke android:width="1dp" android:color="@color/btn_grad_press_end" />
         </shape>
     </item>
 </selector>

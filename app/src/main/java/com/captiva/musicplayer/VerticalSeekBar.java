@@ -22,13 +22,14 @@ public class VerticalSeekBar extends SeekBar {
     private Paint thumbBorderPaint;
     private Paint thumbGlowPaint;
 
-    private int trackColor = 0xFF2A2A34;
-    private int progressColor = 0xFF4FC3F7;
-    private int progressColorDark = 0xFF0288D1;
-    private int centerLineColor = 0xFF4A4A56;
-    private int thumbColor = 0xFFFFFFFF;
-    private int thumbBorderColor = 0xFF4FC3F7;
-    private int thumbGlowColor = 0x554FC3F7;
+    // 颜色默认值在 init() 里从资源解析:白天/夜间两套配色自动跟随(v6.4)
+    private int trackColor;
+    private int progressColor;
+    private int progressColorDark;
+    private int centerLineColor;
+    private int thumbColor;          // 白色手柄内圆,两套主题同值
+    private int thumbBorderColor;
+    private int thumbGlowColor;
 
     private int trackWidth = 8;  // dp
     private int thumbRadius = 12; // dp
@@ -55,6 +56,14 @@ public class VerticalSeekBar extends SeekBar {
 
     private void init(Context context) {
         density = context.getResources().getDisplayMetrics().density;
+        // 从当前主题资源取色:DayNight 切换时 Activity 重建,这里拿到的就是新配色
+        trackColor = context.getResources().getColor(R.color.seek_track);
+        progressColor = context.getResources().getColor(R.color.accent_bright);
+        progressColorDark = context.getResources().getColor(R.color.accent_deep);
+        centerLineColor = context.getResources().getColor(R.color.seek_center_line);
+        thumbColor = 0xFFFFFFFF;
+        thumbBorderColor = context.getResources().getColor(R.color.accent_bright);
+        thumbGlowColor = context.getResources().getColor(R.color.accent_glow);
 
         trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         trackPaint.setColor(trackColor);

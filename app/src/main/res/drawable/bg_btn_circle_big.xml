@@ -5,9 +5,9 @@
         <shape android:shape="oval">
             <gradient
                 android:angle="135"
-                android:startColor="#81D4FA"
-                android:endColor="#29B6F6" />
-            <stroke android:width="1dp" android:color="#B3E5FC" />
+                android:startColor="@color/accent_pale"
+                android:endColor="@color/accent_light" />
+            <stroke android:width="1dp" android:color="@color/accent_pale2" />
             <size android:width="80dp" android:height="80dp" />
         </shape>
     </item>
@@ -15,9 +15,9 @@
         <shape android:shape="oval">
             <gradient
                 android:angle="135"
-                android:startColor="#4FC3F7"
-                android:endColor="#0288D1" />
-            <stroke android:width="1dp" android:color="#81D4FA" />
+                android:startColor="@color/accent_bright"
+                android:endColor="@color/accent_deep" />
+            <stroke android:width="1dp" android:color="@color/accent_pale" />
             <size android:width="80dp" android:height="80dp" />
         </shape>
     </item>

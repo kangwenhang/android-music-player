@@ -20,7 +20,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="♪"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_title"
             android:textSize="28sp"
             android:layout_marginRight="12dp" />
 
@@ -30,7 +30,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="均衡器模式"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_title"
             android:textSize="26sp"
             android:textStyle="bold" />
 
@@ -43,7 +43,7 @@
             android:padding="0dp"
             android:background="@drawable/bg_dialog_close"
             android:text="✕"
-            android:textColor="#FFFFFF"
+            android:textColor="@color/text_title"
             android:textSize="22sp" />
     </LinearLayout>
 
@@ -57,8 +57,8 @@
         android:paddingTop="10dp"
         android:paddingBottom="10dp"
         android:textSize="17sp"
-        android:textColor="#8AB4FF"
-        android:background="#1A2A4A"
+        android:textColor="@color/eq_quick_accent"
+        android:background="@color/eq_quick_bg"
         android:visibility="gone" />
 
     <!-- 预设列表(卡片行,Java 填充) -->

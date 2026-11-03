@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 车机深色主题(夜间)配色,高对比度,适配安卓 4.0+
+     浅色(白天)配色在默认 values/colors.xml,由 DayNight 主题按模式自动选用 -->
+<resources>
+    <!-- 主背景(深色基底,略带蓝调更现代) -->
+    <color name="bg_main">#16161C</color>
+    <color name="bg_title_bar">#1E1E26</color>
+    <color name="bg_control_bar">#1E1E26</color>
+
+    <!-- 列表(与主背景接近,消除色块感) -->
+    <color name="list_item_bg">#16161C</color>
+    <color name="playing_highlight">#1E2D3D</color>
+
+    <!-- 文本 -->
+    <color name="text_primary">#F0F0F0</color>
+    <color name="text_secondary">#9A9AA0</color>
+    <color name="text_title">#FFFFFF</color>
+    <color name="playing_text">#4FC3F7</color>
+    <color name="playing_text_sub">#82D4F7</color>
+
+    <!-- 强调色 -->
+    <color name="accent">#4FC3F7</color>
+
+    <!-- 按钮 -->
+    <color name="btn_bg">#2A2A34</color>
+    <color name="btn_text">#FFFFFF</color>
+    <color name="btn_play_bg">#4FC3F7</color>
+    <color name="btn_play_text">#0A1A2A</color>
+    <!-- 播放状态:蓝色 / 暂停状态:红色 -->
+    <color name="btn_playing_bg">#1E88E5</color>
+    <color name="btn_playing_text">#FFFFFF</color>
+    <color name="btn_paused_bg">#E53935</color>
+    <color name="btn_paused_text">#FFFFFF</color>
+
+    <!-- 搜索栏 -->
+    <color name="search_bg">#22222A</color>
+    <color name="search_hint">#6A6A70</color>
+
+    <!-- 封面占位 -->
+    <color name="cover_placeholder">#2A2A34</color>
+
+    <!-- Navidrome 来源标识 -->
+    <!-- 来源状态点:绿=已缓存本地(完成态),蓝灰=云端未缓存(点播放即按需下载) -->
+    <color name="source_network">#78909C</color>
+    <color name="source_local">#66BB6A</color>
+
+    <!-- 服务器状态 -->
+    <color name="server_status_connected">#66BB6A</color>
+    <color name="server_status_disconnected">#E53935</color>
+    <color name="server_status_connecting">#FFA726</color>
+    <color name="server_status_retrying">#FF7043</color>
+    <color name="server_status_offline">#78909C</color>
+
+    <!-- 收藏爱心 -->
+    <color name="favorite_active">#FF5252</color>
+    <color name="favorite_inactive">#6A6A70</color>
+
+    <!-- 均衡器 -->
+    <color name="eq_card_bg">#1E1E26</color>
+    <color name="eq_preset_bg">#2A2A34</color>
+    <color name="eq_preset_selected_bg">#4FC3F7</color>
+    <color name="eq_preset_text">#C0C0C5</color>
+    <color name="eq_preset_selected_text">#0A1A2A</color>
+    <color name="eq_band_panel_bg">#1A1A20</color>
+    <color name="eq_freq_label">#9A9AA0</color>
+    <color name="eq_value_label">#4FC3F7</color>
+    <color name="eq_hint_text">#6A6A70</color>
+    <!-- EQ 启用开关文字色(开=白,关=中灰) v5.7.373 -->
+    <color name="eq_toggle_text_on">#FFFFFF</color>
+    <color name="eq_toggle_text_off">#9A9AA4</color>
+
+    <!-- ===== 昼夜自动切换新增(v6.4):以下资源两套主题各配一份 ===== -->
+    <!-- 标题栏/控制栏渐变与高光线 -->
+    <color name="title_grad_start">#262632</color>
+    <color name="title_grad_end">#1C1C24</color>
+    <color name="title_line">#2A3A4A</color>
+    <!-- 普通按钮渐变/边框(常态+按压态) -->
+    <color name="btn_grad_start">#2A2A34</color>
+    <color name="btn_grad_end">#22222C</color>
+    <color name="btn_border">#333340</color>
+    <color name="btn_grad_press_start">#55555F</color>
+    <color name="btn_grad_press_end">#45454F</color>
+    <color name="btn_border_press">#5A5A66</color>
+    <!-- 搜索栏渐变/边框 -->
+    <color name="search_grad_start">#24242E</color>
+    <color name="search_grad_end">#1E1E28</color>
+    <color name="search_border">#2E2E3A</color>
+    <!-- 弹窗按钮(负面灰) -->
+    <color name="dialog_btn_grad_start">#2E2E38</color>
+    <color name="dialog_btn_grad_end">#3A3A44</color>
+    <!-- 弹窗按钮(正面蓝) -->
+    <color name="pos_btn_press_a">#2A4050</color>
+    <color name="pos_btn_press_b">#3A6080</color>
+    <color name="pos_btn_a">#1E3545</color>
+    <color name="pos_btn_b">#2A5070</color>
+    <!-- 弹窗选项卡片 -->
+    <color name="card_grad_a">#2A3540</color>
+    <color name="card_grad_b">#222230</color>
+    <color name="card_selected">#1E2D3D</color>
+    <color name="accent_line">#2A5070</color>
+    <!-- 信息卡片(控制栏封面卡/EQ卡) -->
+    <color name="info_grad_a">#242430</color>
+    <color name="info_grad_b">#1C1C26</color>
+    <color name="info_border">#36363F</color>
+    <!-- EQ 频段面板 -->
+    <color name="eq_band_grad_a">#1A1A22</color>
+    <color name="preset_grad_a">#262630</color>
+    <color name="preset_border">#3A3A46</color>
+    <!-- EQ 开关轨道/描边 -->
+    <color name="toggle_track_off">#3A3A42</color>
+    <color name="toggle_rim">#66B2EBFF</color>
+    <!-- 滑杆手柄 -->
+    <color name="thumb_tint">#DDEEFF</color>
+    <color name="thumb_border">#C8C8D0</color>
+    <!-- 侧边字母索引 -->
+    <color name="index_letter_bg">#D91E1E26</color>
+    <color name="side_index_shadow">#33000000</color>
+    <!-- 弹窗关闭按钮/圆形按钮 -->
+    <color name="close_btn_border">#40404A</color>
+    <color name="circle_grad_a">#42424C</color>
+    <color name="circle_grad_b">#363640</color>
+    <color name="circle_border">#4A4A54</color>
+    <color name="circle_border_press">#6A6A76</color>
+    <!-- 垂直滑杆(EQ 频段) -->
+    <color name="seek_track">#2A2A34</color>
+    <color name="seek_center_line">#4A4A56</color>
+    <!-- EQ 头部蓝渐变(两套主题同值) -->
+    <color name="eq_header_a">#1A73B8</color>
+    <color name="eq_header_b">#2980B9</color>
+    <!-- 播放大圆钮蓝色系(两套同值) -->
+    <color name="accent_light">#29B6F6</color>
+    <color name="accent_deep">#0288D1</color>
+    <color name="accent_deeper">#01579B</color>
+    <color name="accent_pale">#81D4FA</color>
+    <color name="accent_pale2">#B3E5FC</color>
+    <color name="accent_glow">#664FC3F7</color>
+    <!-- 亮蓝(渐变填充用,两套同值;文本用 accent 会翻转) -->
+    <color name="accent_bright">#4FC3F7</color>
+    <color name="paused_bright">#FF5252</color>
+    <color name="playing_deep">#1565C0</color>
+    <color name="playing_mid">#1976D2</color>
+    <color name="playing_bright">#42A5F5</color>
+    <color name="playing_soft">#64B5F6</color>
+    <color name="playing_pale">#90CAF9</color>
+    <!-- 暂停红色系(两套同值) -->
+    <color name="paused_deep">#C62828</color>
+    <color name="paused_deeper">#B71C1C</color>
+    <color name="paused_soft">#EF5350</color>
+    <color name="paused_pale">#FF8A80</color>
+    <!-- 来源绿深色 / 启动图标(两套同值) -->
+    <color name="source_green_deep">#43A047</color>
+    <color name="launcher_red">#FA2D48</color>
+    <color name="launcher_red2">#FF6B6B</color>
+    <!-- 歌单封面占位音符图标:夜间白,昼间中灰 -->
+    <color name="icon_note">#FFFFFF</color>
+    <!-- Java 层硬编码色资源化 -->
+    <color name="dialog_btn_text">#C0C0C5</color>
+    <color name="pager_dot_off">#6A6A70</color>
+    <!-- EQ 快速弹窗 -->
+    <color name="eq_quick_bg">#1A2A4A</color>
+    <color name="eq_quick_text">#FFFFFF</color>
+    <color name="eq_quick_accent">#8AB4FF</color>
+    <!-- 侧边索引禁用态/色带 -->
+    <color name="index_disabled">#4A4A52</color>
+    <color name="accent_band">#334FC3F7</color>
+    <!-- 歌词页 -->
+    <color name="lrc_bg">#1A1A1E</color>
+    <color name="lrc_no_lrc">#99FFFFFF</color>
+    <color name="lrc_current">#FFFFFF</color>
+    <color name="lrc_normal">#CCFFFFFF</color>
+    <color name="lrc_scrim">#99000000</color>
+    <!-- 半透明白(两套同值,阴影/描边用) -->
+    <color name="white_33">#55FFFFFF</color>
+</resources>

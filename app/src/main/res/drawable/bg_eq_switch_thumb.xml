@@ -10,13 +10,13 @@
             <gradient
                 android:angle="135"
                 android:startColor="#FFFFFF"
-                android:endColor="#DDEEFF" />
+                android:endColor="@color/thumb_tint" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
             <size android:width="26dp" android:height="26dp" />
-            <solid android:color="#C8C8D0" />
+            <solid android:color="@color/thumb_border" />
         </shape>
     </item>
 </selector>
