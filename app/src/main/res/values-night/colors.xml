@@ -114,7 +114,8 @@
     <color name="thumb_border">#C8C8D0</color>
     <!-- 侧边字母索引 -->
     <color name="index_letter_bg">#D91E1E26</color>
-    <color name="side_index_shadow">#33000000</color>
+    <!-- 索引条浮层底色:95% 不透明的深灰(与浅色模式同因:压住底下内容保证字母可读) -->
+    <color name="side_index_shadow">#F2262830</color>
     <!-- 弹窗关闭按钮/圆形按钮 -->
     <color name="close_btn_border">#40404A</color>
     <color name="circle_grad_a">#42424C</color>

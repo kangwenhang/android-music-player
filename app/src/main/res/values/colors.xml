@@ -92,7 +92,9 @@
     <color name="thumb_tint">#E8F4FE</color>
     <color name="thumb_border">#B8C4D8</color>
     <color name="index_letter_bg">#D9EDF0F7</color>
-    <color name="side_index_shadow">#33000000</color>
+    <!-- 索引条浮层底色:95% 不透明的浅灰白(2026-11-04 用户反馈:20% 半透明时
+         播放行蓝渐变透上来,字母看不清;提底子不透明度后任何内容上都可读) -->
+    <color name="side_index_shadow">#F2F7F8FA</color>
     <color name="close_btn_border">#A8AFC0</color>
     <color name="circle_grad_a">#E2E5EE</color>
     <color name="circle_grad_b">#D6DAE5</color>
