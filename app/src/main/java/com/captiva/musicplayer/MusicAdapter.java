@@ -218,16 +218,17 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         // 缓存状态点(2026-11-03 用户决策):由"来源标识"改为"缓存状态"——
         // 绿=已缓存(MusicService 缓存完成后 bean 原地 setNetwork(false),同一判定),
         // 红=云端未缓存。颜色直接复用右上角服务器状态点的红绿,自带日夜两套;
-        // 圆形(OVAL)与右上角一致;尺寸 6dp 方块 → 12dp 圆,电阻屏上看得清。
+        // 圆点改方点(2026-11-04 用户决策):与右上角服务器状态圆点形态区分开,
+        // 颜色仍复用同一套红绿;尺寸不变 12dp,电阻屏上看得清。
         // 预建两个 Drawable 实例在 bind 时换引用(零分配,不 mutate 共享实例)。
         dotCached = new android.graphics.drawable.GradientDrawable();
         ((android.graphics.drawable.GradientDrawable) dotCached).setShape(
-                android.graphics.drawable.GradientDrawable.OVAL);
+                android.graphics.drawable.GradientDrawable.RECTANGLE);
         ((android.graphics.drawable.GradientDrawable) dotCached)
                 .setColor(ContextCompat.getColor(context, R.color.server_status_connected));
         dotNotCached = new android.graphics.drawable.GradientDrawable();
         ((android.graphics.drawable.GradientDrawable) dotNotCached).setShape(
-                android.graphics.drawable.GradientDrawable.OVAL);
+                android.graphics.drawable.GradientDrawable.RECTANGLE);
         ((android.graphics.drawable.GradientDrawable) dotNotCached)
                 .setColor(ContextCompat.getColor(context, R.color.server_status_disconnected));
         coverSizeList = (int) context.getResources().getDimension(R.dimen.cover_size_list);
@@ -1251,7 +1252,7 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
         textCol.addView(tvArtist, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        // 缓存状态点(圆形,初始先给绿——bind 时会按实际状态换)
+        // 缓存状态点(方形,初始先给绿——bind 时会按实际状态换)
         View vSource = new View(context);
         vSource.setId(R.id.v_source);
         vSource.setBackgroundDrawable(dotCached);
