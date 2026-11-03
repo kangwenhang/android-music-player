@@ -15,6 +15,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- 定位(日出日落主题切换用,取一次坐标后持久化) -->
+    <!-- API 17 无运行时权限,清单声明即授;定位失败则回退固定时间切换 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <application
         android:name=".App"
         android:allowBackup="true"

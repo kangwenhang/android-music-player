@@ -1937,12 +1937,19 @@ public class MainActivity extends AppCompatActivity {
     private void showThemeDialog() {
         final SubDialog sd = createSubDialog("昼", "界面主题");
         int current = ThemeManager.getMode(this);
-        final String[] items = {"自动 (7:00-19:00 白天,其余夜间)", "白天 (浅色)", "夜间 (深色)"};
+        // 自动模式的时间源:已定位过 → 按日出日落(随季节自适应);未定位 → 固定 7-19
+        final String[] items = {
+            ThemeManager.getCoords(this) == null
+                ? "自动 (7:00-19:00 白天,其余夜间)"
+                : "自动 (按日出日落切换)",
+            "白天 (浅色)", "夜间 (深色)"};
         final int[] values = {ThemeManager.MODE_AUTO, ThemeManager.MODE_DAY, ThemeManager.MODE_NIGHT};
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
-        sd.body.addView(createInfoCard("选\"自动\"时按车机时间在白天浅色与夜间深色间自动切换;切换立即生效"));
+        sd.body.addView(createInfoCard(ThemeManager.getCoords(this) == null
+                ? "选\"自动\"按 7:00-19:00 固定时间切换;想按日出日落切换,点下方\"日出日落定位\"记录一次位置"
+                : "选\"自动\"按本地日出日落时间自动切换(随季节自适应);点下方可重新定位"));
 
         for (int i = 0; i < items.length; i++) {
             final int index = i;
@@ -1991,6 +1998,9 @@ public class MainActivity extends AppCompatActivity {
             sd.body.addView(row);
         }
 
+        // 日出日落定位入口(定位一次持久化,失败回退固定时间切换)
+        sd.body.addView(createSunPosRow(sd));
+
         Button btnCancel = createDialogButton("关闭", false);
         btnCancel.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -1999,6 +2009,164 @@ public class MainActivity extends AppCompatActivity {
         sd.buttons.addView(btnCancel);
 
         showDialogFull(sd.dialog);
+    }
+
+    /** 日出日落定位行(界面主题弹窗内):显示当前坐标状态,点击发起一次定位 */
+    private View createSunPosRow(final SubDialog sd) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(28, 22, 28, 22);
+        row.setBackgroundResource(R.drawable.bg_dialog_option);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = 12;
+        row.setLayoutParams(lp);
+
+        TextView label = new TextView(this);
+        label.setTextSize(19);
+        float[] ll = ThemeManager.getCoords(this);
+        if (ll == null) {
+            label.setText("◎ 日出日落定位: 未设置 (点击定位)");
+            label.setTextColor(getResources().getColor(R.color.text_secondary));
+        } else {
+            java.util.Calendar c = java.util.Calendar.getInstance();
+            long[] rs = SunTime.sunRiseSetUtcMillis(
+                    c.get(java.util.Calendar.YEAR),
+                    c.get(java.util.Calendar.MONTH) + 1,
+                    c.get(java.util.Calendar.DAY_OF_MONTH), ll[0], ll[1]);
+            String extra = rs == null ? "" : String.format(java.util.Locale.CHINA,
+                    "  今日 %s~%s", formatClock(rs[0]), formatClock(rs[1]));
+            label.setText(String.format(java.util.Locale.CHINA,
+                    "◎ 已定位: %.2f, %.2f%s (点击重新定位)", ll[0], ll[1], extra));
+            label.setTextColor(getResources().getColor(R.color.text_primary));
+        }
+        row.addView(label);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { requestLocationOnce(); }
+        });
+        return row;
+    }
+
+    /** 用系统定位服务取一次坐标(日出日落切换用);失败自动回退固定时间切换 */
+    private void requestLocationOnce() {
+        final android.location.LocationManager lm =
+                (android.location.LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) {
+            Toast.makeText(this, "设备无定位服务,自动模式仍按 7:00-19:00 切换",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final String[] provs = {android.location.LocationManager.GPS_PROVIDER,
+                android.location.LocationManager.NETWORK_PROVIDER,
+                android.location.LocationManager.PASSIVE_PROVIDER};
+        // 1) 优先 30 分钟内的缓存定位:车机开机后系统常已有GPS/网络缓存,免等
+        android.location.Location best = null;
+        for (String p : provs) {
+            try {
+                android.location.Location l = lm.getLastKnownLocation(p);
+                if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+            } catch (SecurityException ignored) {
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (best != null && System.currentTimeMillis() - best.getTime() < 30 * 60 * 1000L) {
+            applyCoords(best);
+            return;
+        }
+        // 2) 主动请求单次定位
+        Toast.makeText(this, "正在定位,请稍候...", Toast.LENGTH_SHORT).show();
+        final android.location.LocationListener[] holder =
+                new android.location.LocationListener[1];
+        android.location.LocationListener listener =
+                new android.location.LocationListener() {
+                    @Override
+                    public void onLocationChanged(android.location.Location l) {
+                        finishSunLocate(lm, holder[0]);
+                        applyCoords(l);
+                    }
+
+                    @Override
+                    public void onStatusChanged(String p, int s, android.os.Bundle e) {
+                    }
+
+                    @Override
+                    public void onProviderEnabled(String p) {
+                    }
+
+                    @Override
+                    public void onProviderDisabled(String p) {
+                    }
+                };
+        holder[0] = listener;
+        boolean requested = false;
+        for (String p : provs) {
+            try {
+                lm.requestSingleUpdate(p, listener, Looper.getMainLooper());
+                requested = true;
+            } catch (SecurityException ignored) {
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (!requested) {
+            Toast.makeText(this, "定位不可用(定位服务未开启),自动模式仍按 7:00-19:00 切换",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        // 30 秒超时兜底:无 GPS/蜂窝的纯 WiFi 车机可能永远不回调
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                finishSunLocate(lm, holder[0]);
+                Toast.makeText(MainActivity.this,
+                        "定位超时(车机无 GPS/蜂窝网络),自动模式仍按 7:00-19:00 切换",
+                        Toast.LENGTH_LONG).show();
+            }
+        }, 30000L);
+    }
+
+    /** 结束一次定位监听(防泄漏) */
+    private void finishSunLocate(android.location.LocationManager lm,
+                                 android.location.LocationListener l) {
+        if (l != null) {
+            try {
+                lm.removeUpdates(l);
+            } catch (SecurityException ignored) {
+            }
+        }
+    }
+
+    /** 定位结果落地:存坐标 + Toast 显示今日日出日落时间 */
+    private void applyCoords(android.location.Location loc) {
+        double lat = loc.getLatitude();
+        double lon = loc.getLongitude();
+        ThemeManager.setCoords(this, lat, lon);
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        long[] rs = SunTime.sunRiseSetUtcMillis(
+                c.get(java.util.Calendar.YEAR),
+                c.get(java.util.Calendar.MONTH) + 1,
+                c.get(java.util.Calendar.DAY_OF_MONTH), lat, lon);
+        String msg;
+        if (rs == null) {
+            msg = String.format(java.util.Locale.CHINA,
+                    "位置已记录: %.2f, %.2f", lat, lon);
+        } else {
+            msg = String.format(java.util.Locale.CHINA,
+                    "位置已记录: %.2f, %.2f\n今日日出 %s / 日落 %s (自动模式按此切换)",
+                    lat, lon, formatClock(rs[0]), formatClock(rs[1]));
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
+    /** epoch 毫秒 → HH:mm(本地时区) */
+    private String formatClock(long epochMs) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(epochMs);
+        return String.format(java.util.Locale.CHINA, "%02d:%02d",
+                c.get(java.util.Calendar.HOUR_OF_DAY),
+                c.get(java.util.Calendar.MINUTE));
     }
 
     /** 清除歌曲列表缓存确认对话框(全屏美化) */

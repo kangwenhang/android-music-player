@@ -33,6 +33,9 @@ public final class ThemeManager {
 
     private static final String PREFS = "theme_prefs";
     private static final String KEY_MODE = "ui_theme_mode";
+    /** 日出日落切换的坐标(定位一次后持久化) */
+    private static final String KEY_LAT = "sun_lat";
+    private static final String KEY_LON = "sun_lon";
 
     private ThemeManager() {}
 
@@ -49,6 +52,19 @@ public final class ThemeManager {
         apply(ctx);
     }
 
+    /** 读取定位到的坐标 {纬度, 经度};未定位过返回 null */
+    public static float[] getCoords(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!sp.contains(KEY_LAT) || !sp.contains(KEY_LON)) return null;
+        return new float[]{sp.getFloat(KEY_LAT, 999f), sp.getFloat(KEY_LON, 999f)};
+    }
+
+    /** 保存定位坐标(日出日落切换立即生效) */
+    public static void setCoords(Context ctx, double lat, double lon) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putFloat(KEY_LAT, (float) lat).putFloat(KEY_LON, (float) lon).apply();
+    }
+
     /** 按当前用户模式把 AppCompat 的夜间档位设置好(进程启动时也要调) */
     public static void apply(Context ctx) {
         int mode = getMode(ctx);
@@ -62,7 +78,7 @@ public final class ThemeManager {
                 break;
             case MODE_AUTO:
             default:
-                nightMode = isDayNow()
+                nightMode = isDayNow(ctx)
                         ? AppCompatDelegate.MODE_NIGHT_NO
                         : AppCompatDelegate.MODE_NIGHT_YES;
                 break;
@@ -75,17 +91,31 @@ public final class ThemeManager {
         }
     }
 
+    /** 当前时刻是否属于白天 */
+    public static boolean isDayNow(Context ctx) {
+        java.util.Calendar now = java.util.Calendar.getInstance();
+        // 优先按日出日落(已定位过):天文时间随季节自适应,冬夏切换点自然偏移
+        float[] ll = getCoords(ctx);
+        if (ll != null) {
+            long[] rs = SunTime.sunRiseSetUtcMillis(
+                    now.get(java.util.Calendar.YEAR),
+                    now.get(java.util.Calendar.MONTH) + 1,
+                    now.get(java.util.Calendar.DAY_OF_MONTH), ll[0], ll[1]);
+            if (rs != null) {
+                long t = now.getTimeInMillis();
+                return t >= rs[0] && t < rs[1];
+            }
+            // 极昼/极夜(国内实际碰不到):落到下面的固定时间兜底
+        }
+        int h = now.get(java.util.Calendar.HOUR_OF_DAY);
+        return h >= AUTO_DAY_START_HOUR && h < AUTO_DAY_END_HOUR;
+    }
+
     /** 自动模式专用:每分钟调一次,时间越过昼夜分界时自动切换 */
     public static void checkAutoTick(Context ctx) {
         if (getMode(ctx) == MODE_AUTO) {
             apply(ctx);
         }
-    }
-
-    /** 当前时刻是否属于白天(7:00-19:00) */
-    public static boolean isDayNow() {
-        int h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY);
-        return h >= AUTO_DAY_START_HOUR && h < AUTO_DAY_END_HOUR;
     }
 
     /** 模式的中文显示名(设置界面用) */
