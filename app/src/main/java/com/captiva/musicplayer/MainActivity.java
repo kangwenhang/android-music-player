@@ -1948,7 +1948,7 @@ public class MainActivity extends AppCompatActivity {
         dRef[0] = sd.dialog;
 
         sd.body.addView(createInfoCard(ThemeManager.getCoords(this) == null
-                ? "选\"自动\"按 7:00-19:00 固定时间切换;想按日出日落切换,点下方\"日出日落定位\"记录一次位置"
+                ? "选\"自动\"先按 7:00-19:00 切换,后台会自动定位一次,拿到坐标后改按日出日落(随季节自适应),无需手动操作"
                 : "选\"自动\"按本地日出日落时间自动切换(随季节自适应);点下方可重新定位"));
 
         for (int i = 0; i < items.length; i++) {
@@ -1991,6 +1991,11 @@ public class MainActivity extends AppCompatActivity {
                             "界面主题: " + ThemeManager.modeName(values[index]),
                             Toast.LENGTH_SHORT).show();
                     dRef[0].dismiss();
+                    // 刚切到"自动"且还没坐标:跳过节流立即后台定位一次(零配置)
+                    if (values[index] == ThemeManager.MODE_AUTO
+                            && ThemeManager.getCoords(MainActivity.this) == null) {
+                        maybeAutoLocate(true);
+                    }
                     // setMode 内部走 setDefaultNightMode,所有 Activity 自动重建换肤
                 }
             });
@@ -2051,13 +2056,24 @@ public class MainActivity extends AppCompatActivity {
         return row;
     }
 
-    /** 用系统定位服务取一次坐标(日出日落切换用);失败自动回退固定时间切换 */
+    /** 手动定位入口(点太阳位置行):全程有提示 */
     private void requestLocationOnce() {
+        requestLocationOnce(false);
+    }
+
+    /**
+     * 用系统定位服务取一次坐标(日出日落切换用);失败自动回退固定时间切换。
+     * @param silent true=后台自动定位(进入自动模式时零配置触发),不弹任何提示;
+     *               false=用户手动点击,全程有反馈
+     */
+    private void requestLocationOnce(final boolean silent) {
         final android.location.LocationManager lm =
                 (android.location.LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (lm == null) {
-            Toast.makeText(this, "设备无定位服务,自动模式仍按 7:00-19:00 切换",
-                    Toast.LENGTH_LONG).show();
+            if (!silent) {
+                Toast.makeText(this, "设备无定位服务,自动模式仍按 7:00-19:00 切换",
+                        Toast.LENGTH_LONG).show();
+            }
             return;
         }
         final String[] provs = {android.location.LocationManager.GPS_PROVIDER,
@@ -2074,11 +2090,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (best != null && System.currentTimeMillis() - best.getTime() < 30 * 60 * 1000L) {
-            applyCoords(best);
+            applyCoords(best, silent);
             return;
         }
         // 2) 主动请求单次定位
-        Toast.makeText(this, "正在定位,请稍候...", Toast.LENGTH_SHORT).show();
+        if (!silent) {
+            Toast.makeText(this, "正在定位,请稍候...", Toast.LENGTH_SHORT).show();
+        }
         final android.location.LocationListener[] holder =
                 new android.location.LocationListener[1];
         android.location.LocationListener listener =
@@ -2086,7 +2104,7 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onLocationChanged(android.location.Location l) {
                         finishSunLocate(lm, holder[0]);
-                        applyCoords(l);
+                        applyCoords(l, silent);
                     }
 
                     @Override
@@ -2112,8 +2130,10 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         if (!requested) {
-            Toast.makeText(this, "定位不可用(定位服务未开启),自动模式仍按 7:00-19:00 切换",
-                    Toast.LENGTH_LONG).show();
+            if (!silent) {
+                Toast.makeText(this, "定位不可用(定位服务未开启),自动模式仍按 7:00-19:00 切换",
+                        Toast.LENGTH_LONG).show();
+            }
             return;
         }
         // 30 秒超时兜底:无 GPS/蜂窝的纯 WiFi 车机可能永远不回调
@@ -2121,11 +2141,31 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void run() {
                 finishSunLocate(lm, holder[0]);
-                Toast.makeText(MainActivity.this,
-                        "定位超时(车机无 GPS/蜂窝网络),自动模式仍按 7:00-19:00 切换",
-                        Toast.LENGTH_LONG).show();
+                if (!silent) {
+                    Toast.makeText(MainActivity.this,
+                            "定位超时(车机无 GPS/蜂窝网络),自动模式仍按 7:00-19:00 切换",
+                            Toast.LENGTH_LONG).show();
+                }
             }
         }, 30000L);
+    }
+
+    /**
+     * 自动模式零配置入口:选了"自动"但还没有有效坐标时,后台静默定位一次,
+     * 用户无需手动点"定位";失败/超时无感回退 7:00-19:00。
+     * 6 小时节流,避免纯 WiFi 车机每次回前台都徒劳请求。
+     * @param force true=用户刚点了"自动"选项,跳过节流立即试一次
+     */
+    private void maybeAutoLocate(boolean force) {
+        if (ThemeManager.getMode(this) != ThemeManager.MODE_AUTO) return;
+        if (ThemeManager.getCoords(this) != null) return;
+        long now = System.currentTimeMillis();
+        if (!force && now - ThemeManager.getLastLocateAttempt(this)
+                < ThemeManager.LOCATE_ATTEMPT_INTERVAL) {
+            return;
+        }
+        ThemeManager.setLastLocateAttempt(this, now);
+        requestLocationOnce(true);
     }
 
     /** 结束一次定位监听(防泄漏) */
@@ -2139,21 +2179,29 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 定位结果落地:合理性门禁 → 存坐标 + Toast 显示今日日出日落时间 */
+    /** 定位结果落地(手动):合理性门禁 → 存坐标 + Toast 显示今日日出日落时间 */
     private void applyCoords(android.location.Location loc) {
+        applyCoords(loc, false);
+    }
+
+    /** 定位结果落地:合理性门禁 → 存坐标;silent=后台自动,不弹提示 */
+    private void applyCoords(android.location.Location loc, boolean silent) {
         double lat = loc.getLatitude();
         double lon = loc.getLongitude();
         // 合理性门禁:无 GMS 的车机上 NETWORK 服务商常返回预置垃圾缓存
         // (实测出现过美国加州 39.24,-123.15)。坐标超出中国范围一律不采纳,
         // 自动模式回退 7:00-19:00;设备真在境外的场景极少,取最稳妥假设。
         if (lat < 18.0 || lat > 53.6 || lon < 73.5 || lon > 135.1) {
-            Toast.makeText(this, String.format(java.util.Locale.CHINA,
-                    "定位结果异常: %.2f, %.2f 明显偏离常规位置,已忽略%s\n"
-                            + "请检查车机的定位服务/GPS;自动模式仍按 7:00-19:00 切换",
-                    lat, lon, deviceClockTag()), Toast.LENGTH_LONG).show();
+            if (!silent) {
+                Toast.makeText(this, String.format(java.util.Locale.CHINA,
+                        "定位结果异常: %.2f, %.2f 明显偏离常规位置,已忽略%s\n"
+                                + "请检查车机的定位服务/GPS;自动模式仍按 7:00-19:00 切换",
+                        lat, lon, deviceClockTag()), Toast.LENGTH_LONG).show();
+            }
             return;
         }
         ThemeManager.setCoords(this, lat, lon);
+        if (silent) return; // 后台自动定位成功:坐标已生效,不弹 Toast 打扰
         java.util.Calendar c = java.util.Calendar.getInstance();
         long[] rs = SunTime.sunRiseSetUtcMillis(
                 c.get(java.util.Calendar.YEAR),
@@ -5062,6 +5110,8 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "[onResume] hideSystemUI=" + (System.currentTimeMillis() - t0) + "ms");
         // 自动昼夜切换:恢复前台先对齐一次,再以分钟级轮询跨越时间分界(后台时无需运行)
         ThemeManager.apply(this);
+        // 自动模式零配置:没坐标就后台静默定位一次(6h 节流),不用手动点
+        maybeAutoLocate(false);
         handler.removeCallbacks(themeTickTask);
         handler.post(themeTickTask);
         // 从均衡器页面返回时刷新EQ按钮显示(可能修改了设置或新增了自定义预设)

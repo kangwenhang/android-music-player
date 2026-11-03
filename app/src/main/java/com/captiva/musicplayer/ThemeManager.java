@@ -36,6 +36,21 @@ public final class ThemeManager {
     /** 日出日落切换的坐标(定位一次后持久化) */
     private static final String KEY_LAT = "sun_lat";
     private static final String KEY_LON = "sun_lon";
+    /** 后台自动定位的上次尝试时间戳(节流用) */
+    private static final String KEY_LOCATE_ATTEMPT = "sun_locate_attempt";
+    /** 后台自动定位节流间隔:6 小时内不重复徒劳尝试(纯 WiFi 车机多半定不到) */
+    public static final long LOCATE_ATTEMPT_INTERVAL = 6L * 3600 * 1000;
+
+    /** 上次后台自动定位尝试时间(0 = 从未尝试) */
+    public static long getLastLocateAttempt(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getLong(KEY_LOCATE_ATTEMPT, 0L);
+    }
+
+    public static void setLastLocateAttempt(Context ctx, long t) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(KEY_LOCATE_ATTEMPT, t).apply();
+    }
 
     private ThemeManager() {}
 
