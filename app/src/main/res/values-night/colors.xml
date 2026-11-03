@@ -171,4 +171,6 @@
     <color name="lrc_scrim">#99000000</color>
     <!-- 半透明白(两套同值,阴影/描边用) -->
     <color name="white_33">#55FFFFFF</color>
+    <!-- 列表分隔线(与日间同名的夜间版):比 bg_main 略亮一线即可 -->
+    <color name="list_divider">#26262E</color>
 </resources>

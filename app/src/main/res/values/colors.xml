@@ -2,11 +2,11 @@
 <resources>
     <!-- 昼间(白天)浅色配色 v6.4:自动昼夜切换的白天形态
          夜间深色配色在 values-night/colors.xml,由 DayNight 主题按模式自动选用 -->
-    <color name="bg_main">#F2F3F7</color>
-    <color name="bg_title_bar">#FFFFFF</color>
-    <color name="bg_control_bar">#FFFFFF</color>
+    <color name="bg_main">#E7E9EF</color>
+    <color name="bg_title_bar">#EDEFF4</color>
+    <color name="bg_control_bar">#EDEFF4</color>
 
-    <color name="list_item_bg">#FAFAFC</color>
+    <color name="list_item_bg">#E7E9EF</color>
     <color name="playing_highlight">#D6E9F9</color>
 
     <color name="text_primary">#1A1D26</color>
@@ -41,9 +41,10 @@
     <color name="server_status_offline">#607D8B</color>
 
     <color name="favorite_active">#E53935</color>
-    <color name="favorite_inactive">#B4BAC6</color>
+    <!-- v6.4.1:#B4BAC6 在浅灰圆钮(#E2E5EE)上对比度仅 1.5:1,用户反馈看不清,加深 -->
+    <color name="favorite_inactive">#7A8292</color>
 
-    <color name="eq_card_bg">#F4F5F9</color>
+    <color name="eq_card_bg">#EDEFF4</color>
     <color name="eq_preset_bg">#E8EAF0</color>
     <color name="eq_preset_selected_bg">#4FC3F7</color>
     <color name="eq_preset_text">#3A3F4C</color>
@@ -55,47 +56,48 @@
     <color name="eq_toggle_text_on">#0288D1</color>
     <color name="eq_toggle_text_off">#9AA0AE</color>
 
-    <color name="title_grad_start">#FFFFFF</color>
-    <color name="title_grad_end">#EFF1F6</color>
-    <color name="title_line">#D5DAE6</color>
+    <color name="title_grad_start">#EDEFF4</color>
+    <color name="title_grad_end">#E0E3EB</color>
+    <!-- v6.4.1:分隔线整体加深一档(#D5DAE6 级在车机上被压得几乎看不见) -->
+    <color name="title_line">#B0B7C6</color>
     <color name="btn_grad_start">#E8EAF0</color>
     <color name="btn_grad_end">#DCE0E9</color>
-    <color name="btn_border">#C8CCD8</color>
+    <color name="btn_border">#B2B8C6</color>
     <color name="btn_grad_press_start">#D0D5E0</color>
     <color name="btn_grad_press_end">#C2C8D6</color>
-    <color name="btn_border_press">#A8B0C0</color>
-    <color name="search_grad_start">#FAFBFD</color>
-    <color name="search_grad_end">#F0F2F7</color>
-    <color name="search_border">#D5D9E4</color>
+    <color name="btn_border_press">#99A2B4</color>
+    <color name="search_grad_start">#EFF1F6</color>
+    <color name="search_grad_end">#E4E7EE</color>
+    <color name="search_border">#B8BECB</color>
     <color name="dialog_btn_grad_start">#F0F2F7</color>
     <color name="dialog_btn_grad_end">#E2E5EE</color>
     <color name="pos_btn_press_a">#C4E4F8</color>
     <color name="pos_btn_press_b">#9ED0F0</color>
     <color name="pos_btn_a">#D2E9FA</color>
     <color name="pos_btn_b">#ABD8F3</color>
-    <color name="card_grad_a">#FFFFFF</color>
-    <color name="card_grad_b">#F1F3F8</color>
+    <color name="card_grad_a">#F0F2F7</color>
+    <color name="card_grad_b">#E6E9F0</color>
     <color name="card_selected">#D6E9F9</color>
-    <color name="accent_line">#8FC4E8</color>
-    <color name="info_grad_a">#FFFFFF</color>
-    <color name="info_grad_b">#F3F5FA</color>
-    <color name="info_border">#D8DCE6</color>
+    <color name="accent_line">#5FA8DC</color>
+    <color name="info_grad_a">#F0F2F7</color>
+    <color name="info_grad_b">#E6E9F0</color>
+    <color name="info_border">#B8BECB</color>
     <color name="eq_band_grad_a">#E4E7EF</color>
     <color name="preset_grad_a">#EDF0F6</color>
-    <color name="preset_border">#C5CAD8</color>
+    <color name="preset_border">#B0B6C4</color>
     <color name="toggle_track_off">#C5CAD6</color>
     <color name="toggle_rim">#66B2EBFF</color>
     <color name="thumb_tint">#E8F4FE</color>
     <color name="thumb_border">#B8C4D8</color>
     <color name="index_letter_bg">#D9EDF0F7</color>
     <color name="side_index_shadow">#33000000</color>
-    <color name="close_btn_border">#C0C6D4</color>
+    <color name="close_btn_border">#A8AFC0</color>
     <color name="circle_grad_a">#E2E5EE</color>
     <color name="circle_grad_b">#D6DAE5</color>
-    <color name="circle_border">#C4CAD8</color>
-    <color name="circle_border_press">#9AA4B8</color>
-    <color name="seek_track">#D8DCE4</color>
-    <color name="seek_center_line">#C0C6D4</color>
+    <color name="circle_border">#AEB5C4</color>
+    <color name="circle_border_press">#8A94AA</color>
+    <color name="seek_track">#C8CDD8</color>
+    <color name="seek_center_line">#AAB0C0</color>
     <color name="eq_header_a">#1A73B8</color>
     <color name="eq_header_b">#2980B9</color>
     <color name="accent_light">#29B6F6</color>
@@ -120,17 +122,19 @@
     <color name="launcher_red2">#FF6B6B</color>
     <color name="icon_note">#8A90A0</color>
     <color name="dialog_btn_text">#3A3F4C</color>
-    <color name="pager_dot_off">#B4BAC6</color>
+    <color name="pager_dot_off">#8A92A2</color>
     <color name="eq_quick_bg">#E3F1FD</color>
     <color name="eq_quick_text">#14243A</color>
     <color name="eq_quick_accent">#1565C0</color>
-    <color name="index_disabled">#C5CAD6</color>
+    <color name="index_disabled">#A8AFC0</color>
     <color name="accent_band">#331292D0</color>
-    <color name="lrc_bg">#F2F3F7</color>
+    <color name="lrc_bg">#E7E9EF</color>
     <color name="lrc_no_lrc">#995F6470</color>
     <color name="lrc_current">#10131A</color>
     <color name="lrc_normal">#CC3A3F4C</color>
     <!-- 歌词封面遮罩:夜间蒙黑压暗,白天蒙白提亮(保证深色歌词字可读) -->
     <color name="lrc_scrim">#B3FFFFFF</color>
     <color name="white_33">#55FFFFFF</color>
+    <!-- 列表分隔线(v6.4.1 新增,配 ListDivider):日间中灰,夜间深一档 -->
+    <color name="list_divider">#BCC3D2</color>
 </resources>

@@ -743,6 +743,8 @@ public class MainActivity extends AppCompatActivity {
         rvList.setLayoutManager(new LinearLayoutManager(this));
         // 完全禁用 item 动画(车机性能弱,任何动画都卡顿)
         rvList.setItemAnimator(null);
+        // 【v6.4】列表分隔线:812 首歌没有分隔线难以逐行对读,颜色随昼夜主题切换
+        rvList.addItemDecoration(new ListDivider(this));
         // 【2026-10-05 v5.7.416 回调默认缓存】v377 加大缓存(10→24)与回收池(5→24)是为了
         // 压 XML inflate 卡顿;buildItemView 改纯代码构造后单次创建已是毫秒级,
         // 囤 24 个离屏缓存反成负担:车机一屏仅 5-6 行(行高 76px/rv 高 392px),
