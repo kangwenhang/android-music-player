@@ -1947,9 +1947,7 @@ public class MainActivity extends AppCompatActivity {
         final Dialog[] dRef = new Dialog[1];
         dRef[0] = sd.dialog;
 
-        sd.body.addView(createInfoCard(ThemeManager.getCoords(this) == null
-                ? "选\"自动\"先按 7:00-19:00 切换,后台会自动定位一次,拿到坐标后改按日出日落(随季节自适应),无需手动操作"
-                : "选\"自动\"按本地日出日落时间自动切换(随季节自适应);点下方可重新定位"));
+        // 定位已全自动(进入自动模式时后台静默定位),不再放定位入口行和说明卡片
 
         for (int i = 0; i < items.length; i++) {
             final int index = i;
@@ -2003,8 +2001,7 @@ public class MainActivity extends AppCompatActivity {
             sd.body.addView(row);
         }
 
-        // 日出日落定位入口(定位一次持久化,失败回退固定时间切换)
-        sd.body.addView(createSunPosRow(sd));
+        // (定位入口行已移除:自动模式下 onStartup 静默定位,无需手动)
 
         Button btnCancel = createDialogButton("关闭", false);
         btnCancel.setOnClickListener(new View.OnClickListener() {
@@ -2014,51 +2011,6 @@ public class MainActivity extends AppCompatActivity {
         sd.buttons.addView(btnCancel);
 
         showDialogFull(sd.dialog);
-    }
-
-    /** 日出日落定位行(界面主题弹窗内):显示当前坐标状态,点击发起一次定位 */
-    private View createSunPosRow(final SubDialog sd) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(28, 22, 28, 22);
-        row.setBackgroundResource(R.drawable.bg_dialog_option);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = 12;
-        row.setLayoutParams(lp);
-
-        TextView label = new TextView(this);
-        label.setTextSize(19);
-        float[] ll = ThemeManager.getCoords(this);
-        if (ll == null) {
-            label.setText("◎ 日出日落定位: 未设置 (点击定位)" + deviceClockTag());
-            label.setTextColor(getResources().getColor(R.color.text_secondary));
-        } else {
-            java.util.Calendar c = java.util.Calendar.getInstance();
-            long[] rs = SunTime.sunRiseSetUtcMillis(
-                    c.get(java.util.Calendar.YEAR),
-                    c.get(java.util.Calendar.MONTH) + 1,
-                    c.get(java.util.Calendar.DAY_OF_MONTH), ll[0], ll[1]);
-            String extra = rs == null ? "" : String.format(java.util.Locale.CHINA,
-                    "  今日 %s~%s", formatClock(rs[0]), formatClock(rs[1]));
-            label.setText(String.format(java.util.Locale.CHINA,
-                    "◎ 已定位: %.2f, %.2f%s%s (点击重新定位)",
-                    ll[0], ll[1], deviceClockTag(), extra));
-            label.setTextColor(getResources().getColor(R.color.text_primary));
-        }
-        row.addView(label);
-        row.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) { requestLocationOnce(); }
-        });
-        return row;
-    }
-
-    /** 手动定位入口(点太阳位置行):全程有提示 */
-    private void requestLocationOnce() {
-        requestLocationOnce(false);
     }
 
     /**
@@ -2177,11 +2129,6 @@ public class MainActivity extends AppCompatActivity {
             } catch (SecurityException ignored) {
             }
         }
-    }
-
-    /** 定位结果落地(手动):合理性门禁 → 存坐标 + Toast 显示今日日出日落时间 */
-    private void applyCoords(android.location.Location loc) {
-        applyCoords(loc, false);
     }
 
     /** 定位结果落地:合理性门禁 → 存坐标;silent=后台自动,不弹提示 */
