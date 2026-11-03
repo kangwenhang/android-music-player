@@ -144,10 +144,9 @@ android {
             abiFilters 'armeabi-v7a'
         }
 
-        // 【2026-11-03】密度裁剪:车机屏幕密度在 mdpi~xhdpi 档,
-        // 剔除 androidx 自带的 xxhdpi/xxxhdpi/tvdpi 位图(appcompat 的
-        // abc_switch/popup 等,~50KB),自家图标在 mdpi/xhdpi 两档不受影响
-        resConfigs 'mdpi', 'hdpi', 'xhdpi'
+        // 【2026-11-03】注:曾试过 resConfigs 'mdpi'/'hdpi'/'xhdpi' 密度裁剪,
+        // CI 上 AAPT2 link 直接静默崩溃(AAPT2 对密度 -c 配置有已知崩坏案例),
+        // 已回退;密度位图裁剪交给 shrinkResources 顺带处理。
     }
 
     // JDK 8 兼容
