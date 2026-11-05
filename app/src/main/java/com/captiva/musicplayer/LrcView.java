@@ -52,8 +52,8 @@ public class LrcView extends View {
     private int COLOR_NO_LRC;
     private int COLOR_CURRENT;
     private int COLOR_NORMAL;
-    private static final int COLOR_SHADOW_CURRENT = Color.parseColor("#AA000000");
-    private static final int COLOR_SHADOW_NORMAL = Color.parseColor("#80000000");
+    private int COLOR_SHADOW_CURRENT;
+    private int COLOR_SHADOW_NORMAL;
     // 遮罩色从资源取:夜间蒙黑/白天蒙白(v6.4)
     private int COLOR_SCRIM;
     private int COLOR_EMPTY_SCRIM;
@@ -170,6 +170,8 @@ public class LrcView extends View {
         COLOR_NO_LRC = getResources().getColor(R.color.lrc_no_lrc);
         COLOR_CURRENT = getResources().getColor(R.color.lrc_current);
         COLOR_NORMAL = getResources().getColor(R.color.lrc_normal);
+        COLOR_SHADOW_CURRENT = getResources().getColor(R.color.lrc_shadow_current);
+        COLOR_SHADOW_NORMAL = getResources().getColor(R.color.lrc_shadow_normal);
         COLOR_SCRIM = getResources().getColor(R.color.lrc_scrim);
         // 未播放/无歌词时的灰蒙版:与左侧歌曲列表划出区域分界(2026-11-03 用户要求)
         COLOR_EMPTY_SCRIM = getResources().getColor(R.color.lrc_empty_scrim);
