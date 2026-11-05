@@ -170,6 +170,8 @@
     <color name="lrc_no_lrc">#99FFFFFF</color>
     <color name="lrc_current">#FFFFFF</color>
     <color name="lrc_normal">#CCFFFFFF</color>
+    <color name="lrc_shadow_current">#AA000000</color>
+    <color name="lrc_shadow_normal">#80000000</color>
     <color name="lrc_scrim">#99000000</color>
     <color name="lrc_empty_scrim">#14000000</color>
     <!-- 半透明白(两套同值,阴影/描边用) -->

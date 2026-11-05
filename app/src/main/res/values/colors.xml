@@ -136,6 +136,9 @@
     <color name="lrc_no_lrc">#995F6470</color>
     <color name="lrc_current">#10131A</color>
     <color name="lrc_normal">#CC3A3F4C</color>
+    <!-- 白天深字不加黑影(发虚),阴影全透明 -->
+    <color name="lrc_shadow_current">#00000000</color>
+    <color name="lrc_shadow_normal">#00000000</color>
     <!-- 歌词封面遮罩:夜间蒙黑压暗,白天蒙白提亮(保证深色歌词字可读) -->
     <color name="lrc_scrim">#B3FFFFFF</color>
     <!-- 未播放/无歌词时的区域分界灰蒙版 -->
