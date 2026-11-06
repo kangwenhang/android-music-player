@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 弹窗关闭按钮背景(深色半透明圆) -->
+<!-- 弹窗关闭按钮背景(圆形+描边)
+     v6.4.2: 常态加 close_btn_border 描边 —— 白天浅底上无描边的浅色圆完全隐形 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="oval">
             <solid android:color="@color/close_btn_border" />
+            <stroke android:width="2dp" android:color="@color/close_btn_border" />
             <size android:width="52dp" android:height="52dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="oval">
             <solid android:color="@color/btn_grad_start" />
+            <stroke android:width="2dp" android:color="@color/close_btn_border" />
             <size android:width="52dp" android:height="52dp" />
         </shape>
     </item>
