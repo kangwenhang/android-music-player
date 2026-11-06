@@ -261,7 +261,28 @@ public class FnMusicApi implements MusicSourceApi {
         }
     }
 
+    /**
+     * GET 请求(带死连接重试)。
+     *
+     * 【v6.4.3 为什么"经常连接不上但网络没问题"】fnOS 中继/服务端空闲几秒就 FIN
+     * keep-alive 连接,而 4.2.2 的 libcore 连接池不感知,下一条请求复用死 socket
+     * 直接抛异常 —— 实锤记录见 UpdateChecker.obtainTicket 注释(GET 偶尔可被
+     * HttpEngine 自动重放,带体的 POST 无法重放直接 EOF)。首次失败时 finally 的
+     * disconnect() 已把死连接丢弃,立刻重试一次拿到的必是新连接。TLS 握手失败与
+     * HTTP 4xx/5xx 是确定性错误,不重试。
+     */
     private String httpGetByUrl(String urlStr, String signPath, String canonicalBody) {
+        boolean[] retryable = {true};
+        String r = httpGetOnce(urlStr, signPath, canonicalBody, retryable);
+        if (r == null && retryable[0]) {
+            Log.i(TAG, "stale-connection retry (1/1): GET " + signPath);
+            r = httpGetOnce(urlStr, signPath, canonicalBody, retryable);
+        }
+        return r;
+    }
+
+    private String httpGetOnce(String urlStr, String signPath, String canonicalBody,
+                               boolean[] retryable) {
         String currentUrl = urlStr;
         for (int redirect = 0; redirect <= MAX_RELAY_REDIRECTS; redirect++) {
             HttpURLConnection conn = null;
@@ -286,6 +307,7 @@ public class FnMusicApi implements MusicSourceApi {
                 if (code != 200) {
                     lastError = "GET " + signPath + " 返回 HTTP " + code;
                     Log.e(TAG, "GET " + signPath + " -> HTTP " + code);
+                    retryable[0] = false;   // 服务端明确应答,重试无意义
                     return null;
                 }
                 InputStream is = conn.getInputStream();
@@ -303,9 +325,13 @@ public class FnMusicApi implements MusicSourceApi {
             } catch (Exception e) {
                 if (TlsCompat.isTlsError(e)) {
                     lastError = "TLS 握手失败(系统 SSL 版本过旧): " + currentUrl;
-                } else if (lastError == null) {
-                    lastError = e.getClass().getSimpleName() + ": " + e.getMessage()
-                            + " @ " + currentUrl;
+                    retryable[0] = false;   // 系统性握手问题,重试同样失败
+                } else {
+                    if (lastError == null) {
+                        lastError = e.getClass().getSimpleName() + ": " + e.getMessage()
+                                + " @ " + currentUrl;
+                    }
+                    retryable[0] = true;    // IO 类错误:多半是死连接,值得重试
                 }
                 Log.e(TAG, "GET failed: " + signPath, e);
                 return null;
@@ -316,8 +342,21 @@ public class FnMusicApi implements MusicSourceApi {
         return null;
     }
 
-    /** POST JSON */
+    /**
+     * POST 请求(带死连接重试)。同 httpGetByUrl 的注释 —— 带体的 POST 在 4.2.2
+     * 上无法被 HttpEngine 自动重放,踩到死连接直接 EOF,这里手动重试一次。
+     */
     private String httpPost(String endpoint, JSONObject body) {
+        boolean[] retryable = {true};
+        String r = httpPostOnce(endpoint, body, retryable);
+        if (r == null && retryable[0]) {
+            Log.i(TAG, "stale-connection retry (1/1): POST " + endpoint);
+            r = httpPostOnce(endpoint, body, retryable);
+        }
+        return r;
+    }
+
+    private String httpPostOnce(String endpoint, JSONObject body, boolean[] retryable) {
         String json = body.toString();
         String urlStr = apiUrl(endpoint);
         String currentUrl = urlStr;
@@ -353,6 +392,7 @@ public class FnMusicApi implements MusicSourceApi {
                 if (is == null) {
                     lastError = "POST " + endpoint + " 返回 HTTP " + code;
                     Log.e(TAG, "POST " + endpoint + " -> HTTP " + code);
+                    retryable[0] = false;   // 服务端明确应答,重试无意义
                     return null;
                 }
                 BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
@@ -366,9 +406,13 @@ public class FnMusicApi implements MusicSourceApi {
             } catch (Exception e) {
                 if (TlsCompat.isTlsError(e)) {
                     lastError = "TLS 握手失败(系统 SSL 版本过旧): " + currentUrl;
-                } else if (lastError == null) {
-                    lastError = e.getClass().getSimpleName() + ": " + e.getMessage()
-                            + " @ " + currentUrl;
+                    retryable[0] = false;
+                } else {
+                    if (lastError == null) {
+                        lastError = e.getClass().getSimpleName() + ": " + e.getMessage()
+                                + " @ " + currentUrl;
+                    }
+                    retryable[0] = true;
                 }
                 Log.e(TAG, "POST failed: " + endpoint, e);
                 return null;

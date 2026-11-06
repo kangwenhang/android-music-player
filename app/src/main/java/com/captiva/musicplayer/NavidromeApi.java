@@ -143,8 +143,29 @@ public class NavidromeApi implements MusicSourceApi {
 
     // ==================== HTTP 请求 ====================
 
-    /** 执行 GET 请求,返回响应体字符串 */
+    /**
+     * 执行 GET 请求(带死连接重试)。
+     *
+     * 【v6.4.3 为什么"经常连接不上但网络没问题"】服务端空闲几秒就 FIN keep-alive
+     * 连接,4.2.2 的 libcore 连接池不感知,复用死 socket 直接抛异常(实锤记录见
+     * UpdateChecker.obtainTicket 注释)。首次失败时 finally 的 disconnect() 已把
+     * 死连接丢弃,立刻重试一次必拿新连接。TLS 握手失败与 HTTP 状态错误不重试。
+     */
     private String httpGet(String urlStr) throws Exception {
+        try {
+            return httpGetOnce(urlStr);
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage();
+            boolean httpStatus = msg.startsWith("HTTP ");
+            boolean tls = TlsCompat.isTlsError(e);
+            if (httpStatus || tls) throw e;   // 确定性错误,重试无意义
+            Log.i(TAG, "stale-connection retry (1/1): GET " + urlStr);
+            return httpGetOnce(urlStr);
+        }
+    }
+
+    /** 执行一次 GET(重试的最小单元) */
+    private String httpGetOnce(String urlStr) throws Exception {
         HttpURLConnection conn = null;
         InputStream is = null;
         try {
