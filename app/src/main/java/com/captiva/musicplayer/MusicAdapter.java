@@ -496,13 +496,41 @@ public class MusicAdapter extends RecyclerView.Adapter<MusicAdapter.VH> {
     /**
      * 判断歌曲是否匹配当前搜索关键词
      * 只按歌名和歌手匹配,不搜专辑名(避免误匹配)
+     *
+     * v6.4.3 新增拼音首字母缩写匹配:纯字母关键词(如 zw)按"开头"命中缩写,
+     * "知我"→zw、"Forever Love"→fl;非纯字母关键词(含汉字/数字/符号)不启用,
+     * 避免误匹配
      */
     private boolean matchesFilter(MusicBean b) {
         if (TextUtils.isEmpty(filterKeyword)) {
             return true;
         }
         // 使用缓存的小写值,避免每次过滤都对 810 首歌调用 toLowerCase()
-        return b.getLowerTitle().contains(filterKeyword) || b.getLowerArtist().contains(filterKeyword);
+        if (b.getLowerTitle().contains(filterKeyword) || b.getLowerArtist().contains(filterKeyword)) {
+            return true;
+        }
+        if (isAsciiLetters(filterKeyword)) {
+            // 缩写也是小写缓存,直接 startsWith("开头"语义,见需求:ZW → 知我)
+            if (b.getInitials().startsWith(filterKeyword)
+                    || b.getArtistInitials().startsWith(filterKeyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 关键词是否纯小写字母(缩写匹配只在这种输入下启用) */
+    private static boolean isAsciiLetters(String s) {
+        if (s == null || s.length() == 0) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < 'a' || c > 'z') {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

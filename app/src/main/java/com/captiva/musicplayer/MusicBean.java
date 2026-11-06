@@ -276,4 +276,26 @@ public class MusicBean {
         }
         return cachedLowerArtist;
     }
+
+    // ==================== 拼音首字母缩写(搜索 v6.4.3) ====================
+    // "知我"→"zw"、"Forever Love"→"fl":搜索框输首字母缩写也能命中。
+    // 懒缓存:后台过滤线程首次触到时算一遍(810 首约几十毫秒),此后零开销。
+    private String cachedInitials;        // 歌名缩写,小写
+    private String cachedArtistInitials;  // 歌手缩写,小写
+
+    /** 歌名拼音首字母缩写(小写);无字母可取(纯数字/符号名)返回空串 */
+    public String getInitials() {
+        if (cachedInitials == null) {
+            cachedInitials = PinyinUtils.initials(getTitle()).toLowerCase();
+        }
+        return cachedInitials;
+    }
+
+    /** 歌手拼音首字母缩写(小写) */
+    public String getArtistInitials() {
+        if (cachedArtistInitials == null) {
+            cachedArtistInitials = PinyinUtils.initials(getArtist()).toLowerCase();
+        }
+        return cachedArtistInitials;
+    }
 }

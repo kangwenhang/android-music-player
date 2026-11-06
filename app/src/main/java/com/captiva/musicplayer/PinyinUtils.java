@@ -57,8 +57,14 @@ public final class PinyinUtils {
         if (title == null || title.length() == 0) {
             return '#';
         }
-        char c = title.charAt(0);
+        return charLetter(title.charAt(0));
+    }
 
+    /**
+     * 单字符 → 首字母(供整串缩写 initials() 与 firstLetter 共用)。
+     * 拉丁字母原样大写;汉字走 GB2312 区位码(带记忆化);其余返回 '#'。
+     */
+    public static char charLetter(char c) {
         // 拉丁字母
         if (c >= 'a' && c <= 'z') return (char) (c - 'a' + 'A');
         if (c >= 'A' && c <= 'Z') return c;
@@ -76,6 +82,31 @@ public final class PinyinUtils {
             return result;
         }
         return '#';
+    }
+
+    /**
+     * 整串拼音首字母缩写(搜索用):"知我"→"ZW"、"Forever Love"→"FL"。
+     * 只取汉字与拉丁字母,空格/数字/符号跳过(不占位,保证缩写连续);
+     * 生僻字无拼音可取,同样跳过。
+     * 车机 810 首全量算一遍约几十毫秒(汉字命中 LETTER_CACHE 后近零开销),
+     * 在 MusicBean 上懒缓存,只算一次。
+     */
+    public static String initials(String s) {
+        if (s == null || s.length() == 0) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= 0x4E00 && c <= 0x9FA5)) {
+                char l = charLetter(c);
+                if (l != '#') {
+                    sb.append(l);
+                }
+            }
+        }
+        return sb.toString();
     }
 
     /** 由 GB2312 区位码定声母;取不到返回 0 */
