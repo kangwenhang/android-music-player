@@ -22,10 +22,16 @@ import java.util.List;
  * 滚动时踩到并发修改。真正需要同步的只有"现在是第几首在播",用
  * {@link #setPlayingIndex(int)} 单独刷新即可。
  *
- * <p>v6.6.2:ListView → RecyclerView,支持长按拖动排序(ItemTouchHelper 由
+ * <p>v6.6.2:ListView → RecyclerView,支持拖动排序(ItemTouchHelper 由
  * MainActivity 挂载)。排序期间行内交换走 {@link #swap(int, int)},落手时
  * MainActivity 调 MusicService.reorderQueue 一次性提交 —— 两边用同一套
  * currentIndex 调整规则,弹窗快照与服务队列保持一致。
+ *
+ * <p>v6.6.3:拖拽触发从"整行长按"改为"长按右侧 ≡ 把手"(整行长按在电阻屏
+ * 快速滑动时极易误触发,还会搅出渲染残影);序号刷新走 payload 局部绑定 ——
+ * 不带 payload 的 notifyItemRangeChanged 会触发 DefaultItemAnimator 的
+ * cross-fade(旧视图淡出/新视图淡入),车机弱 GPU 上一瞬间序号整个消失,
+ * 表现为"滑着的时候突然出现一个没有序号的行"。
  *
  * <p>性能:车机列表动辄 800+ 首,颜色在构造时一次性取好(不在 bind 里
  * ContextCompat.getColor);背景只按"是否当前行"换资源,不新建 Drawable 实例。
@@ -37,14 +43,23 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
     /** 当前播放行左侧显示的字形(代替序号,一眼看出播到哪) */
     private static final String MARK_PLAYING = "▶";
 
+    /** 拖拽期间刷序号用的 payload:带 payload 的重绑不走 cross-fade 动画 */
+    public static final Object PAYLOAD_INDEX = new Object();
+
     /** 行点击回调(MainActivity 收到后关弹窗并从该首起播) */
     public interface OnRowClick {
         void onRow(int position);
     }
 
+    /** 把手长按回调(MainActivity 收到后调 ItemTouchHelper.startDrag) */
+    public interface OnDragStart {
+        void onDragStart(RecyclerView.ViewHolder holder);
+    }
+
     private final List<MusicBean> data;
     private final LayoutInflater inflater;
     private final OnRowClick rowClick;
+    private final OnDragStart dragStart;
 
     private final int colorTextPrimary;
     private final int colorTextSecondary;
@@ -55,10 +70,11 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
     private int playingIndex;
 
     public PlaylistAdapter(Context context, List<MusicBean> data, int playingIndex,
-                           OnRowClick rowClick) {
+                           OnRowClick rowClick, OnDragStart dragStart) {
         this.data = data;
         this.playingIndex = playingIndex;
         this.rowClick = rowClick;
+        this.dragStart = dragStart;
         this.inflater = LayoutInflater.from(context);
         this.colorTextPrimary = ContextCompat.getColor(context, R.color.text_primary);
         this.colorTextSecondary = ContextCompat.getColor(context, R.color.text_secondary);
@@ -104,9 +120,17 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
         }
         notifyItemMoved(from, to);
         // notifyItemMoved 只重绑被移动的两行,介于 from/to 之间的行只是换了位置、
-        // 不会重新 bind —— 左侧序号会停留在旧值。补一次区间重绑刷序号。
+        // 不会重新 bind —— 左侧序号会停留在旧值。带 payload 局部刷新:
+        // 不走 cross-fade 动画,弱 GPU 上不会出现"序号淡出一瞬间"的残影。
         int lo = Math.min(from, to);
-        notifyItemRangeChanged(lo, Math.abs(from - to) + 1);
+        notifyItemRangeChanged(lo, Math.abs(from - to) + 1, PAYLOAD_INDEX);
+    }
+
+    /** 落手后整行重绑(不带 payload,把拖拽行的序号也刷成最终位置) */
+    public void refreshRow(int position) {
+        if (position >= 0 && position < data.size()) {
+            notifyItemChanged(position);
+        }
     }
 
     @NonNull
@@ -114,6 +138,19 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = inflater.inflate(R.layout.dialog_playlist_item, parent, false);
         return new VH(v);
+    }
+
+    /** 拖拽期间带 payload 的局部刷新:只刷序号/▶,整行不动 */
+    @Override
+    public void onBindViewHolder(@NonNull VH h, int position,
+                                 @NonNull List<Object> payloads) {
+        if (!payloads.isEmpty()) {
+            boolean playing = (position == playingIndex);
+            h.index.setText(playing ? MARK_PLAYING : String.valueOf(position + 1));
+            h.index.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
+            return;
+        }
+        onBindViewHolder(h, position);
     }
 
     @Override
@@ -154,6 +191,17 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
                 }
             }
         });
+
+        // 拖拽把手:只有长按 ≡ 才进入拖拽模式(整行长按/滑动不再误触发)
+        if (dragStart != null) {
+            h.handle.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    dragStart.onDragStart(h);
+                    return true;
+                }
+            });
+        }
     }
 
     @Override
@@ -167,6 +215,7 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
         final TextView title;
         final TextView artist;
         final TextView dur;
+        final TextView handle;
 
         VH(View itemView) {
             super(itemView);
@@ -174,6 +223,7 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
             title = (TextView) itemView.findViewById(R.id.tv_pl_title);
             artist = (TextView) itemView.findViewById(R.id.tv_pl_artist);
             dur = (TextView) itemView.findViewById(R.id.tv_pl_dur);
+            handle = (TextView) itemView.findViewById(R.id.drag_handle);
         }
     }
 }

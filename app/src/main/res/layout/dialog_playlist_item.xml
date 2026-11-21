@@ -61,4 +61,17 @@
         android:textColor="@color/text_secondary"
         android:textSize="15sp" />
 
+    <!-- 拖拽把手(v6.6.3):三条横线,长按这里才开始拖动。
+         触摸判定放宽:48dp 宽 × 整行高(64dp),电阻屏上好按;
+         整行长按不再触发拖拽,快速滑动列表不会误入拖拽模式 -->
+    <TextView
+        android:id="@+id/drag_handle"
+        android:layout_width="48dp"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:text="≡"
+        android:textColor="@color/text_secondary"
+        android:textSize="26sp"
+        android:contentDescription="@string/playlist_drag_handle" />
+
 </LinearLayout>

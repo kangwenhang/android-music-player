@@ -5,4 +5,5 @@
     <string name="mode_one">单曲循环</string>
     <string name="mode_shuf">随机播放</string>
     <string name="playlist_title">播放列表</string>
+    <string name="playlist_drag_handle">拖动调整播放顺序</string>
 </resources>

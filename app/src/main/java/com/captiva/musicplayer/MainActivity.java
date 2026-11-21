@@ -2681,11 +2681,13 @@ public class MainActivity extends AppCompatActivity {
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         dialog.setContentView(dialogView);
 
+        // ItemTouchHelper 先占位,adapter 的把手回调里再取(startDrag 在 attach 前调用无效)
+        final ItemTouchHelper[] ithBox = new ItemTouchHelper[1];
         final PlaylistAdapter pa = new PlaylistAdapter(this, queue, playingIndex,
                 new PlaylistAdapter.OnRowClick() {
                     @Override
                     public void onRow(int position) {
-                        // 长按拖动落手的瞬间松指可能带出一次 click,
+                        // 长按把手拖动落手的瞬间松指可能带出一次 click,
                         // 不能被误当成"点行起播",500ms 内忽略
                         if (SystemClock.elapsedRealtime() - playlistLastDropAt < 500) {
                             return;
@@ -2693,6 +2695,14 @@ public class MainActivity extends AppCompatActivity {
                         // 先关弹窗再起播:起播会重设队列并触发状态广播,弹窗留着会先闪一下旧高亮
                         dialog.dismiss();
                         playFromPlaylist(queue, position);
+                    }
+                },
+                new PlaylistAdapter.OnDragStart() {
+                    @Override
+                    public void onDragStart(RecyclerView.ViewHolder holder) {
+                        if (ithBox[0] != null) {
+                            ithBox[0].startDrag(holder);
+                        }
                     }
                 });
         rv.setLayoutManager(new LinearLayoutManager(this));
@@ -2710,12 +2720,18 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 长按拖动排序(v6.6.2):拖动期间只交换弹窗快照(pa.swap),
+        // 长按右侧 ≡ 把手拖动排序(v6.6.3):整行长按不再触发(电阻屏快速滑动
+        // 极易误触发,还会搅出渲染残影)。拖动期间只交换弹窗快照(pa.swap),
         // 落手(clearView)一次性提交给 MusicService —— 拖动过程不碰服务队列,
         // 自动切歌等广播也不会把排序中的快照搅乱。
         ItemTouchHelper.SimpleCallback dragCb = new ItemTouchHelper.SimpleCallback(
                 ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
             private int dragFrom = -1;
+
+            @Override
+            public boolean isLongPressDragEnabled() {
+                return false;   // 只认把手长按,见 PlaylistAdapter.OnDragStart
+            }
 
             @Override
             public boolean onMove(RecyclerView recyclerView,
@@ -2743,15 +2759,21 @@ public class MainActivity extends AppCompatActivity {
                 super.clearView(recyclerView, vh);
                 if (dragFrom >= 0) {
                     int to = vh.getAdapterPosition();
-                    if (to != RecyclerView.NO_POSITION && dragFrom != to) {
-                        commitPlaylistReorder(dragFrom, to);
+                    if (to != RecyclerView.NO_POSITION) {
+                        if (dragFrom != to) {
+                            commitPlaylistReorder(dragFrom, to);
+                        }
+                        // 拖拽行的序号在拖动期间一直是旧值(局部刷新只刷别的行),
+                        // 落手后整行重绑刷成最终位置
+                        pa.refreshRow(to);
                     }
                     dragFrom = -1;
                     playlistLastDropAt = SystemClock.elapsedRealtime();
                 }
             }
         };
-        new ItemTouchHelper(dragCb).attachToRecyclerView(rv);
+        ithBox[0] = new ItemTouchHelper(dragCb);
+        ithBox[0].attachToRecyclerView(rv);
 
         tvPlaylistSub.setText(buildPlaylistSubtitle(queue.size(), playingIndex));
 
