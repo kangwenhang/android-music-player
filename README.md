@@ -193,11 +193,18 @@
   v6.6.2 的整行长按判定在电阻屏快速滑动时极易误触发拖拽,还会搅出渲染残影,
   v6.6.3 改为只认把手;拖拽结束后 500ms 内的松指 click 会被忽略,防止误触起播;
   行间 6dp 间距改由 ItemDecoration 提供
-- **修复:拖拽中突然出现"没有序号的行"(v6.6.3)**:不带 payload 的
-  `notifyItemRangeChanged` 会触发 DefaultItemAnimator 的 cross-fade
-  (旧视图淡出/新视图淡入),车机弱 GPU 上一瞬间序号整个消失。改为带
-  payload 的局部刷新(只刷序号文本,不重绘整行、无淡入淡出),
-  拖拽行自身的序号在落手时整行重绑补上
+- **修复:拖拽中突然出现"没有序号的行"(v6.6.3,真机复现后 v6.6.4 根治)**:
+  不带 payload 的 `notifyItemChanged/notifyItemRangeChanged` 会触发
+  DefaultItemAnimator 的 cross-fade(旧视图淡出/新视图淡入),车机弱 GPU 上
+  **若淡入进行中列表恰被滚动/再布局,动画被取消后新视图 alpha 停在 0,
+  整行(含序号)永久空白** —— v6.6.3 只修了拖拽 swap 路径,`setPlayingIndex`
+  (切歌高亮)与 `refreshRow`(落手重绑)仍走裸 `notifyItemChanged`,真机依旧复现。
+  v6.6.4 三管齐下:① 弹窗 RecyclerView `setItemAnimator(null)` 彻底断掉
+  change 动画;② 新增 `PAYLOAD_STATE` 全量视觉 payload(背景/颜色/粗体/序号
+  原地更新,无淡入淡出),`setPlayingIndex`/`refreshRow` 全部改走 payload;
+  ③ 序号局部刷新继续用 `PAYLOAD_INDEX`。同时重开 `CacheDebugLog`(PL 开头
+  埋点:弹窗开/拖拽 swap/落手/高亮切换),真机再出问题直接看
+  `Music/cache_debug.log` 取证,排查定案后再关
 - **修复:选中高亮方角从卡片圆角漏出(v6.6.2)**:ListView 的默认 listSelector
   画在子项**背后**,方形高亮会从不透明卡片的 10dp 圆角缺口漏出四条蓝角。
   播放列表弹窗换 RecyclerView 后天然没有 selector;设置/EQ 快捷弹窗的

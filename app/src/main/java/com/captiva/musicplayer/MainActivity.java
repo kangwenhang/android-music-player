@@ -2676,6 +2676,8 @@ public class MainActivity extends AppCompatActivity {
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_playlist, null);
         final RecyclerView rv = (RecyclerView) dialogView.findViewById(R.id.rv_playlist);
         tvPlaylistSub = (TextView) dialogView.findViewById(R.id.tv_playlist_sub);
+        CacheDebugLog.log("PL dialog open size=" + queue.size()
+                + " playingIdx=" + playingIndex);
 
         final Dialog dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
@@ -2706,6 +2708,11 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
         rv.setLayoutManager(new LinearLayoutManager(this));
+        // v6.6.4:关掉 DefaultItemAnimator —— 它的 change 动画是 cross-fade,
+        // 弱 GPU 上若淡入进行中列表被滚动/再布局,动画被取消后新视图 alpha 停在 0,
+        // 整行(含序号)永久空白。payload 重绑本身不走动画,这里再把兜底的
+        // setPlayingIndex/refreshRow 路径也断掉(主列表 rvList 已有同款做法)。
+        rv.setItemAnimator(null);
         rv.setAdapter(pa);
 
         // 行间距 6dp(等价于原 ListView 的透明 divider,最后一行不补,免得底部多一截)

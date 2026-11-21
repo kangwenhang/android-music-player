@@ -46,6 +46,16 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
     /** 拖拽期间刷序号用的 payload:带 payload 的重绑不走 cross-fade 动画 */
     public static final Object PAYLOAD_INDEX = new Object();
 
+    /**
+     * 全量视觉刷新 payload(背景/颜色/粗体/序号,不含标题等文本)。
+     * v6.6.4:setPlayingIndex / refreshRow 原先走不带 payload 的 notifyItemChanged,
+     * 触发 DefaultItemAnimator cross-fade —— 车机弱 GPU 上若动画进行中恰逢滚动/再布局,
+     * 淡入动画被打断后新视图 alpha 停在 0,整行(含序号)永久空白
+     * (= 用户实测"拖动列表后序号消失")。带 payload 的重绑 canReuseUpdatedViewHolder
+     * 返回 true,原视图原地更新,不存在淡入淡出,根治此类消失。
+     */
+    public static final Object PAYLOAD_STATE = new Object();
+
     /** 行点击回调(MainActivity 收到后关弹窗并从该首起播) */
     public interface OnRowClick {
         void onRow(int position);
@@ -93,11 +103,13 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
         int old = playingIndex;
         playingIndex = index;
         if (old >= 0 && old < data.size()) {
-            notifyItemChanged(old);
+            // v6.6.4:PAYLOAD_STATE 原地刷新(旧行去掉高亮),不走 cross-fade
+            notifyItemChanged(old, PAYLOAD_STATE);
         }
         if (index >= 0 && index < data.size()) {
-            notifyItemChanged(index);
+            notifyItemChanged(index, PAYLOAD_STATE);
         }
+        CacheDebugLog.log("PL playingIdx " + old + "->" + index);
     }
 
     /**
@@ -124,12 +136,15 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
         // 不走 cross-fade 动画,弱 GPU 上不会出现"序号淡出一瞬间"的残影。
         int lo = Math.min(from, to);
         notifyItemRangeChanged(lo, Math.abs(from - to) + 1, PAYLOAD_INDEX);
+        CacheDebugLog.log("PL swap " + from + "->" + to
+                + " playingIdx=" + playingIndex);
     }
 
-    /** 落手后整行重绑(不带 payload,把拖拽行的序号也刷成最终位置) */
+    /** 落手后重绑拖拽行(v6.6.4:PAYLOAD_STATE 原地刷新,不触发 cross-fade) */
     public void refreshRow(int position) {
         if (position >= 0 && position < data.size()) {
-            notifyItemChanged(position);
+            notifyItemChanged(position, PAYLOAD_STATE);
+            CacheDebugLog.log("PL refreshRow " + position);
         }
     }
 
@@ -140,22 +155,27 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
         return new VH(v);
     }
 
-    /** 拖拽期间带 payload 的局部刷新:只刷序号/▶,整行不动 */
+    /** 拖拽期间带 payload 的局部刷新:原地更新,不走 cross-fade */
     @Override
     public void onBindViewHolder(@NonNull VH h, int position,
                                  @NonNull List<Object> payloads) {
-        if (!payloads.isEmpty()) {
+        if (payloads.isEmpty()) {
+            onBindViewHolder(h, position);
+            return;
+        }
+        if (payloads.contains(PAYLOAD_STATE)) {
+            // 全量视觉刷新(背景/颜色/粗体/序号),文本内容不变
+            bindVisual(h, position);
+        } else {
+            // PAYLOAD_INDEX:拖拽排序中只刷序号/▶,开销最小
             boolean playing = (position == playingIndex);
             h.index.setText(playing ? MARK_PLAYING : String.valueOf(position + 1));
             h.index.setTextColor(playing ? colorPlayingTextSub : colorTextSecondary);
-            return;
         }
-        onBindViewHolder(h, position);
     }
 
-    @Override
-    public void onBindViewHolder(@NonNull VH h, int position) {
-        MusicBean bean = data.get(position);
+    /** 视觉样式(背景/序号/颜色/粗体)——payload 刷新与整行 bind 共用,保证一致 */
+    private void bindVisual(VH h, int position) {
         boolean playing = (position == playingIndex);
 
         if (playing) {
@@ -175,6 +195,12 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
             h.dur.setTextColor(colorTextSecondary);
             h.title.setTypeface(null, Typeface.NORMAL);
         }
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull VH h, int position) {
+        MusicBean bean = data.get(position);
+        bindVisual(h, position);
 
         h.title.setText(bean.getTitle());
         h.artist.setText(bean.getArtist());

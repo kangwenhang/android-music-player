@@ -47,8 +47,13 @@ public class CacheDebugLog {
      * 【2026-10-04 关闭】进度条"圆点与深蓝条不同步"排查定案(v5.7.353 运行时标定
      * 模拟器全程验证通过:frac 0.006~0.940 填充终点与圆点中心偏差 ≤1px),
      * 诊断期结束,正式版关闭落盘。
+     *
+     * 【2026-11-22 重开】播放列表弹窗"拖动后序号消失"排查(v6.6.4 修复后仍需
+     * 真机取证):新增 PL 开头的埋点(弹窗开/拖拽 swap/落手/高亮切换),
+     * 都是弹窗内的低频事件,量级远小于当年的每次切换/重建,车机扛得住。
+     * 排查定案后再关。
      */
-    public static final boolean ENABLED = false;
+    public static final boolean ENABLED = true;
 
     private static final String FILE_NAME = "cache_debug.log";
     /** 单文件大小上限(超过即重建),避免长期运行把存储写满 */
