@@ -61,7 +61,9 @@
         android:background="@color/eq_quick_bg"
         android:visibility="gone" />
 
-    <!-- 预设列表(卡片行,Java 填充) -->
+    <!-- 预设列表(卡片行,Java 填充)
+         listSelector 置空:默认 selector 画在子项背后,方角会从卡片圆角缺口漏出;
+         按压反馈由行自身的 bg_settings_item(state_pressed)提供,不受影响 -->
     <ListView
         android:id="@+id/lv_eq_presets"
         android:layout_width="match_parent"
@@ -69,6 +71,7 @@
         android:layout_weight="1"
         android:divider="@android:color/transparent"
         android:dividerHeight="8dp"
+        android:listSelector="@null"
         android:padding="16dp"
         android:scrollbars="none" />
 

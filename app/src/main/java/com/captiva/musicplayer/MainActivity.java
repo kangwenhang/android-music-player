@@ -45,6 +45,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -130,6 +131,8 @@ public class MainActivity extends AppCompatActivity {
     private List<MusicBean> playlistQueue;
     /** 弹窗副标题("共 N 首 · 正在播放第 M 首") */
     private TextView tvPlaylistSub;
+    /** 长按拖动排序落手的时间戳:落手瞬间松指会带出一次 click,500ms 内忽略防误触起播 */
+    private long playlistLastDropAt;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
 
@@ -2641,7 +2644,10 @@ public class MainActivity extends AppCompatActivity {
      *       即按该列表起播,与主列表点击同一套语义,不会出现按钮点了没反应。</li>
      * </ul>
      *
-     * <p>性能:800+ 首一次性喂给 ListView(getView 全程复用 + 颜色预取),
+     * <p>交互(v6.6.2):点击行 = 从该首起播;**长按行 = 拖动排序**,拖动期间只交换
+     * 快照,落手一次性提交 MusicService.reorderQueue(currentIndex 跟着播放行走)。
+     *
+     * <p>性能:800+ 首一次性喂给 RecyclerView(VH 全程复用 + 颜色预取),
      * 只绑可见的几行,进弹窗耗时与总歌数无关,不需要分批加载。
      */
     private void showPlaylistDialog() {
@@ -2668,16 +2674,87 @@ public class MainActivity extends AppCompatActivity {
         }
 
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_playlist, null);
-        final ListView lv = (ListView) dialogView.findViewById(R.id.lv_playlist);
+        final RecyclerView rv = (RecyclerView) dialogView.findViewById(R.id.rv_playlist);
         tvPlaylistSub = (TextView) dialogView.findViewById(R.id.tv_playlist_sub);
-
-        final PlaylistAdapter pa = new PlaylistAdapter(this, queue, playingIndex);
-        lv.setAdapter(pa);
-        tvPlaylistSub.setText(buildPlaylistSubtitle(queue.size(), playingIndex));
 
         final Dialog dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         dialog.setContentView(dialogView);
+
+        final PlaylistAdapter pa = new PlaylistAdapter(this, queue, playingIndex,
+                new PlaylistAdapter.OnRowClick() {
+                    @Override
+                    public void onRow(int position) {
+                        // 长按拖动落手的瞬间松指可能带出一次 click,
+                        // 不能被误当成"点行起播",500ms 内忽略
+                        if (SystemClock.elapsedRealtime() - playlistLastDropAt < 500) {
+                            return;
+                        }
+                        // 先关弹窗再起播:起播会重设队列并触发状态广播,弹窗留着会先闪一下旧高亮
+                        dialog.dismiss();
+                        playFromPlaylist(queue, position);
+                    }
+                });
+        rv.setLayoutManager(new LinearLayoutManager(this));
+        rv.setAdapter(pa);
+
+        // 行间距 6dp(等价于原 ListView 的透明 divider,最后一行不补,免得底部多一截)
+        final int rowGap = (int) (6 * getResources().getDisplayMetrics().density + 0.5f);
+        rv.addItemDecoration(new RecyclerView.ItemDecoration() {
+            @Override
+            public void getItemOffsets(android.graphics.Rect outRect, View v,
+                                       RecyclerView parent, RecyclerView.State state) {
+                if (parent.getChildAdapterPosition(v) < state.getItemCount() - 1) {
+                    outRect.bottom = rowGap;
+                }
+            }
+        });
+
+        // 长按拖动排序(v6.6.2):拖动期间只交换弹窗快照(pa.swap),
+        // 落手(clearView)一次性提交给 MusicService —— 拖动过程不碰服务队列,
+        // 自动切歌等广播也不会把排序中的快照搅乱。
+        ItemTouchHelper.SimpleCallback dragCb = new ItemTouchHelper.SimpleCallback(
+                ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
+            private int dragFrom = -1;
+
+            @Override
+            public boolean onMove(RecyclerView recyclerView,
+                                  RecyclerView.ViewHolder vh, RecyclerView.ViewHolder target) {
+                int from = vh.getAdapterPosition();
+                int to = target.getAdapterPosition();
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION
+                        || from == to) {
+                    return false;
+                }
+                pa.swap(from, to);
+                if (dragFrom < 0) {
+                    dragFrom = from;
+                }
+                return true;
+            }
+
+            @Override
+            public void onSwiped(RecyclerView.ViewHolder vh, int direction) {
+                // 不启用滑动删除
+            }
+
+            @Override
+            public void clearView(RecyclerView recyclerView, RecyclerView.ViewHolder vh) {
+                super.clearView(recyclerView, vh);
+                if (dragFrom >= 0) {
+                    int to = vh.getAdapterPosition();
+                    if (to != RecyclerView.NO_POSITION && dragFrom != to) {
+                        commitPlaylistReorder(dragFrom, to);
+                    }
+                    dragFrom = -1;
+                    playlistLastDropAt = SystemClock.elapsedRealtime();
+                }
+            }
+        };
+        new ItemTouchHelper(dragCb).attachToRecyclerView(rv);
+
+        tvPlaylistSub.setText(buildPlaylistSubtitle(queue.size(), playingIndex));
+
         dialogView.findViewById(R.id.btn_playlist_close).setOnClickListener(
                 new View.OnClickListener() {
                     @Override
@@ -2685,16 +2762,6 @@ public class MainActivity extends AppCompatActivity {
                         dialog.dismiss();
                     }
                 });
-
-        lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(android.widget.AdapterView<?> parent, View view,
-                                    int position, long id) {
-                // 先关弹窗再起播:起播会重设队列并触发状态广播,弹窗留着会先闪一下旧高亮
-                dialog.dismiss();
-                playFromPlaylist(queue, position);
-            }
-        });
 
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
             @Override
@@ -2713,13 +2780,25 @@ public class MainActivity extends AppCompatActivity {
 
         // 定位到正在播放那首(上面留 2 行上下文,车机上比贴着顶边更好认)
         if (playingIndex > 0) {
-            lv.post(new Runnable() {
-                @Override
-                public void run() {
-                    lv.setSelectionFromTop(Math.max(0, playingIndex - 2), 0);
-                }
-            });
+            rv.scrollToPosition(Math.max(0, playingIndex - 2));
         }
+    }
+
+    /**
+     * 拖拽排序落手:把弹窗快照里 from→to 的移动提交给 MusicService。
+     * adapter.swap 已用同一套规则调整过弹窗里的高亮下标,这里只需提交服务队列
+     * + 刷新副标题(副标题里的"正在播放第 M 首"以服务 currentIndex 为准)。
+     */
+    private void commitPlaylistReorder(int from, int to) {
+        if (service == null || !bound) {
+            return;
+        }
+        service.reorderQueue(from, to);
+        if (tvPlaylistSub != null && playlistQueue != null) {
+            tvPlaylistSub.setText(buildPlaylistSubtitle(
+                    playlistQueue.size(), service.getCurrentIndex()));
+        }
+        updatePlayingHighlight();
     }
 
     /**

@@ -653,6 +653,35 @@ public class MusicService extends Service {
         posTrackingActive = false;
     }
 
+    /**
+     * 拖拽排序:把队列里 from 位置的歌移到 to 位置(v6.6 播放列表弹窗长按拖动)。
+     * currentIndex 跟着"正在播的那首"移动:
+     * <ul>
+     *   <li>拖的正是正在播的那首 → currentIndex = to;</li>
+     *   <li>从播放位上方拖出、插到播放位及以后 → 播放位左移一格;</li>
+     *   <li>从播放位下方拖出、插到播放位及以前 → 播放位右移一格;</li>
+     *   <li>其余情况(两侧互不跨越播放位)→ 播放位不动。</li>
+     * </ul>
+     * 与 setPlayList 同策略:队列不落盘,只影响本次会话的播放顺序。
+     */
+    public synchronized void reorderQueue(int from, int to) {
+        if (from < 0 || to < 0 || from == to) {
+            return;
+        }
+        if (from >= playList.size() || to >= playList.size()) {
+            return;
+        }
+        MusicBean moved = playList.remove(from);
+        playList.add(to, moved);
+        if (currentIndex == from) {
+            currentIndex = to;
+        } else if (from < currentIndex && to >= currentIndex) {
+            currentIndex--;
+        } else if (from > currentIndex && to <= currentIndex) {
+            currentIndex++;
+        }
+    }
+
     /** 播放指定索引 */
     public void playIndex(int index) {
         if (playList.isEmpty() || index < 0 || index >= playList.size()) {

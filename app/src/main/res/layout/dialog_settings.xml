@@ -45,7 +45,9 @@
             android:textSize="22sp" />
     </LinearLayout>
 
-    <!-- 菜单列表容器(Java动态填充) -->
+    <!-- 菜单列表容器(Java动态填充)
+         listSelector 置空:默认 selector 画在子项背后,方角会从卡片圆角缺口漏出;
+         按压反馈由行自身的 bg_settings_item(state_pressed)提供,不受影响 -->
     <ListView
         android:id="@+id/lv_settings"
         android:layout_width="match_parent"
@@ -53,6 +55,7 @@
         android:layout_weight="1"
         android:divider="@android:color/transparent"
         android:dividerHeight="8dp"
+        android:listSelector="@null"
         android:padding="16dp"
         android:scrollbars="none" />
 

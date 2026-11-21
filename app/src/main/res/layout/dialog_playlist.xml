@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 播放列表弹窗(当前播放队列,全屏:渐变头部 + 圆角卡片行)
      【2026-11-22 v6.6】与设置/EQ 快捷弹窗同款结构:头部渐变 + 卡片行 + 当前播放行高亮。
-     行由 PlaylistAdapter 填充,点击任意一行 = 从该首起重设队列并开始播放。 -->
+     【2026-11-22 v6.6.2】ListView → RecyclerView + ItemTouchHelper:
+     长按行拖动调整播放顺序;点击任意一行 = 从该首起重设队列并开始播放。
+     RecyclerView 没有 listSelector,顺带根治了"选中高亮方角从卡片圆角处溢出"的问题。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -65,14 +67,12 @@
             android:textSize="22sp" />
     </LinearLayout>
 
-    <!-- 队列列表(卡片行,Java 填充) -->
-    <ListView
-        android:id="@+id/lv_playlist"
+    <!-- 队列列表(卡片行,Java 填充;行间距 6dp 由 ItemDecoration 补) -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rv_playlist"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:divider="@android:color/transparent"
-        android:dividerHeight="6dp"
         android:padding="12dp"
         android:clipToPadding="false"
         android:scrollbars="none" />

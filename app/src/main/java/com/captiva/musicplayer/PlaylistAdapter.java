@@ -5,11 +5,13 @@ import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.BaseAdapter;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.RecyclerView;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -20,23 +22,29 @@ import java.util.List;
  * 滚动时踩到并发修改。真正需要同步的只有"现在是第几首在播",用
  * {@link #setPlayingIndex(int)} 单独刷新即可。
  *
- * <p>性能:车机列表动辄 800+ 首,虽然是 ListView 复用,仍然做了三件事 ——
- * <ul>
- *   <li>ViewHolder 复用,getView 里不 findViewById;</li>
- *   <li>颜色在构造时一次性取好(不在 bind 里 ContextCompat.getColor);</li>
- *   <li>背景只按"是否当前行"换资源,不新建 Drawable 实例。</li>
- * </ul>
+ * <p>v6.6.2:ListView → RecyclerView,支持长按拖动排序(ItemTouchHelper 由
+ * MainActivity 挂载)。排序期间行内交换走 {@link #swap(int, int)},落手时
+ * MainActivity 调 MusicService.reorderQueue 一次性提交 —— 两边用同一套
+ * currentIndex 调整规则,弹窗快照与服务队列保持一致。
+ *
+ * <p>性能:车机列表动辄 800+ 首,颜色在构造时一次性取好(不在 bind 里
+ * ContextCompat.getColor);背景只按"是否当前行"换资源,不新建 Drawable 实例。
  * 注意背景不能缓存同一个 Drawable 实例跨行共享:bg_settings_item 是
- * selector(带 state_pressed),Drawable 的 callback/state 是单例的,
- * 多行共用一个实例会出现"按一行、全列表一起变色"。
+ * selector(带 state_pressed),多行共用一个实例会出现"按一行、全列表一起变色"。
  */
-public class PlaylistAdapter extends BaseAdapter {
+public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.VH> {
 
     /** 当前播放行左侧显示的字形(代替序号,一眼看出播到哪) */
     private static final String MARK_PLAYING = "▶";
 
+    /** 行点击回调(MainActivity 收到后关弹窗并从该首起播) */
+    public interface OnRowClick {
+        void onRow(int position);
+    }
+
     private final List<MusicBean> data;
     private final LayoutInflater inflater;
+    private final OnRowClick rowClick;
 
     private final int colorTextPrimary;
     private final int colorTextSecondary;
@@ -46,9 +54,11 @@ public class PlaylistAdapter extends BaseAdapter {
     /** 当前播放行在**队列**里的下标,-1 = 没有正在播放的(队列还没起播) */
     private int playingIndex;
 
-    public PlaylistAdapter(Context context, List<MusicBean> data, int playingIndex) {
+    public PlaylistAdapter(Context context, List<MusicBean> data, int playingIndex,
+                           OnRowClick rowClick) {
         this.data = data;
         this.playingIndex = playingIndex;
+        this.rowClick = rowClick;
         this.inflater = LayoutInflater.from(context);
         this.colorTextPrimary = ContextCompat.getColor(context, R.color.text_primary);
         this.colorTextSecondary = ContextCompat.getColor(context, R.color.text_secondary);
@@ -58,51 +68,61 @@ public class PlaylistAdapter extends BaseAdapter {
 
     /**
      * 更新高亮行(自动切歌时由 MainActivity 的状态广播调用)。
-     * 下标没变就不刷,避免每 300ms 的进度广播把整屏重绑一遍。
+     * 只刷新新旧两行,避免每 300ms 的进度广播把整屏重绑一遍。
      */
     public void setPlayingIndex(int index) {
         if (index == playingIndex) {
             return;
         }
+        int old = playingIndex;
         playingIndex = index;
-        notifyDataSetChanged();
-    }
-
-    @Override
-    public int getCount() {
-        return data.size();
-    }
-
-    @Override
-    public MusicBean getItem(int position) {
-        return data.get(position);
-    }
-
-    @Override
-    public long getItemId(int position) {
-        return position;
-    }
-
-    @Override
-    public View getView(int position, View convertView, ViewGroup parent) {
-        Holder h;
-        if (convertView == null) {
-            convertView = inflater.inflate(R.layout.dialog_playlist_item, parent, false);
-            h = new Holder();
-            h.index = (TextView) convertView.findViewById(R.id.tv_pl_index);
-            h.title = (TextView) convertView.findViewById(R.id.tv_pl_title);
-            h.artist = (TextView) convertView.findViewById(R.id.tv_pl_artist);
-            h.dur = (TextView) convertView.findViewById(R.id.tv_pl_dur);
-            convertView.setTag(h);
-        } else {
-            h = (Holder) convertView.getTag();
+        if (old >= 0 && old < data.size()) {
+            notifyItemChanged(old);
         }
+        if (index >= 0 && index < data.size()) {
+            notifyItemChanged(index);
+        }
+    }
 
+    /**
+     * 拖拽排序:把 from 行移到 to 行。
+     * playingIndex 的调整规则与 MusicService.reorderQueue 完全一致
+     * (拖的是播放行 → 跟着走;跨越播放位 → 补偿一格)。
+     */
+    public void swap(int from, int to) {
+        if (from == to || from < 0 || to < 0
+                || from >= data.size() || to >= data.size()) {
+            return;
+        }
+        Collections.swap(data, from, to);
+        if (playingIndex == from) {
+            playingIndex = to;
+        } else if (from < playingIndex && to >= playingIndex) {
+            playingIndex--;
+        } else if (from > playingIndex && to <= playingIndex) {
+            playingIndex++;
+        }
+        notifyItemMoved(from, to);
+        // notifyItemMoved 只重绑被移动的两行,介于 from/to 之间的行只是换了位置、
+        // 不会重新 bind —— 左侧序号会停留在旧值。补一次区间重绑刷序号。
+        int lo = Math.min(from, to);
+        notifyItemRangeChanged(lo, Math.abs(from - to) + 1);
+    }
+
+    @NonNull
+    @Override
+    public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        View v = inflater.inflate(R.layout.dialog_playlist_item, parent, false);
+        return new VH(v);
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull VH h, int position) {
         MusicBean bean = data.get(position);
         boolean playing = (position == playingIndex);
 
         if (playing) {
-            convertView.setBackgroundResource(R.drawable.bg_playlist_item_playing);
+            h.itemView.setBackgroundResource(R.drawable.bg_playlist_item_playing);
             h.index.setText(MARK_PLAYING);
             h.index.setTextColor(colorPlayingTextSub);
             h.title.setTextColor(colorPlayingText);
@@ -110,7 +130,7 @@ public class PlaylistAdapter extends BaseAdapter {
             h.dur.setTextColor(colorPlayingTextSub);
             h.title.setTypeface(null, Typeface.BOLD);
         } else {
-            convertView.setBackgroundResource(R.drawable.bg_settings_item);
+            h.itemView.setBackgroundResource(R.drawable.bg_settings_item);
             h.index.setText(String.valueOf(position + 1));
             h.index.setTextColor(colorTextSecondary);
             h.title.setTextColor(colorTextPrimary);
@@ -122,14 +142,38 @@ public class PlaylistAdapter extends BaseAdapter {
         h.title.setText(bean.getTitle());
         h.artist.setText(bean.getArtist());
         h.dur.setText(MusicBean.formatDuration(bean.getDuration()));
-        return convertView;
+
+        h.itemView.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (rowClick != null) {
+                    int pos = h.getAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION) {
+                        rowClick.onRow(pos);
+                    }
+                }
+            }
+        });
     }
 
-    /** getView 复用容器(不 static —— 内部类实例只在适配器存活期内存在) */
-    private static final class Holder {
-        TextView index;
-        TextView title;
-        TextView artist;
-        TextView dur;
+    @Override
+    public int getItemCount() {
+        return data.size();
+    }
+
+    /** RecyclerView 复用容器 */
+    static final class VH extends RecyclerView.ViewHolder {
+        final TextView index;
+        final TextView title;
+        final TextView artist;
+        final TextView dur;
+
+        VH(View itemView) {
+            super(itemView);
+            index = (TextView) itemView.findViewById(R.id.tv_pl_index);
+            title = (TextView) itemView.findViewById(R.id.tv_pl_title);
+            artist = (TextView) itemView.findViewById(R.id.tv_pl_artist);
+            dur = (TextView) itemView.findViewById(R.id.tv_pl_dur);
+        }
     }
 }
