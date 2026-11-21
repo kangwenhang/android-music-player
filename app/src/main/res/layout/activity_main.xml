@@ -354,6 +354,24 @@
                     android:textSize="24sp"
                     android:textStyle="bold" />
 
+                <!-- 播放列表(小圆,点击弹出当前播放队列,可在队列内直接跳播)
+                     【2026-11-22 v6.6】图标 ic_playlist 为日/夜两套 PNG
+                     (白天深色 #3A3F4C 放 drawable-*,夜间白色放 drawable-night-*),
+                     由 tools/make_playlist_icon.py 从 512x512 源图缩放生成。
+                     图标取 32dp(比 btn_mode 的 24dp 大一档):源图墨迹细,
+                     24dp 下三条横条只剩 2px 且三角左缘会被裁;padding 16dp
+                     使 32dp 图标正好落在 64dp 圆内。 -->
+                <ImageView
+                    android:id="@+id/btn_playlist"
+                    android:layout_width="@dimen/btn_circle_size"
+                    android:layout_height="@dimen/btn_circle_size"
+                    android:layout_marginLeft="@dimen/btn_circle_spacing"
+                    android:padding="16dp"
+                    android:scaleType="fitCenter"
+                    android:background="@drawable/bg_btn_circle"
+                    android:src="@drawable/ic_playlist"
+                    android:contentDescription="@string/playlist_title" />
+
                 <!-- 均衡器(方形按钮,EQ竖条图标 + 当前模式名,点击弹出预设快速切换)
                      【2026-10-04 v5.7.372】"EQ:关闭"文字前缀升级为五条均衡器图标
                      (ic_eq_bars,自绘 PNG,与参考图同比例),文字只显示当前预设名 -->

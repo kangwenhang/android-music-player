@@ -121,6 +121,15 @@ public class MainActivity extends AppCompatActivity {
     private Button btnPrev, btnPlay, btnNext, btnFav;
     /** 播放模式按钮(v5.7.366 起为 ImageView:文字"随/顺/单"升级为 Material 图标) */
     private ImageView btnMode;
+    /** 播放列表按钮(小圆,点开当前播放队列;v6.6 新增,位置在均衡器左侧) */
+    private ImageView btnPlaylist;
+    /** 播放列表弹窗(打开期间随自动切歌同步高亮;关闭时连同下面两个字段一起置空) */
+    private Dialog playlistDialog;
+    private PlaylistAdapter playlistAdapter;
+    /** 弹窗里那份队列快照(与 MusicService 的活队列分离,避免滚动时踩并发修改) */
+    private List<MusicBean> playlistQueue;
+    /** 弹窗副标题("共 N 首 · 正在播放第 M 首") */
+    private TextView tvPlaylistSub;
     // UI - 歌词区(封面做底色)
     private LrcView lrcView;
 
@@ -367,6 +376,8 @@ public class MainActivity extends AppCompatActivity {
                 // 更新EQ按钮显示(切歌后可能应用了单曲绑定的EQ)
                 String eqPreset = intent.getStringExtra("eqPreset");
                 updateEqButtonText(eqPreset);
+                // 播放列表弹窗开着时同步高亮(自动切歌/上一首下一首)
+                syncPlaylistDialogHighlight();
                 // 滚动列表到当前播放歌曲(含高亮+确保数据加载)
                 // 连点防抖(2026-10-04):快速切歌时列表滚动+高亮合并为一次,
                 // 播放本体不防抖(每次点击都切),只合并 UI 侧刷新
@@ -664,6 +675,7 @@ public class MainActivity extends AppCompatActivity {
         btnNext = findViewById(R.id.btn_next);
         btnMode = findViewById(R.id.btn_mode);
         btnFav = findViewById(R.id.btn_fav);
+        btnPlaylist = findViewById(R.id.btn_playlist);
         lrcView = findViewById(R.id.lrc_view);
 
         // 缓存收藏颜色
@@ -1252,6 +1264,9 @@ public class MainActivity extends AppCompatActivity {
             syncStarToServer(current, nowFav);
             Toast.makeText(this, nowFav ? "已收藏" : "取消收藏", Toast.LENGTH_SHORT).show();
         });
+
+        // 播放列表:打开当前播放队列(可在队列内直接跳播)
+        btnPlaylist.setOnClickListener(v -> showPlaylistDialog());
 
         // 长按歌词区:调整歌词偏移(校正个别歌曲歌词不同步)
         lrcView.setOnLongClickListener(v -> {
@@ -2611,6 +2626,146 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         dialog.show();
+    }
+
+    // ==================== 播放列表(当前播放队列) ====================
+
+    /**
+     * 弹出播放列表(当前播放队列)。
+     *
+     * <p>队列语义:
+     * <ul>
+     *   <li>正常情况取 {@link MusicService#getPlayList()} 的**快照** —— 那就是
+     *       上一首/下一首/自动切歌实际走的队列,用户看到什么就播什么;</li>
+     *   <li>队列还空着(刚启动、还没点过歌)时退回"当前显示的列表",点任意一行
+     *       即按该列表起播,与主列表点击同一套语义,不会出现按钮点了没反应。</li>
+     * </ul>
+     *
+     * <p>性能:800+ 首一次性喂给 ListView(getView 全程复用 + 颜色预取),
+     * 只绑可见的几行,进弹窗耗时与总歌数无关,不需要分批加载。
+     */
+    private void showPlaylistDialog() {
+        if (playlistDialog != null && playlistDialog.isShowing()) {
+            return;   // 电阻屏双击很常见,已经在显示就不再叠一层
+        }
+        if (service == null || !bound) {
+            Toast.makeText(this, "正在初始化，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final List<MusicBean> queue;
+        final int playingIndex;
+        List<MusicBean> svcQueue = service.getPlayList();
+        if (svcQueue != null && !svcQueue.isEmpty()) {
+            queue = new ArrayList<>(svcQueue);
+            playingIndex = service.getCurrentIndex();
+        } else if (adapter != null && !adapter.getDisplayList().isEmpty()) {
+            queue = new ArrayList<>(adapter.getDisplayList());
+            playingIndex = -1;
+        } else {
+            Toast.makeText(this, "播放列表是空的，先选一首歌吧", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_playlist, null);
+        final ListView lv = (ListView) dialogView.findViewById(R.id.lv_playlist);
+        tvPlaylistSub = (TextView) dialogView.findViewById(R.id.tv_playlist_sub);
+
+        final PlaylistAdapter pa = new PlaylistAdapter(this, queue, playingIndex);
+        lv.setAdapter(pa);
+        tvPlaylistSub.setText(buildPlaylistSubtitle(queue.size(), playingIndex));
+
+        final Dialog dialog = new Dialog(this, R.style.Theme_CaptivaDialog);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(dialogView);
+        dialogView.findViewById(R.id.btn_playlist_close).setOnClickListener(
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                    }
+                });
+
+        lv.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(android.widget.AdapterView<?> parent, View view,
+                                    int position, long id) {
+                // 先关弹窗再起播:起播会重设队列并触发状态广播,弹窗留着会先闪一下旧高亮
+                dialog.dismiss();
+                playFromPlaylist(queue, position);
+            }
+        });
+
+        dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(DialogInterface d) {
+                playlistDialog = null;
+                playlistAdapter = null;
+                playlistQueue = null;
+                tvPlaylistSub = null;
+            }
+        });
+
+        playlistDialog = dialog;
+        playlistAdapter = pa;
+        playlistQueue = queue;
+        dialog.show();
+
+        // 定位到正在播放那首(上面留 2 行上下文,车机上比贴着顶边更好认)
+        if (playingIndex > 0) {
+            lv.post(new Runnable() {
+                @Override
+                public void run() {
+                    lv.setSelectionFromTop(Math.max(0, playingIndex - 2), 0);
+                }
+            });
+        }
+    }
+
+    /**
+     * 从播放列表选中一首开始播。
+     *
+     * <p>与主列表点击的区别:这里直接把**弹窗里那份队列**设成播放队列 ——
+     * 用户看到的是这个队列,起播后队列就必须还是它,否则会出现
+     * "点了队列里第 30 首,结果按主列表顺序往下走"的错位。
+     */
+    private void playFromPlaylist(List<MusicBean> queue, int position) {
+        if (service == null || !bound) {
+            Toast.makeText(this, "正在初始化，请稍候", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (queue == null || position < 0 || position >= queue.size()) {
+            return;
+        }
+        service.setPlayList(queue, position);
+        service.playIndex(position);
+        // 高亮立刻跟上(不等状态广播):弹窗刚关,主列表就在眼前,
+        // 晚 200~400ms 才亮会被当成"点了没反应"
+        updatePlayingHighlight();
+        scheduleListRefresh();
+    }
+
+    /** 播放列表副标题文案:共 N 首 [· 正在播放第 M 首] */
+    private String buildPlaylistSubtitle(int total, int playingIndex) {
+        if (playingIndex >= 0 && playingIndex < total) {
+            return "共 " + total + " 首 · 正在播放第 " + (playingIndex + 1) + " 首";
+        }
+        return "共 " + total + " 首";
+    }
+
+    /**
+     * 弹窗开着时同步高亮(自动切歌 / 上一首下一首都会走到状态广播)。
+     * 下标没变时 PlaylistAdapter 内部直接返回,不会因为播放/暂停广播白白重绑列表。
+     */
+    private void syncPlaylistDialogHighlight() {
+        if (playlistAdapter == null || playlistQueue == null || service == null) {
+            return;
+        }
+        int idx = service.getCurrentIndex();
+        playlistAdapter.setPlayingIndex(idx);
+        if (tvPlaylistSub != null) {
+            tvPlaylistSub.setText(buildPlaylistSubtitle(playlistQueue.size(), idx));
+        }
     }
 
     // ==================== 服务器状态显示 ====================
@@ -5189,6 +5344,14 @@ public class MainActivity extends AppCompatActivity {
         handler.removeCallbacksAndMessages(null);
         // 停止目录监听,释放 inotify 资源
         stopLocalDirObserver();
+        // 播放列表弹窗:Activity 销毁时一并关掉,避免持有 Activity 引用
+        if (playlistDialog != null) {
+            playlistDialog.dismiss();
+            playlistDialog = null;
+            playlistAdapter = null;
+            playlistQueue = null;
+            tvPlaylistSub = null;
+        }
         PerfLogger.shutdown();
         // 取消自动同步
         cancelAutoSync();

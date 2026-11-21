@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放列表弹窗里"当前播放行"的背景:与主列表播放行/BIG 播放按钮同款蓝渐变
+     (playing_bright #42A5F5 → playing_deep #1565C0,TL→BR,angle=315),
+     圆角与卡片行(bg_settings_item 10dp)一致 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:startColor="@color/playing_bright"
+        android:endColor="@color/playing_deep" />
+    <corners android:radius="10dp" />
+</shape>

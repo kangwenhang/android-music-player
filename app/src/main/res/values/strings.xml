@@ -4,4 +4,5 @@
     <string name="mode_seq">顺序播放</string>
     <string name="mode_one">单曲循环</string>
     <string name="mode_shuf">随机播放</string>
+    <string name="playlist_title">播放列表</string>
 </resources>

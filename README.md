@@ -19,7 +19,10 @@
 - **连点切换防抖**:连续点击本地/云端时,250ms 窗口内的连发点击只按最终目标重建一次列表
 - 播放模式记忆:顺序 / 单曲循环 / 随机,状态自动保存
 - **开机自动播放**(可开关,记忆上次播放歌曲和进度,断点续播)
-- 播放模式:顺序 / 单曲循环 / 随机
+- **播放列表(当前播放队列)**:底栏均衡器左侧的列表按钮(播放三角 + 三条横条图标),
+  点开即当前播放队列 —— 当前行蓝底高亮 + `▶`,点任意一行从该首起播并把队列切到该列表;
+  队列还空着(刚启动、没点过歌)时退回当前显示的列表,不会出现"点了没反应";
+  弹窗开着时自动切歌,高亮与"正在播放第 M 首"同步刷新
 - 后台播放 + 通知栏控制
 - 方向盘媒体按键响应
 
@@ -106,6 +109,27 @@
 
 或通过 GitHub Actions 自动构建(push 到 main 或 local-test 分支触发),自动生成 APK 并发布 Release。
 
+### 命令行编译(本地快验)
+
+本环境没有 `gradlew`,用本地 Gradle 7.5 直接跑(路径按实际安装位置):
+
+```bash
+/c/Users/kangw/.workbuddy/binaries/gradle/gradle-7.5/bin/gradle assembleDebug \
+  -Dorg.gradle.java.home="C:/Users/kangw/.workbuddy/binaries/java/jdk-17.0.20.1+1"
+```
+
+两个必踩的坑:
+
+- **必须用 JDK 17 跑 Gradle**。默认 JVM 若是 JDK 21,`minifyDebugWithR8` 会报
+  `R8: java.lang.NullPointerException: Cannot invoke "String.length()" because "<parameter1>" is null`
+  (AGP 7.4.2 自带的 R8 认不了新 JVM),换成 JDK 17 即通过。
+- **资源合并缓存会偶发失效**:报
+  `Unable to locate resourceFile (...merged-not-compiled-resources\debug\layout\xxx.xml) in source-sets` 时,
+  删掉 `app/build/intermediates/merged-not-compiled-resources` 与
+  `app/build/intermediates/incremental/debug/mergeDebugResources` 再跑即可(OneDrive 同步目录下增量合并容易被扰动)。
+
+本地编译只做语法/资源快验;**正式验证一律走 GitHub CI → 下载 pre-release APK → 车机/模拟器**。
+
 ## 目录结构(本地 / 云端隔离)
 
 设置里只需要配置一个**音乐文件根目录**(默认 `外部存储/Music`),两类歌曲自动隔离、互不串味:
@@ -135,6 +159,30 @@
 - **local-test 分支**:测试版,`assembleDebug`(性能监控开启,便于卡顿分析),推送后自动构建并创建预发布(Pre-release)
 - 版本号基于 git tag,正式版如 `v6.4`,预发布如 `v6.3.470-pre`
 - CI 构建 versionCode 使用 `GITHUB_RUN_NUMBER + 100000`,跨分支单调递增,确保可覆盖安装
+
+### v6.6 更新内容
+
+本版本主线是**播放列表(当前播放队列)**:
+
+- **新增播放列表入口**:底栏均衡器左侧新增列表按钮,图标为"播放三角 + 三条横条"
+  (`ic_playlist`,日/夜两套 PNG:白天 #3A3F4C、夜间纯白,32dp 落在 64dp 圆钮内)。
+  图标由 `tools/make_playlist_icon.py` 从 512×512 源图生成 —— 只缩放 **alpha 通道**
+  再统一填色,避免半透明边缘混出黑边;压到 24dp 时三条横条只剩 2px、三角左缘被裁,
+  故取 32dp(比 `btn_mode` 的 24dp 大一档)
+- **点开即当前播放队列**:弹窗沿用设置/EQ 快捷弹窗的结构(渐变头部 + 卡片行),
+  头部显示"共 N 首 · 正在播放第 M 首",当前行蓝渐变高亮 + `▶` 替代序号,
+  列表自动滚到正在播放那首(上留 2 行)
+- **点任意一行从该首起播**:点击时把**弹窗里那份队列快照**重设为播放队列
+  (不是主列表),杜绝"点了队列第 30 首、结果按主列表顺序往下走"的错位;
+  起播后立刻 `updatePlayingHighlight()` + 滚动,不等状态广播,消除"点了没反应"的错觉
+- **队列为空的兜底**:刚启动还没点过歌时队列是空的,此时退回**当前显示的列表**
+  (与主列表点击同一套语义),按该列表起播;列表也空才提示"播放列表是空的"
+- **弹窗开着时自动切歌也同步**:状态广播里回写高亮行 + 副标题;下标没变时适配器
+  直接返回,不会被播放/暂停广播白白重绑
+- **性能**:800+ 首一次性喂给 `ListView`,ViewHolder 复用 + 颜色在构造时预取 +
+  背景只按"是否当前行"换资源;背景刻意不跨行共享同一个 Drawable 实例 ——
+  `bg_settings_item` 带 `state_pressed`,Drawable 的 callback/state 是单例的,
+  多行共用会"按一行、全列表一起变色"
 
 ### v6.5 更新内容(正式版)
 
