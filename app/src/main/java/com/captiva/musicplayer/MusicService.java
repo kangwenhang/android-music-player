@@ -124,6 +124,14 @@ public class MusicService extends Service {
     // 主线程 Handler(用于异步歌词加载后更新 UI)
     private final android.os.Handler mainHandler = new android.os.Handler();
 
+    /**
+     * 服务销毁标志:onDestroy 会 shutdown 后台线程池,但单例 StreamProxy 持有的
+     * proxyCallback 在服务销毁后仍可能被触发(缓存完成晚于销毁),若放行会走到
+     * cacheExecutor.submit 抛 RejectedExecutionException —— 在主线程未捕获即
+     * 杀死整个进程,表现为"播放中突然无声/无法播放"(真机日志 10-11/11-06 实锤)。
+     */
+    private volatile boolean serviceDestroyed = false;
+
     /** 歌词加载线程池(单线程,可取消,避免Service销毁后线程泄漏) */
     private final ExecutorService lyricsExecutor = Executors.newSingleThreadExecutor();
 
@@ -148,6 +156,10 @@ public class MusicService extends Service {
             new LocalStreamProxy.CacheCallback() {
         @Override
         public void onCached(final String streamId, final java.io.File finalFile) {
+            // 服务已销毁:单例 proxy 的迟到回调,立即作废(否则 submit 已关停的池直接崩进程)
+            if (serviceDestroyed) {
+                return;
+            }
             // 当前歌已下载完:下载链路空出,预缓存可以恢复(播放只剩轻量本地文件读)
             currentViaProxy = false;
             // ---- 后台线程:登记(与 autoCacheSongLocked 成功路径一致) ----
@@ -857,7 +869,7 @@ public class MusicService extends Service {
     private void loadLocalLyrics(final MusicBean bean) {
         final String filePath = bean.getData();
 
-        lyricsExecutor.execute(new Runnable() {
+        poolSubmit(lyricsExecutor, new Runnable() {
             @Override
             public void run() {
                 // 歌词加载是纯后台任务,降为后台优先级(2026-10-04)
@@ -1017,7 +1029,7 @@ public class MusicService extends Service {
             return;
         }
 
-        lyricsExecutor.execute(new Runnable() {
+        poolSubmit(lyricsExecutor, new Runnable() {
             @Override
             public void run() {
                 // 歌词加载是纯后台任务,降为后台优先级(2026-10-04)
@@ -1507,7 +1519,7 @@ public class MusicService extends Service {
      */
     private void downloadThenPlay(final MusicBean bean, final int token) {
         // 当前播放的歌:走优先队列立即执行(资源倾斜于当前播放)
-        priorityCacheExecutor.submit(new Runnable() {
+        poolSubmit(priorityCacheExecutor, new Runnable() {
             @Override
             public void run() {
                 // 降为后台优先级(2026-10-04 二次收紧):此前 LESS_FAVORABLE(+1) 在
@@ -1621,6 +1633,16 @@ public class MusicService extends Service {
         return null;
     }
 
+    /** 提交后台任务:服务销毁后池已 shutdown,submit 会抛 RejectedExecutionException;
+     *  迟到的代理回调可能触发提交,吞掉即可,绝不能让它炸主线程(2026-11-22 真机实锤) */
+    private void poolSubmit(java.util.concurrent.ExecutorService pool, Runnable r) {
+        try {
+            pool.submit(r);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            DownloadDiag.log("后台任务提交被拒(服务已销毁),忽略");
+        }
+    }
+
     /**
      * 预缓存播放列表中当前歌曲之后的 count 首(只有网络歌占名额,本地歌直接跳过)。
      *
@@ -1632,6 +1654,9 @@ public class MusicService extends Service {
      * - 代理路径:当前歌 onCached 回调触发 —— 边下边播占着带宽,播完才开始预缓存。
      */
     private void preCacheUpcoming(int count) {
+        if (serviceDestroyed) {
+            return;
+        }
         if (navidromeConfig == null || !navidromeConfig.isAutoCacheOnPlay()) {
             return;
         }
@@ -1663,7 +1688,7 @@ public class MusicService extends Service {
             }
             final String title = b.getTitle();
             queued++;
-            cacheExecutor.submit(new Runnable() {
+            poolSubmit(cacheExecutor, new Runnable() {
                 @Override
                 public void run() {
                     // 降为后台优先级(2026-10-04):批量预缓存纯后台任务,
@@ -1821,7 +1846,7 @@ public class MusicService extends Service {
                 ? (long) navidromeConfig.getAutoCacheMaxMb() * 1024L * 1024L : 0L;
         // 当前播放的歌:走优先队列 + 优先限速档(资源倾斜于当前播放);
         // 预缓存走 cacheExecutor 后台队列 + 后台档,互不排队
-        priorityCacheExecutor.submit(new Runnable() {
+        poolSubmit(priorityCacheExecutor, new Runnable() {
             @Override
             public void run() {
                 // 降为后台优先级(2026-10-04 二次收紧,+1→BACKGROUND,理由同 downloadThenPlay)
@@ -2162,6 +2187,8 @@ public class MusicService extends Service {
 
     @Override
     public void onDestroy() {
+        // 先置销毁标志:此后单例 proxy 的迟到回调一律作废(防御主线程崩溃)
+        serviceDestroyed = true;
         // 悬浮控制条随服务销毁移除(避免窗口泄漏)
         if (floatWindow != null) {
             floatWindow.destroy();
