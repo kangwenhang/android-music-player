@@ -47,8 +47,11 @@ public final class DownloadDiag {
      * Watchdog / 生命周期 / 联网播放等记录全部停止。崩溃取证不受影响
      * (crash_log.txt 由 UncaughtExceptionHandler 独立写入)。
      * 需要重新排查:改回 true 重新构建即可,调用点无需改动(log 内部短路)。
+     *
+     * 【2026-11-22 临时重开】排查真机"无法播放/一直切歌":播放失败原因
+     * (mpError 码、文件存在性、下载失败)必须落盘才能定位,定案后关回 false。
      */
-    public static final boolean ENABLED = false;
+    public static final boolean ENABLED = true;
 
     /**
      * 列表/收藏夹调试开关:false = 关掉本轮排查"列表错位(第一首下面是第13首)"时

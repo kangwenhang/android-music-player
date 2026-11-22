@@ -12,6 +12,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.media.AudioManager;
 import android.media.MediaPlayer;
+import android.widget.Toast;
 import android.media.RemoteControlClient;
 import android.media.audiofx.Equalizer;
 import android.os.Build;
@@ -131,6 +132,15 @@ public class MusicService extends Service {
      * 杀死整个进程,表现为"播放中突然无声/无法播放"(真机日志 10-11/11-06 实锤)。
      */
     private volatile boolean serviceDestroyed = false;
+
+    /** 播放失败自动跳歌的连续计数(成功起播归零;达到上限熔断停止跳歌) */
+    private int consecutiveFailSkips = 0;
+    /**
+     * 连续失败熔断上限:达到即认定"整张列表系统性失效"
+     * (U 盘重挂载路径全变 / NAS 断连 / 存储卸载),停止无限快切 ——
+     * 旧行为是每 1 秒跳一首刷完整张列表再循环,耗电且毫无诊断价值。
+     */
+    private static final int MAX_CONSECUTIVE_FAILS = 8;
 
     /** 歌词加载线程池(单线程,可取消,避免Service销毁后线程泄漏) */
     private final ExecutorService lyricsExecutor = Executors.newSingleThreadExecutor();
@@ -1348,6 +1358,8 @@ public class MusicService extends Service {
                         // 确保音量正常(可能之前 ducking 后未恢复)
                         mp.setVolume(1.0f, 1.0f);
                         mp.start();
+                        // 起播成功:连续失败计数清零(熔断只针对连续失败)
+                        consecutiveFailSkips = 0;
                         // 恢复上次播放进度
                         if (pendingSeekPosition > 0) {
                             try {
@@ -1421,16 +1433,17 @@ public class MusicService extends Service {
                         return true;
                     }
 
-                    // 本地歌播放失败:自动跳下一首兜底(避免卡住)
+                    // 本地歌播放失败:记录文件存在性(区分"路径失效"与"解码失败",
+                    // U 盘重挂载后路径全变是连续跳歌的最常见根因),再自动跳下一首兜底
+                    String localPath = currentBean.getData();
+                    java.io.File lf = (localPath != null) ? new File(localPath) : null;
+                    DownloadDiag.log("本地歌失败诊断: 文件存在="
+                            + (lf != null && lf.exists())
+                            + " 大小=" + (lf != null && lf.exists() ? lf.length() : -1)
+                            + " path=" + localPath);
                     if (token == playToken) {
-                        mainHandler.postDelayed(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (token == playToken) {
-                                    next();
-                                }
-                            }
-                        }, 1000);
+                        scheduleFailSkip(token, "本地歌播放失败: "
+                                + currentBean.getTitle(), 1000);
                     }
                     return true;
                 }
@@ -1493,15 +1506,13 @@ public class MusicService extends Service {
             downloadThenPlay(bean, token);
             return;
         }
-        // 异常时也尝试跳下一首
-        mainHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (token == playToken) {
-                    next();
-                }
-            }
-        }, 1000);
+        // 异常时也尝试跳下一首(走熔断计数)
+        String localPath = bean.getData();
+        java.io.File lf = (localPath != null) ? new File(localPath) : null;
+        DownloadDiag.log("本地歌异常诊断: 文件存在=" + (lf != null && lf.exists())
+                + " 大小=" + (lf != null && lf.exists() ? lf.length() : -1)
+                + " path=" + localPath);
+        scheduleFailSkip(token, "prepareAndPlay 异常: " + bean.getTitle(), 1000);
     }
 
     /**
@@ -1594,6 +1605,38 @@ public class MusicService extends Service {
 
     /** 仍是当前歌曲才跳下一首(避免切歌后被旧回调带偏) */
     private void postNextIfCurrent(final int token) {
+        scheduleFailSkip(token, "下载后重播放弃(下载失败或文件异常)", 300);
+    }
+
+    /**
+     * 播放失败后的自动跳歌兜底,带连续失败熔断。
+     * 本地歌 prepare 失败(onError / handlePrepareFailure)与下载重播放弃
+     * (postNextIfCurrent)统一走这里:计数、记日志、超限熔断。
+     *
+     * @param token   当前播放代次(切歌后旧回调作废)
+     * @param reason  本次失败原因(写入 download_debug.log,逐首可查)
+     * @param delayMs 跳歌延迟(本地歌失败 1000ms / 下载放弃 300ms,沿用原节奏)
+     */
+    private void scheduleFailSkip(final int token, final String reason, long delayMs) {
+        consecutiveFailSkips++;
+        DownloadDiag.log("失败跳歌[" + consecutiveFailSkips + "/" + MAX_CONSECUTIVE_FAILS
+                + "]: " + reason);
+        if (consecutiveFailSkips >= MAX_CONSECUTIVE_FAILS) {
+            // 熔断:整张列表系统性失效,继续跳只会无限快切。停在这里并把
+            // 播放器复位到干净状态(歌名/通知停在失败那首),等用户手动处理。
+            DownloadDiag.log("熔断: 连续 " + consecutiveFailSkips + " 首播放失败,停止自动跳歌!"
+                    + " 整张列表可能已失效(U 盘路径变更/NAS 不可达/存储卸载),"
+                    + "建议重新同步或检查网络;逐首失败原因见上方[失败跳歌]日志");
+            try {
+                Toast.makeText(this,
+                        "连续播放失败已停止,请重新同步歌曲或检查网络", Toast.LENGTH_LONG).show();
+            } catch (Throwable ignored) {
+            }
+            resetPlayer();
+            notifyState();
+            updateNotification();
+            return;
+        }
         mainHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -1601,7 +1644,7 @@ public class MusicService extends Service {
                     next();
                 }
             }
-        }, 300);
+        }, delayMs);
     }
 
     /**
