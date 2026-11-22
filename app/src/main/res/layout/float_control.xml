@@ -54,34 +54,35 @@
             android:layout_marginTop="6dp" />
     </LinearLayout>
 
+    <!-- 上一首/下一首:车机触摸不精准,命中区加大到 44x48dp(字形仍 16sp) -->
     <TextView
         android:id="@+id/float_prev"
-        android:layout_width="32dp"
-        android:layout_height="40dp"
+        android:layout_width="44dp"
+        android:layout_height="48dp"
         android:gravity="center"
         android:text="◀"
         android:textColor="#E8EAF0"
-        android:textSize="14sp" />
+        android:textSize="16sp" />
 
     <TextView
         android:id="@+id/float_toggle"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:layout_marginLeft="2dp"
         android:layout_marginRight="2dp"
         android:gravity="center"
         android:background="@drawable/bg_float_toggle"
         android:text="❚❚"
         android:textColor="#FFFFFF"
-        android:textSize="14sp" />
+        android:textSize="16sp" />
 
     <TextView
         android:id="@+id/float_next"
-        android:layout_width="32dp"
-        android:layout_height="40dp"
+        android:layout_width="44dp"
+        android:layout_height="48dp"
         android:gravity="center"
         android:text="▶"
         android:textColor="#E8EAF0"
-        android:textSize="14sp" />
+        android:textSize="16sp" />
 
 </LinearLayout>

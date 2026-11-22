@@ -51,7 +51,7 @@ public final class DownloadDiag {
      * 【2026-11-22 临时重开】排查真机"无法播放/一直切歌":播放失败原因
      * (mpError 码、文件存在性、下载失败)必须落盘才能定位,定案后关回 false。
      */
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false;
 
     /**
      * 列表/收藏夹调试开关:false = 关掉本轮排查"列表错位(第一首下面是第13首)"时
