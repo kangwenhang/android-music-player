@@ -20,6 +20,11 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- 悬浮控制条(app 退到后台时显示播放控制);API 17 清单声明即授 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 前后台判定(onPause 后查栈顶 Activity 是否本包) -->
+    <uses-permission android:name="android.permission.GET_TASKS" />
+
     <application
         android:name=".App"
         android:allowBackup="true"

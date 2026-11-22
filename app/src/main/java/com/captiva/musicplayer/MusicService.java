@@ -73,6 +73,9 @@ public class MusicService extends Service {
     public static final String CMD_STOP = "com.captiva.musicplayer.STOP";
     public static final String CMD_TOGGLE = "com.captiva.musicplayer.TOGGLE";
     public static final String CMD_PLAY_INDEX = "com.captiva.musicplayer.PLAY_INDEX";
+    /** 悬浮控制条:app 退到后台时显示 / 回前台隐藏(MainActivity 前后台判定后触发) */
+    public static final String CMD_FLOAT_SHOW = "com.captiva.musicplayer.FLOAT_SHOW";
+    public static final String CMD_FLOAT_HIDE = "com.captiva.musicplayer.FLOAT_HIDE";
 
     private MediaPlayer player;
     private final List<MusicBean> playList = new ArrayList<>();
@@ -98,6 +101,9 @@ public class MusicService extends Service {
 
     private RemoteControlClient remoteControlClient;
     private AudioManager audioManager;
+
+    /** 桌面悬浮控制条(app 退到后台时显示播放控制) */
+    private FloatWindow floatWindow;
 
     /** 音频焦点监听器:导航播报时压低音量,播报结束恢复 */
     private AudioManager.OnAudioFocusChangeListener audioFocusListener;
@@ -285,6 +291,8 @@ public class MusicService extends Service {
         // 一次性迁移:旧的"播放时自动缓存=关"重置为开(与 MainActivity 幂等,双保险)
         config.migrateAutoCacheOnPlayIfNeeded();
         playMode = PlayMode.fromValue(config.getPlayMode());
+        // 悬浮控制条(app 退到后台时由 MainActivity 前后台判定触发显示)
+        floatWindow = new FloatWindow(this);
         // 【必须】给字段赋值:maybeAutoCache / promoteToLocalIfCached 都依赖它,
         // 此前该字段从未初始化(恒为 null),导致"播放时按需缓存"与"播放优先用缓存"
         // 这两条路径在判断处就直接返回,功能静默失效。
@@ -1974,6 +1982,14 @@ public class MusicService extends Service {
             } else if (CMD_PLAY_INDEX.equals(action)) {
                 int idx = intent.getIntExtra("index", 0);
                 playIndex(idx);
+            } else if (CMD_FLOAT_SHOW.equals(action)) {
+                if (floatWindow != null) {
+                    floatWindow.show();
+                }
+            } else if (CMD_FLOAT_HIDE.equals(action)) {
+                if (floatWindow != null) {
+                    floatWindow.hide();
+                }
             }
         }
         // 确保前台运行,避免被回收
@@ -2025,6 +2041,10 @@ public class MusicService extends Service {
             i.putExtra("eqPreset", equalizerManager.getActivePreset());
         }
         sendBroadcast(i);
+        // 悬浮条同步刷新歌名/播放键(未显示时是 no-op)
+        if (floatWindow != null) {
+            floatWindow.updateState();
+        }
     }
 
     /** 进度广播(由 Activity 轮询更简单,这里保留接口) */
@@ -2142,6 +2162,11 @@ public class MusicService extends Service {
 
     @Override
     public void onDestroy() {
+        // 悬浮控制条随服务销毁移除(避免窗口泄漏)
+        if (floatWindow != null) {
+            floatWindow.destroy();
+            floatWindow = null;
+        }
         // 保存播放状态,下次自动播放可恢复
         try {
             NavidromeConfig config = new NavidromeConfig(this);

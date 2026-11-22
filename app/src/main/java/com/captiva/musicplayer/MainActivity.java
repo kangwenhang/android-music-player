@@ -2,6 +2,7 @@ package com.captiva.musicplayer;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -275,6 +276,34 @@ public class MainActivity extends AppCompatActivity {
 
     /** 封面加载代次(每次 updateNowPlaying 递增,旧回调自动作废,避免暂停/恢复后封面错乱) */
     private int coverLoadToken = 0;
+
+    // ==================== 悬浮控制条(退到后台时显示) ====================
+    // onPause 延迟 400ms 判定:若盖在本界面上的是自家页面(EQ/设置/同步/更新页),
+    // 不算"退出此app界面",悬浮条不出;若是第三方 app(如高德地图)则显示。
+    // getRunningTasks 在 API 17 无需特殊授权且可靠,车机不涉及 API 21+ 的限制。
+    private static final long FLOAT_SHOW_DELAY_MS = 400;
+
+    private final Runnable floatShowCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || !bound || service == null) return;
+            try {
+                ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                if (am == null) return;
+                List<ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(1);
+                if (tasks == null || tasks.isEmpty()) return;
+                String top = tasks.get(0).topActivity != null
+                        ? tasks.get(0).topActivity.getPackageName() : null;
+                if (!getPackageName().equals(top)) {
+                    Intent i = new Intent(MainActivity.this, MusicService.class);
+                    i.setAction(MusicService.CMD_FLOAT_SHOW);
+                    startService(i);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "float show check failed", e);
+            }
+        }
+    };
 
     // 进度刷新(三档频率:播放200ms / 滑动500ms / 空闲2000ms)
     private final Handler handler = new Handler();
@@ -5307,6 +5336,13 @@ public class MainActivity extends AppCompatActivity {
         long t0 = System.currentTimeMillis();
         super.onResume();
         Log.i(TAG, "[onResume] 开始");
+        // 悬浮控制条:回前台立即隐藏,并取消 onPause 排下的延迟显示检查
+        handler.removeCallbacks(floatShowCheck);
+        if (bound && service != null) {
+            Intent hideFloat = new Intent(this, MusicService.class);
+            hideFloat.setAction(MusicService.CMD_FLOAT_HIDE);
+            startService(hideFloat);
+        }
         // 屏幕常亮:onCreate 已加窗口标志,这里再补一次 —— 息屏/解锁/被系统 UI 打扰之后
         // 窗口标志偶尔会没被重新认定(见 ScreenOnKeeper 注释),补一次成本几乎为零。
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -5395,6 +5431,8 @@ public class MainActivity extends AppCompatActivity {
         super.onPause();
         DownloadDiag.log("[生命周期] onPause | " + DownloadDiag.env());
         ScreenOnKeeper.release();
+        // 悬浮控制条:延迟判定前台归属,若已被第三方 app 盖住则显示
+        handler.postDelayed(floatShowCheck, FLOAT_SHOW_DELAY_MS);
         unregisterReceiver(stateReceiver);
         try {
             unregisterReceiver(cacheReceiver);
