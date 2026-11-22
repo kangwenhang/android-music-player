@@ -192,7 +192,9 @@
   (拖播放行 = 高亮跟着走,跨越播放位 = 补偿一格),副标题"正在播放第 M 首"同步刷新。
   v6.6.2 的整行长按判定在电阻屏快速滑动时极易误触发拖拽,还会搅出渲染残影,
   v6.6.3 改为只认把手;拖拽结束后 500ms 内的松指 click 会被忽略,防止误触起播;
-  行间 6dp 间距改由 ItemDecoration 提供
+  行间 6dp 间距改由 ItemDecoration 提供。
+  v6.6.5:把手触摸区从 48dp 加宽到 **72dp × 整行高**(真机反馈车机电阻屏
+  不好点中,图标本身不变,纯扩触摸判定)
 - **修复:拖拽中突然出现"没有序号的行"(v6.6.3,真机复现后 v6.6.4 根治)**:
   不带 payload 的 `notifyItemChanged/notifyItemRangeChanged` 会触发
   DefaultItemAnimator 的 cross-fade(旧视图淡出/新视图淡入),车机弱 GPU 上
