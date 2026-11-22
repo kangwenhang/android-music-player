@@ -151,9 +151,13 @@ public class FloatWindow {
         tvTitle.setText(text);
         // 跑马灯:悬浮窗无焦点,setSelected 才能驱动 marquee 循环滚动
         tvTitle.setSelected(true);
-        btnToggle.setText(service.isPlaying() ? "❚❚" : "▶");
+        boolean playing = service.isPlaying();
+        btnToggle.setText(playing ? "❚❚" : "▶");
+        // 底色随状态:播放中蓝色 / 暂停红色(2026-11-22 用户定稿)
+        btnToggle.setBackgroundResource(playing
+                ? R.drawable.bg_float_toggle : R.drawable.bg_float_toggle_paused);
         // ▶ 字形在字体基线里自带左侧空白,居中后视觉偏左:加左内边距修正视觉居中
-        btnToggle.setPadding(service.isPlaying() ? 0 : dp(3), 0, 0, 0);
+        btnToggle.setPadding(playing ? 0 : dp(3), 0, 0, 0);
 
         // 封面:代次递增,旧回调作废;先清图显占位底色再异步加载
         final int token = ++coverToken;
