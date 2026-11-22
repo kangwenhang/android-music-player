@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  悬浮控制条 v7(app 退到后台时显示在屏幕上):
-  [方形封面48dp] [文字列128dp:歌名/歌词+时间/进度条] [隔离带14dp] [◀◀] [▶❚❚蓝圆] [▶▶]
-  文字列固定宽度+右边界硬隔离:歌名/时间再长只在列内省略,永不挤进按键区。
+  悬浮控制条 v7.1(app 退到后台时显示在屏幕上):
+  [方形圆角封面48dp] [文字列128dp:歌名/歌词/进度条] [隔离带14dp] [◀] [▶❚❚蓝圆] [▶]
+  文字列固定宽度+右边界硬隔离:歌名/歌词再长只在列内省略,永不挤进按键区。
+  时间不再显示(总时长由进度条表达),歌词独占整行。
+  上一首/下一首单箭头(车机字体渲染稳、占位窄)。
   无关闭按钮:回主界面时由 MainActivity 触发隐藏。
-  整条无 ×,封面与文字列是拖动把手 + 点击回主界面。
+  封面与文字列是拖动把手 + 点击回主界面。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
@@ -17,13 +19,13 @@
     android:paddingTop="10dp"
     android:paddingBottom="10dp">
 
-    <!-- 方形圆角封面:拖动把手之一 -->
+    <!-- 方形圆角封面:拖动把手之一(占位底也带 10dp 圆角) -->
     <ImageView
         android:id="@+id/float_cover"
         android:layout_width="48dp"
         android:layout_height="48dp"
         android:scaleType="centerCrop"
-        android:background="#3D5FCB"
+        android:background="@drawable/bg_float_cover"
         android:contentDescription="封面" />
 
     <!-- 文字列:固定宽度,歌名/歌词/时间/进度条都在这列内 -->
@@ -44,32 +46,15 @@
             android:textColor="#FFFFFF"
             android:textSize="13sp" />
 
-        <LinearLayout
+        <TextView
+            android:id="@+id/float_lrc"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="3dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/float_lrc"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:singleLine="true"
-                android:ellipsize="end"
-                android:textColor="#35C4A0"
-                android:textSize="12sp"
-                android:layout_marginRight="4dp" />
-
-            <TextView
-                android:id="@+id/float_time"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:singleLine="true"
-                android:textColor="#9AA0AC"
-                android:textSize="12sp" />
-        </LinearLayout>
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="#35C4A0"
+            android:textSize="12sp" />
 
         <com.captiva.musicplayer.FloatProgressView
             android:id="@+id/float_progress"
@@ -80,19 +65,19 @@
 
     <TextView
         android:id="@+id/float_prev"
-        android:layout_width="40dp"
+        android:layout_width="32dp"
         android:layout_height="40dp"
         android:gravity="center"
-        android:text="◀◀"
+        android:text="◀"
         android:textColor="#E8EAF0"
-        android:textSize="13sp" />
+        android:textSize="14sp" />
 
     <TextView
         android:id="@+id/float_toggle"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:layout_marginLeft="4dp"
-        android:layout_marginRight="4dp"
+        android:layout_marginLeft="2dp"
+        android:layout_marginRight="2dp"
         android:gravity="center"
         android:background="@drawable/bg_float_toggle"
         android:text="❚❚"
@@ -101,11 +86,11 @@
 
     <TextView
         android:id="@+id/float_next"
-        android:layout_width="40dp"
+        android:layout_width="32dp"
         android:layout_height="40dp"
         android:gravity="center"
-        android:text="▶▶"
+        android:text="▶"
         android:textColor="#E8EAF0"
-        android:textSize="13sp" />
+        android:textSize="14sp" />
 
 </LinearLayout>

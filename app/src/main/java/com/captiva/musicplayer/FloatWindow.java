@@ -28,7 +28,8 @@ import java.util.List;
  * 归属 MusicService 持有(服务常驻、有播放状态):
  * - 显示/隐藏由 MainActivity 的前后台判定触发(SHOW/HIDE 命令经 service 转交);
  * - 控件直接调 service 的 toggle()/next()/prev(),状态经 notifyState() 反刷;
- * - 封面方形圆角 48dp + 文字列(歌名/当前歌词行/时间) + 进度条(白点);
+ * - 封面方形圆角 48dp + 文字列(歌名/当前歌词行) + 进度条(白点);时间不显示,
+ *   总时长由进度条表达,歌词独占整行
  * - 封面与文字列是拖动把手,可整条拖动;点文字列回主界面;
  * - 显示期间 500ms 轮询刷新歌词/时间/进度(服务内直接取状态,不经广播)。
  *
@@ -42,7 +43,7 @@ public class FloatWindow {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private View root, textArea;
-    private TextView tvTitle, tvLrc, tvTime, btnToggle;
+    private TextView tvTitle, tvLrc, btnToggle;
     private ImageView ivCover;
     private FloatProgressView progressView;
     private WindowManager.LayoutParams params;
@@ -158,18 +159,17 @@ public class FloatWindow {
             @Override
             public void onBitmapLoaded(Bitmap bitmap) {
                 if (!showing || token != coverToken) return;
-                ivCover.setImageBitmap(roundCorner(bitmap, dp(10)));
+                ivCover.setImageBitmap(roundCorner(bitmap, dp(48), dp(10)));
             }
         });
 
         refreshDynamic();
     }
 
-    /** 歌词行/时间/进度刷新(500ms 轮询 + 状态变化时立即调) */
+    /** 歌词行/进度刷新(500ms 轮询 + 状态变化时立即调);时间不再显示,总时长由进度条表达 */
     private void refreshDynamic() {
         int pos = service.getCurrentPosition();
         int dur = service.getDuration();
-        tvTime.setText(formatTime(pos) + " / " + formatTime(dur));
         progressView.setFraction(dur > 0 ? (float) pos / dur : 0f);
         tvLrc.setText(currentLrcLine(pos));
     }
@@ -189,23 +189,20 @@ public class FloatWindow {
         return line;
     }
 
-    private static String formatTime(int ms) {
-        if (ms < 0) ms = 0;
-        int s = ms / 1000;
-        return String.format("%02d:%02d", s / 60, s % 60);
-    }
-
-    /** 圆角裁切(方形封面 10dp 圆角;API 17 无 clipToOutline,用 BitmapShader 自绘) */
-    private static Bitmap roundCorner(Bitmap src, int radiusPx) {
+    /**
+     * 圆角裁切(方形封面 10dp 圆角;API 17 无 clipToOutline,用 BitmapShader 自绘)。
+     * 先缩放到显示尺寸再画圆角:真机封面位图常远大于 48dp,若按原图像素画 10dp 圆角,
+     * centerCrop 缩小显示后圆角只剩 1~2px 肉眼不可见(真机翻车,2026-11-22)。
+     */
+    private Bitmap roundCorner(Bitmap src, int sizePx, int radiusPx) {
         if (src == null) return null;
         try {
-            Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(),
-                    Bitmap.Config.ARGB_8888);
+            Bitmap scaled = Bitmap.createScaledBitmap(src, sizePx, sizePx, true);
+            Bitmap out = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(out);
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setShader(new BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
-            c.drawRoundRect(new RectF(0, 0, src.getWidth(), src.getHeight()),
-                    radiusPx, radiusPx, p);
+            p.setShader(new BitmapShader(scaled, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            c.drawRoundRect(new RectF(0, 0, sizePx, sizePx), radiusPx, radiusPx, p);
             return out;
         } catch (Throwable t) {
             return src; // 裁切失败退回原图
@@ -231,7 +228,6 @@ public class FloatWindow {
         textArea = root.findViewById(R.id.float_text_area);
         tvTitle = (TextView) root.findViewById(R.id.float_title);
         tvLrc = (TextView) root.findViewById(R.id.float_lrc);
-        tvTime = (TextView) root.findViewById(R.id.float_time);
         progressView = (FloatProgressView) root.findViewById(R.id.float_progress);
         btnToggle = (TextView) root.findViewById(R.id.float_toggle);
         TextView btnPrev = (TextView) root.findViewById(R.id.float_prev);
