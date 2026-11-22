@@ -1,7 +1,13 @@
 package com.captiva.musicplayer;
 
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.RectF;
+import android.graphics.Shader;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -11,15 +17,20 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.ImageView;
 import android.widget.TextView;
 
+import java.util.List;
+
 /**
- * 桌面悬浮控制条(app 退到后台时显示)。
+ * 桌面悬浮控制条 v7(app 退到后台时显示)。
  *
  * 归属 MusicService 持有(服务常驻、有播放状态):
  * - 显示/隐藏由 MainActivity 的前后台判定触发(SHOW/HIDE 命令经 service 转交);
  * - 控件直接调 service 的 toggle()/next()/prev(),状态经 notifyState() 反刷;
- * - 歌名区域是拖动把手,可整条拖动调整位置;点歌名回主界面。
+ * - 封面方形圆角 48dp + 文字列(歌名/当前歌词行/时间) + 进度条(白点);
+ * - 封面与文字列是拖动把手,可整条拖动;点文字列回主界面;
+ * - 显示期间 500ms 轮询刷新歌词/时间/进度(服务内直接取状态,不经广播)。
  *
  * API 17 车机:TYPE_PHONE + SYSTEM_ALERT_WINDOW 清单声明即授,无需弹窗授权。
  */
@@ -30,13 +41,31 @@ public class FloatWindow {
     private final WindowManager wm;
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    private View root;
-    private TextView tvTitle, btnToggle;
+    private View root, textArea;
+    private TextView tvTitle, tvLrc, tvTime, btnToggle;
+    private ImageView ivCover;
+    private FloatProgressView progressView;
     private WindowManager.LayoutParams params;
     private boolean showing;
 
+    /** 封面加载代次:切歌后旧回调自动作废,防止封面错配 */
+    private int coverToken = 0;
+
     /** 拖动判定阈值:移动超过此距离才算拖,否则视为点击 */
     private static final int DRAG_SLOP_DP = 10;
+
+    /** 歌词/时间/进度轮询周期 */
+    private static final long POLL_MS = 500;
+
+    /** 轮询循环:显示期间持续刷新动态内容 */
+    private final Runnable pollTask = new Runnable() {
+        @Override
+        public void run() {
+            if (!showing) return;
+            refreshDynamic();
+            main.postDelayed(this, POLL_MS);
+        }
+    };
 
     public FloatWindow(MusicService service) {
         this.service = service;
@@ -69,6 +98,7 @@ public class FloatWindow {
             showing = true;
             // 先置 showing 再刷状态:updateStateInternal 有 showing 门禁
             updateStateInternal();
+            main.post(pollTask);
             Log.i(TAG, "悬浮条已显示");
         } catch (Exception e) {
             Log.w(TAG, "addView failed", e);
@@ -87,6 +117,7 @@ public class FloatWindow {
 
     private void hideInternal() {
         if (!showing) return;
+        main.removeCallbacks(pollTask);
         try {
             wm.removeView(root);
         } catch (Exception e) {
@@ -96,7 +127,7 @@ public class FloatWindow {
         Log.i(TAG, "悬浮条已隐藏");
     }
 
-    /** 播放状态/曲目变化时刷新歌名与播放键(notifyState 转发) */
+    /** 播放状态/曲目变化时刷新歌名/播放键/封面(notifyState 转发) */
     public void updateState() {
         main.post(new Runnable() {
             @Override
@@ -119,6 +150,66 @@ public class FloatWindow {
                 ? artist + " - " + title : title;
         tvTitle.setText(text);
         btnToggle.setText(service.isPlaying() ? "❚❚" : "▶");
+
+        // 封面:代次递增,旧回调作废;先清图显占位底色再异步加载
+        final int token = ++coverToken;
+        ivCover.setImageDrawable(null);
+        CoverLoader.getInstance().loadBitmap(bean, dp(48), new CoverLoader.BitmapCallback() {
+            @Override
+            public void onBitmapLoaded(Bitmap bitmap) {
+                if (!showing || token != coverToken) return;
+                ivCover.setImageBitmap(roundCorner(bitmap, dp(10)));
+            }
+        });
+
+        refreshDynamic();
+    }
+
+    /** 歌词行/时间/进度刷新(500ms 轮询 + 状态变化时立即调) */
+    private void refreshDynamic() {
+        int pos = service.getCurrentPosition();
+        int dur = service.getDuration();
+        tvTime.setText(formatTime(pos) + " / " + formatTime(dur));
+        progressView.setFraction(dur > 0 ? (float) pos / dur : 0f);
+        tvLrc.setText(currentLrcLine(pos));
+    }
+
+    /** 按播放进度取当前歌词行(无歌词/未到首句返回空串) */
+    private String currentLrcLine(int positionMs) {
+        List<LrcEntry> lrc = service.getCurrentLrc();
+        if (lrc == null || lrc.isEmpty()) return "";
+        String line = "";
+        for (LrcEntry e : lrc) {
+            if (e.getTime() <= positionMs) {
+                line = e.getText();
+            } else {
+                break;
+            }
+        }
+        return line;
+    }
+
+    private static String formatTime(int ms) {
+        if (ms < 0) ms = 0;
+        int s = ms / 1000;
+        return String.format("%02d:%02d", s / 60, s % 60);
+    }
+
+    /** 圆角裁切(方形封面 10dp 圆角;API 17 无 clipToOutline,用 BitmapShader 自绘) */
+    private static Bitmap roundCorner(Bitmap src, int radiusPx) {
+        if (src == null) return null;
+        try {
+            Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(),
+                    Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setShader(new BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            c.drawRoundRect(new RectF(0, 0, src.getWidth(), src.getHeight()),
+                    radiusPx, radiusPx, p);
+            return out;
+        } catch (Throwable t) {
+            return src; // 裁切失败退回原图
+        }
     }
 
     /** 服务销毁时移除窗口 */
@@ -136,11 +227,15 @@ public class FloatWindow {
 
     private void inflateView() {
         root = LayoutInflater.from(service).inflate(R.layout.float_control, null);
+        ivCover = (ImageView) root.findViewById(R.id.float_cover);
+        textArea = root.findViewById(R.id.float_text_area);
         tvTitle = (TextView) root.findViewById(R.id.float_title);
+        tvLrc = (TextView) root.findViewById(R.id.float_lrc);
+        tvTime = (TextView) root.findViewById(R.id.float_time);
+        progressView = (FloatProgressView) root.findViewById(R.id.float_progress);
         btnToggle = (TextView) root.findViewById(R.id.float_toggle);
         TextView btnPrev = (TextView) root.findViewById(R.id.float_prev);
         TextView btnNext = (TextView) root.findViewById(R.id.float_next);
-        TextView btnClose = (TextView) root.findViewById(R.id.float_close);
 
         btnPrev.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -160,57 +255,11 @@ public class FloatWindow {
                 service.toggle(); // notifyState 会反刷 updateState
             }
         });
-        btnClose.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                // 点×只隐藏本次;下次退到后台再由 MainActivity 重新触发显示
-                hideInternal();
-            }
-        });
 
-        // 歌名区域:拖动 + 点击回主界面
-        tvTitle.setOnTouchListener(new View.OnTouchListener() {
-            private float downRawX, downRawY;
-            private int startX, startY;
-            private boolean dragging;
-
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        downRawX = event.getRawX();
-                        downRawY = event.getRawY();
-                        startX = params.x;
-                        startY = params.y;
-                        dragging = false;
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        float dx = event.getRawX() - downRawX;
-                        float dy = event.getRawY() - downRawY;
-                        float slop = DRAG_SLOP_DP
-                                * service.getResources().getDisplayMetrics().density;
-                        if (!dragging && Math.abs(dx) + Math.abs(dy) > slop) {
-                            dragging = true;
-                        }
-                        if (dragging) {
-                            params.x = startX + (int) dx;
-                            params.y = startY - (int) dy;
-                            try {
-                                wm.updateViewLayout(root, params);
-                            } catch (Exception ignored) {
-                            }
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                        if (!dragging) {
-                            openMainActivity();
-                        }
-                        return true;
-                    default:
-                        return true;
-                }
-            }
-        });
+        // 封面 + 文字列 = 拖动把手(点击回主界面);按键区不受影响
+        View.OnTouchListener touch = new HandleTouchListener();
+        ivCover.setOnTouchListener(touch);
+        textArea.setOnTouchListener(touch);
 
         params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -229,7 +278,51 @@ public class FloatWindow {
         params.y = dp(12);
     }
 
-    /** 点歌名回到主界面(singleTask,回前台不重建) */
+    /** 封面/文字列共用的触摸处理:拖动整条 + 点击回主界面 */
+    private class HandleTouchListener implements View.OnTouchListener {
+        private float downRawX, downRawY;
+        private int startX, startY;
+        private boolean dragging;
+
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    downRawX = event.getRawX();
+                    downRawY = event.getRawY();
+                    startX = params.x;
+                    startY = params.y;
+                    dragging = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - downRawX;
+                    float dy = event.getRawY() - downRawY;
+                    float slop = DRAG_SLOP_DP
+                            * service.getResources().getDisplayMetrics().density;
+                    if (!dragging && Math.abs(dx) + Math.abs(dy) > slop) {
+                        dragging = true;
+                    }
+                    if (dragging) {
+                        params.x = startX + (int) dx;
+                        params.y = startY - (int) dy;
+                        try {
+                            wm.updateViewLayout(root, params);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!dragging) {
+                        openMainActivity();
+                    }
+                    return true;
+                default:
+                    return true;
+            }
+        }
+    }
+
+    /** 点文字列回到主界面(singleTask,回前台不重建) */
     private void openMainActivity() {
         try {
             Intent i = new Intent(service, MainActivity.class);
