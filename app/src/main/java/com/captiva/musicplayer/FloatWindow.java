@@ -176,10 +176,10 @@ public class FloatWindow {
         tvLrc.setText(currentLrcLine(pos));
     }
 
-    /** 按播放进度取当前歌词行(无歌词/未到首句/脏数据返回空串) */
+    /** 按播放进度取当前歌词行(无歌词显示"暂无歌词",脏数据过滤为空) */
     private String currentLrcLine(int positionMs) {
         List<LrcEntry> lrc = service.getCurrentLrc();
-        if (lrc == null || lrc.isEmpty()) return "";
+        if (lrc == null || lrc.isEmpty()) return "暂无歌词";
         String line = "";
         for (LrcEntry e : lrc) {
             if (e.getTime() <= positionMs) {
