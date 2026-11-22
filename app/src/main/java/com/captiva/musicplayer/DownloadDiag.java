@@ -293,7 +293,16 @@ public final class DownloadDiag {
                 e = "NOT_VALID_FOR_PROGRESSIVE_PLAYBACK: 不支持边下边播";
                 break;
             default:
-                e = "extra=" + extra;
+                if (what == -19 && extra == 0) {
+                    // 2026-11-22 真机"一直切歌"日志实锤:what=-19/extra=0 不是标准
+                    // MediaPlayer 常量,是 media framework 底层错误 —— 网络流与刚
+                    // 下载完成的本地文件(存在且大小正常)双双失败于此,指向
+                    // media 服务资源耗尽/音频输出设备异常,而非路径或网络问题
+                    e = "底层资源错误: media 服务资源耗尽/音频设备异常"
+                            + "(非路径/网络问题,建议重启设备验证)";
+                } else {
+                    e = "extra=" + extra;
+                }
         }
         return w + " / " + e;
     }
