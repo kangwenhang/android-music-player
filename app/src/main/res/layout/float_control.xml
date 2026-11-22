@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  悬浮控制条 v7.3(app 退到后台时显示在屏幕上):
-  [方形圆角封面48dp] [文字列128dp:歌名(跑马灯)/进度条] [隔离带14dp] [◀] [▶❚❚蓝圆] [▶]
-  歌词行已去掉(车机看不清,用户拍板),歌名字体加大 15sp,无歌词不再占行。
+  悬浮控制条 v7.4(整体放大 1/3,v7.3 定稿布局不变):
+  [方形圆角封面64dp] [文字列170dp:歌名(跑马灯)/进度条] [隔离带19dp] [◀] [▶❚❚蓝圆] [▶]
+  歌词行已去掉(车机看不清,用户拍板),歌名字体加大 20sp。
   文字列固定宽度+右边界硬隔离:歌名再长只滚动/省略,永不挤进按键区。
   ▶ 字形视觉偏左,代码里按播放态加 paddingLeft 修正视觉居中。
   无关闭按钮:回主界面时由 MainActivity 触发隐藏。
   封面与文字列是拖动把手 + 点击回主界面。
+  尺寸全部 = v7.3 × 4/3(用户要求放大 1/3),代码里 dp(48)/dp(10)/dp(3)/dp(12) 同步 4/3。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
@@ -14,27 +15,27 @@
     android:orientation="horizontal"
     android:gravity="center_vertical"
     android:background="@drawable/bg_float_control"
-    android:paddingLeft="12dp"
-    android:paddingRight="12dp"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp">
+    android:paddingLeft="16dp"
+    android:paddingRight="16dp"
+    android:paddingTop="13dp"
+    android:paddingBottom="13dp">
 
-    <!-- 方形圆角封面:拖动把手之一(占位底也带 10dp 圆角) -->
+    <!-- 方形圆角封面:拖动把手之一(占位底也带 13dp 圆角) -->
     <ImageView
         android:id="@+id/float_cover"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
         android:scaleType="centerCrop"
         android:background="@drawable/bg_float_cover"
         android:contentDescription="封面" />
 
-    <!-- 文字列:固定宽度,歌名/歌词/时间/进度条都在这列内 -->
+    <!-- 文字列:固定宽度,歌名/进度条都在这列内 -->
     <LinearLayout
         android:id="@+id/float_text_area"
-        android:layout_width="128dp"
+        android:layout_width="170dp"
         android:layout_height="wrap_content"
-        android:layout_marginLeft="10dp"
-        android:layout_marginRight="14dp"
+        android:layout_marginLeft="13dp"
+        android:layout_marginRight="19dp"
         android:orientation="vertical">
 
         <TextView
@@ -45,44 +46,44 @@
             android:ellipsize="marquee"
             android:marqueeRepeatLimit="marquee_forever"
             android:textColor="#FFFFFF"
-            android:textSize="15sp" />
+            android:textSize="20sp" />
 
         <com.captiva.musicplayer.FloatProgressView
             android:id="@+id/float_progress"
             android:layout_width="match_parent"
-            android:layout_height="10dp"
-            android:layout_marginTop="6dp" />
+            android:layout_height="13dp"
+            android:layout_marginTop="8dp" />
     </LinearLayout>
 
-    <!-- 上一首/下一首:车机触摸不精准,命中区加大到 44x48dp(字形仍 16sp) -->
+    <!-- 上一首/下一首:车机触摸不精准,命中区加大到 58x64dp(字形仍 21sp) -->
     <TextView
         android:id="@+id/float_prev"
-        android:layout_width="44dp"
-        android:layout_height="48dp"
+        android:layout_width="58dp"
+        android:layout_height="64dp"
         android:gravity="center"
         android:text="◀"
         android:textColor="#E8EAF0"
-        android:textSize="16sp" />
+        android:textSize="21sp" />
 
     <TextView
         android:id="@+id/float_toggle"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:layout_marginLeft="2dp"
-        android:layout_marginRight="2dp"
+        android:layout_width="58dp"
+        android:layout_height="58dp"
+        android:layout_marginLeft="3dp"
+        android:layout_marginRight="3dp"
         android:gravity="center"
         android:background="@drawable/bg_float_toggle"
         android:text="❚❚"
         android:textColor="#FFFFFF"
-        android:textSize="16sp" />
+        android:textSize="21sp" />
 
     <TextView
         android:id="@+id/float_next"
-        android:layout_width="44dp"
-        android:layout_height="48dp"
+        android:layout_width="58dp"
+        android:layout_height="64dp"
         android:gravity="center"
         android:text="▶"
         android:textColor="#E8EAF0"
-        android:textSize="16sp" />
+        android:textSize="21sp" />
 
 </LinearLayout>

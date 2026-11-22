@@ -157,16 +157,16 @@ public class FloatWindow {
         btnToggle.setBackgroundResource(playing
                 ? R.drawable.bg_float_toggle : R.drawable.bg_float_toggle_paused);
         // ▶ 字形在字体基线里自带左侧空白,居中后视觉偏左:加左内边距修正视觉居中
-        btnToggle.setPadding(playing ? 0 : dp(3), 0, 0, 0);
+        btnToggle.setPadding(playing ? 0 : dp(4), 0, 0, 0);
 
         // 封面:代次递增,旧回调作废;先清图显占位底色再异步加载
         final int token = ++coverToken;
         ivCover.setImageDrawable(null);
-        CoverLoader.getInstance().loadBitmap(bean, dp(48), new CoverLoader.BitmapCallback() {
+        CoverLoader.getInstance().loadBitmap(bean, dp(64), new CoverLoader.BitmapCallback() {
             @Override
             public void onBitmapLoaded(Bitmap bitmap) {
                 if (!showing || token != coverToken) return;
-                ivCover.setImageBitmap(roundCorner(bitmap, dp(48), dp(10)));
+                ivCover.setImageBitmap(roundCorner(bitmap, dp(64), dp(13)));
             }
         });
 
@@ -261,7 +261,7 @@ public class FloatWindow {
                 PixelFormat.TRANSLUCENT);
         // 默认屏幕底部居中,贴底留 12dp
         params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        params.y = dp(12);
+        params.y = dp(16);
     }
 
     /** 封面/文字列共用的触摸处理:拖动整条 + 点击回主界面 */
