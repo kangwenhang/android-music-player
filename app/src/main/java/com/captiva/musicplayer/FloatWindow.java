@@ -150,6 +150,8 @@ public class FloatWindow {
         String text = (artist != null && !artist.isEmpty())
                 ? artist + " - " + title : title;
         tvTitle.setText(text);
+        // 跑马灯:悬浮窗无焦点,setSelected 才能驱动 marquee 循环滚动
+        tvTitle.setSelected(true);
         btnToggle.setText(service.isPlaying() ? "❚❚" : "▶");
 
         // 封面:代次递增,旧回调作废;先清图显占位底色再异步加载
@@ -174,14 +176,18 @@ public class FloatWindow {
         tvLrc.setText(currentLrcLine(pos));
     }
 
-    /** 按播放进度取当前歌词行(无歌词/未到首句返回空串) */
+    /** 按播放进度取当前歌词行(无歌词/未到首句/脏数据返回空串) */
     private String currentLrcLine(int positionMs) {
         List<LrcEntry> lrc = service.getCurrentLrc();
         if (lrc == null || lrc.isEmpty()) return "";
         String line = "";
         for (LrcEntry e : lrc) {
             if (e.getTime() <= positionMs) {
-                line = e.getText();
+                String t = e.getText();
+                // 过滤脏数据:lrc 接口偶发返回字面 "null" 被存成一行(pm clear 后实测)
+                if (t != null && t.length() > 0 && !"null".equals(t)) {
+                    line = t;
+                }
             } else {
                 break;
             }
