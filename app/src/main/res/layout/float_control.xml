@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  悬浮控制条 v7.1(app 退到后台时显示在屏幕上):
-  [方形圆角封面48dp] [文字列128dp:歌名/歌词/进度条] [隔离带14dp] [◀] [▶❚❚蓝圆] [▶]
-  文字列固定宽度+右边界硬隔离:歌名/歌词再长只在列内省略,永不挤进按键区。
-  时间不再显示(总时长由进度条表达),歌词独占整行。
-  上一首/下一首单箭头(车机字体渲染稳、占位窄)。
+  悬浮控制条 v7.3(app 退到后台时显示在屏幕上):
+  [方形圆角封面48dp] [文字列128dp:歌名(跑马灯)/进度条] [隔离带14dp] [◀] [▶❚❚蓝圆] [▶]
+  歌词行已去掉(车机看不清,用户拍板),歌名字体加大 15sp,无歌词不再占行。
+  文字列固定宽度+右边界硬隔离:歌名再长只滚动/省略,永不挤进按键区。
+  ▶ 字形视觉偏左,代码里按播放态加 paddingLeft 修正视觉居中。
   无关闭按钮:回主界面时由 MainActivity 触发隐藏。
   封面与文字列是拖动把手 + 点击回主界面。
 -->
@@ -45,23 +45,13 @@
             android:ellipsize="marquee"
             android:marqueeRepeatLimit="marquee_forever"
             android:textColor="#FFFFFF"
-            android:textSize="13sp" />
-
-        <TextView
-            android:id="@+id/float_lrc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:textColor="#35C4A0"
-            android:textSize="12sp" />
+            android:textSize="15sp" />
 
         <com.captiva.musicplayer.FloatProgressView
             android:id="@+id/float_progress"
             android:layout_width="match_parent"
             android:layout_height="10dp"
-            android:layout_marginTop="5dp" />
+            android:layout_marginTop="6dp" />
     </LinearLayout>
 
     <TextView

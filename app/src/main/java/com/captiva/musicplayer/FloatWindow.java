@@ -20,7 +20,6 @@ import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import java.util.List;
 
 /**
  * 桌面悬浮控制条 v7(app 退到后台时显示)。
@@ -43,7 +42,7 @@ public class FloatWindow {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private View root, textArea;
-    private TextView tvTitle, tvLrc, btnToggle;
+    private TextView tvTitle, btnToggle;
     private ImageView ivCover;
     private FloatProgressView progressView;
     private WindowManager.LayoutParams params;
@@ -153,6 +152,8 @@ public class FloatWindow {
         // 跑马灯:悬浮窗无焦点,setSelected 才能驱动 marquee 循环滚动
         tvTitle.setSelected(true);
         btnToggle.setText(service.isPlaying() ? "❚❚" : "▶");
+        // ▶ 字形在字体基线里自带左侧空白,居中后视觉偏左:加左内边距修正视觉居中
+        btnToggle.setPadding(service.isPlaying() ? 0 : dp(3), 0, 0, 0);
 
         // 封面:代次递增,旧回调作废;先清图显占位底色再异步加载
         final int token = ++coverToken;
@@ -168,31 +169,11 @@ public class FloatWindow {
         refreshDynamic();
     }
 
-    /** 歌词行/进度刷新(500ms 轮询 + 状态变化时立即调);时间不再显示,总时长由进度条表达 */
+    /** 进度刷新(500ms 轮询 + 状态变化时立即调);歌词已去掉,总时长由进度条表达 */
     private void refreshDynamic() {
         int pos = service.getCurrentPosition();
         int dur = service.getDuration();
         progressView.setFraction(dur > 0 ? (float) pos / dur : 0f);
-        tvLrc.setText(currentLrcLine(pos));
-    }
-
-    /** 按播放进度取当前歌词行(无歌词显示"暂无歌词",脏数据过滤为空) */
-    private String currentLrcLine(int positionMs) {
-        List<LrcEntry> lrc = service.getCurrentLrc();
-        if (lrc == null || lrc.isEmpty()) return "暂无歌词";
-        String line = "";
-        for (LrcEntry e : lrc) {
-            if (e.getTime() <= positionMs) {
-                String t = e.getText();
-                // 过滤脏数据:lrc 接口偶发返回字面 "null" 被存成一行(pm clear 后实测)
-                if (t != null && t.length() > 0 && !"null".equals(t)) {
-                    line = t;
-                }
-            } else {
-                break;
-            }
-        }
-        return line;
     }
 
     /**
@@ -233,7 +214,6 @@ public class FloatWindow {
         ivCover = (ImageView) root.findViewById(R.id.float_cover);
         textArea = root.findViewById(R.id.float_text_area);
         tvTitle = (TextView) root.findViewById(R.id.float_title);
-        tvLrc = (TextView) root.findViewById(R.id.float_lrc);
         progressView = (FloatProgressView) root.findViewById(R.id.float_progress);
         btnToggle = (TextView) root.findViewById(R.id.float_toggle);
         TextView btnPrev = (TextView) root.findViewById(R.id.float_prev);
